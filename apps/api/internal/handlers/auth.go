@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/getdeco/api/internal/config"
-	"github.com/getdeco/api/internal/models"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"

@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/getdeco/api/internal/config"
+	"github.com/matinz03/deco/internal/config"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
