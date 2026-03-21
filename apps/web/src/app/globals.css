@@ -3,75 +3,171 @@
 @tailwind utilities;
 
 @layer base {
+  /* ─── Cloud Dancer Light Mode ─────────────────────────────────────────────
+     Cloud Dancer (#F2EFE4) is the background — warm, paper-like, premium.
+     Sent bubbles are deep charcoal on this warm canvas.
+  ────────────────────────────────────────────────────────────────────────── */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 4%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 9%;
-    --accent: 0 0% 96%;
-    --accent-foreground: 0 0% 9%;
-    --ring: 221 83% 53%;
-    --radius: 0.75rem;
+    --background:         40 25% 93%;    /* #F2EFE4 Cloud Dancer */
+    --surface:            0 0% 100%;     /* #ffffff card surfaces */
+    --surface-raised:     40 20% 97%;    /* slightly off-white panels */
+    --foreground:         30 8% 10%;     /* #1a1916 warm near-black */
+    --muted:              40 15% 88%;    /* soft warm gray */
+    --muted-foreground:   30 5% 48%;
+    --border:             40 15% 84%;
+    --input:              0 0% 100%;
+    --ring:               30 8% 10%;
 
-    /* Chat-specific */
-    --bubble-sent: 221 83% 53%;
-    --bubble-sent-foreground: 0 0% 100%;
-    --bubble-received: 0 0% 96%;
-    --bubble-received-foreground: 0 0% 4%;
+    /* Accent — deep warm charcoal (inverted from dark mode) */
+    --primary:            30 8% 12%;
+    --primary-foreground: 40 25% 93%;   /* Cloud Dancer on dark */
+
+    --secondary:          40 15% 88%;
+    --secondary-foreground: 30 8% 12%;
+    --accent:             40 15% 86%;
+    --accent-foreground:  30 8% 12%;
+
+    --radius: 0.875rem;
+
+    /* Chat bubbles */
+    --bubble-sent:        30 8% 12%;    /* deep charcoal */
+    --bubble-sent-fg:     40 25% 93%;   /* Cloud Dancer text */
+    --bubble-received:    0 0% 100%;
+    --bubble-received-fg: 30 8% 10%;
+
+    /* Sidebar */
+    --sidebar:            40 22% 89%;
+    --sidebar-border:     40 15% 82%;
+    --nav:                40 18% 85%;
+
+    /* Status colors */
+    --online:             142 71% 45%;
+    --destructive:        0 72% 51%;
+    --destructive-fg:     0 0% 100%;
+    --warning:            38 92% 50%;
   }
 
+  /* ─── Dark Mode ───────────────────────────────────────────────────────────
+     Deep warm dark with Cloud Dancer as the accent/text — not cold blue-black
+  ────────────────────────────────────────────────────────────────────────── */
   .dark {
-    --background: 0 0% 7%;
-    --foreground: 0 0% 95%;
-    --muted: 0 0% 12%;
-    --muted-foreground: 0 0% 60%;
-    --border: 0 0% 15%;
-    --input: 0 0% 15%;
-    --primary: 221 83% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 12%;
-    --secondary-foreground: 0 0% 95%;
-    --accent: 0 0% 12%;
-    --accent-foreground: 0 0% 95%;
-    --ring: 221 83% 60%;
+    --background:         30 6% 7%;     /* #121110 warm near-black */
+    --surface:            30 5% 10%;    /* #1a1917 */
+    --surface-raised:     30 5% 13%;    /* #201f1c */
+    --foreground:         40 25% 93%;   /* #F2EFE4 Cloud Dancer */
+    --muted:              30 5% 16%;
+    --muted-foreground:   40 10% 55%;
+    --border:             30 5% 18%;
+    --input:              30 5% 13%;
+    --ring:               40 25% 93%;
 
-    --bubble-sent: 221 83% 60%;
-    --bubble-sent-foreground: 0 0% 100%;
-    --bubble-received: 0 0% 15%;
-    --bubble-received-foreground: 0 0% 95%;
+    /* Accent — Cloud Dancer itself */
+    --primary:            40 25% 93%;   /* #F2EFE4 */
+    --primary-foreground: 30 8% 10%;
+
+    --secondary:          30 5% 16%;
+    --secondary-foreground: 40 25% 93%;
+    --accent:             30 5% 18%;
+    --accent-foreground:  40 25% 93%;
+
+    /* Chat bubbles */
+    --bubble-sent:        40 25% 93%;   /* Cloud Dancer bubble */
+    --bubble-sent-fg:     30 8% 10%;    /* dark text on light bubble */
+    --bubble-received:    30 5% 16%;
+    --bubble-received-fg: 40 25% 93%;
+
+    /* Sidebar */
+    --sidebar:            30 6% 9%;
+    --sidebar-border:     30 5% 14%;
+    --nav:                30 6% 8%;
+
+    --online:             142 71% 45%;
+    --destructive:        0 72% 51%;
+    --destructive-fg:     0 0% 100%;
+    --warning:            38 92% 50%;
   }
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
+  * { @apply border-border box-border; }
+
+  html { @apply h-full; }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground h-full;
     font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* Smooth scrolling for chat windows */
-  .chat-scroll {
-    scroll-behavior: smooth;
-    overflow-y: auto;
+  /* Scrollbar — thin, theme-aware */
+  * {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
-
-  .chat-scroll::-webkit-scrollbar {
-    width: 4px;
-  }
-
-  .chat-scroll::-webkit-scrollbar-thumb {
+  *::-webkit-scrollbar { width: 4px; height: 4px; }
+  *::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
     border-radius: 2px;
   }
+  *::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-xl border border-border bg-input px-3.5 py-2.5 text-sm
+           placeholder:text-muted-foreground/50
+           focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40
+           transition-all;
+  }
+
+  .btn-primary {
+    @apply w-full rounded-xl bg-primary text-primary-foreground font-medium text-sm
+           py-2.5 px-4
+           hover:opacity-90 active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-all;
+  }
+
+  .btn-ghost {
+    @apply rounded-xl px-3 py-2 text-sm font-medium text-muted
+           hover:bg-accent hover:text-accent-foreground
+           transition-all;
+  }
+
+  .icon-btn {
+    @apply rounded-xl p-2 text-muted
+           hover:bg-accent hover:text-foreground
+           active:scale-95
+           transition-all;
+  }
+}
+
+@layer utilities {
+  .bg-surface        { background-color: hsl(var(--surface)); }
+  .bg-surface-raised { background-color: hsl(var(--surface-raised)); }
+  .bg-sidebar        { background-color: hsl(var(--sidebar)); }
+  .bg-nav            { background-color: hsl(var(--nav)); }
+  .border-sidebar    { border-color: hsl(var(--sidebar-border)); }
+
+  .text-muted        { color: hsl(var(--muted-foreground)); }
+
+  /* Bubble utilities */
+  .bubble-sent {
+    background-color: hsl(var(--bubble-sent));
+    color: hsl(var(--bubble-sent-fg));
+  }
+  .bubble-received {
+    background-color: hsl(var(--bubble-received));
+    color: hsl(var(--bubble-received-fg));
+  }
+
+  /* Smooth chat scroll */
+  .chat-scroll {
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
+
+  /* Full height helper for app shell */
+  .h-app { height: 100dvh; }
 }

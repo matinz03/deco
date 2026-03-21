@@ -1,0 +1,97 @@
+"use client";
+
+import { useState, useRef, useCallback } from "react";
+import { useConversationStore } from "@/store/conversations";
+
+interface Props { conversationId: string; }
+
+export function MessageInput({ conversationId }: Props) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendMessage = useConversationStore((s) => s.sendMessage);
+
+  const handleSend = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setText("");
+    // Reset height
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    try {
+      await sendMessage(conversationId, trimmed);
+    } finally {
+      setSending(false);
+    }
+  }, [text, sending, conversationId, sendMessage]);
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
+  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setText(e.target.value);
+    // Auto-grow
+    const ta = e.target;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  }
+
+  return (
+    <div className="px-4 py-3 border-t border-border bg-surface shrink-0">
+      <div className="flex items-end gap-2 bg-muted rounded-2xl px-3 py-2">
+        {/* Attachment */}
+        <button className="icon-btn p-1.5 shrink-0 mb-0.5" title="Attach file">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+          </svg>
+        </button>
+
+        {/* Textarea */}
+        <textarea
+          ref={textareaRef}
+          rows={1}
+          value={text}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          placeholder="Message…"
+          className="flex-1 bg-transparent resize-none text-sm leading-relaxed focus:outline-none placeholder:text-muted-foreground/50 py-1 max-h-40"
+        />
+
+        {/* Emoji */}
+        <button className="icon-btn p-1.5 shrink-0 mb-0.5" title="Emoji">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z" />
+          </svg>
+        </button>
+
+        {/* Send / voice */}
+        {text.trim() ? (
+          <button
+            onClick={handleSend}
+            disabled={sending}
+            className="shrink-0 mb-0.5 w-8 h-8 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 active:scale-95 transition-all disabled:opacity-50"
+            title="Send"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" />
+            </svg>
+          </button>
+        ) : (
+          <button className="icon-btn p-1.5 shrink-0 mb-0.5" title="Voice message">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      <p className="text-[10px] text-center text-muted mt-1.5">
+        End-to-end encrypted
+      </p>
+    </div>
+  );
+}
