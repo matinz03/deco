@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 4%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 9%;
+    --ring: 221 83% 53%;
+    --radius: 0.75rem;
+
+    /* Chat-specific */
+    --bubble-sent: 221 83% 53%;
+    --bubble-sent-foreground: 0 0% 100%;
+    --bubble-received: 0 0% 96%;
+    --bubble-received-foreground: 0 0% 4%;
+  }
+
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 95%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 60%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --primary: 221 83% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 95%;
+    --accent: 0 0% 12%;
+    --accent-foreground: 0 0% 95%;
+    --ring: 221 83% 60%;
+
+    --bubble-sent: 221 83% 60%;
+    --bubble-sent-foreground: 0 0% 100%;
+    --bubble-received: 0 0% 15%;
+    --bubble-received-foreground: 0 0% 95%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Smooth scrolling for chat windows */
+  .chat-scroll {
+    scroll-behavior: smooth;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .chat-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .chat-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 2px;
+  }
+}

@@ -1,0 +1,82 @@
+name: deco
+
+services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: deco
+      POSTGRES_USER: deco
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432" # Only accessible locally — not exposed to internet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deco"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Go API ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      API_PORT: 8080
+      API_ENV: production
+      DATABASE_URL: postgres://deco:${POSTGRES_PASSWORD}@postgres:5432/deco
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      ALLOWED_ORIGINS: ${APP_URL}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    expose:
+      - "8080"
+
+  # ─── Next.js Web ────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: ${APP_URL}/api
+      NEXT_PUBLIC_WS_URL: ${APP_URL_WS}/ws
+    expose:
+      - "3000"
+
+volumes:
+  postgres_data:
+  redis_data:
