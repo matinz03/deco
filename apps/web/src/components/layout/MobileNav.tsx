@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
+import { useConversationStore } from "@/store/conversations";
 
 const NAV_ITEMS = [
   {
@@ -47,7 +48,9 @@ const NAV_ITEMS = [
 export function MobileNav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // Hide bottom nav when inside a conversation on mobile — ChatHeader has a back button
+  const conversations = useConversationStore((s) => s.conversations);
+  const hasUnreadMessages = conversations.some((conversation) => conversation.type !== "group" && conversation.unreadCount > 0);
+  const hasUnreadGroups = conversations.some((conversation) => conversation.type === "group" && conversation.unreadCount > 0);
   const isInConversation = /^\/inbox\/.+/.test(pathname);
 
   if (isInConversation) return null;
@@ -62,6 +65,7 @@ export function MobileNav() {
           const isActive = hrefTab
             ? pathname.startsWith(hrefPath) && currentTab === hrefTab
             : pathname.startsWith(hrefPath) && currentTab !== "groups";
+
           return (
             <Link
               key={item.href}
@@ -72,14 +76,20 @@ export function MobileNav() {
               <motion.span
                 whileTap={{ scale: 0.88 }}
                 transition={{ type: "spring", stiffness: 500, damping: 28 }}
-                className={`mobile-nav-icon ${isActive ? "text-foreground" : "text-muted"}`}
+                className={`mobile-nav-icon relative ${isActive ? "text-foreground" : "text-muted"}`}
               >
                 {item.icon}
+                {item.label === "Messages" && hasUnreadMessages && (
+                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-nav bg-primary" />
+                )}
+                {item.label === "Groups" && hasUnreadGroups && (
+                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-nav bg-primary" />
+                )}
                 <span className="mobile-nav-label">{item.label}</span>
                 {isActive && (
                   <motion.span
                     layoutId="mobile-indicator"
-                    className="absolute bottom-1 w-1 h-1 rounded-full bg-primary"
+                    className="absolute bottom-1 h-1 w-1 rounded-full bg-primary"
                   />
                 )}
               </motion.span>

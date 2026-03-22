@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
+import { useConversationStore } from "@/store/conversations";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
 
@@ -57,6 +58,9 @@ export function NavRail({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
+  const conversations = useConversationStore((s) => s.conversations);
+  const hasUnreadMessages = conversations.some((conversation) => conversation.type !== "group" && conversation.unreadCount > 0);
+  const hasUnreadGroups = conversations.some((conversation) => conversation.type === "group" && conversation.unreadCount > 0);
 
   return (
     <nav className="nav-rail">
@@ -90,9 +94,15 @@ export function NavRail({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
                 transition={{ type: "spring", stiffness: 500, damping: 28 }}
-                className="flex items-center justify-center"
+                className="relative flex items-center justify-center"
               >
                 {item.icon}
+                {item.label === "Messages" && hasUnreadMessages && (
+                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-nav bg-primary" />
+                )}
+                {item.label === "Groups" && hasUnreadGroups && (
+                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-nav bg-primary" />
+                )}
               </motion.span>
               <AnimatePresence>
                 {isActive && (

@@ -2,9 +2,10 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MessageType } from "@deco/types";
 import type { MutableRefObject, ReactNode } from "react";
+import type { MessageType } from "@deco/types";
 import { useConversationStore } from "@/store/conversations";
+import { EmojiPickerPanel } from "./EmojiPickerPanel";
 
 interface Props {
   conversationId: string;
@@ -92,12 +93,14 @@ const attachmentActions: AttachmentAction[] = [
 export function MessageInput({ conversationId }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [videoMode, setVideoMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const emojiWrapRef = useRef<HTMLDivElement>(null);
   const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -144,6 +147,17 @@ export function MessageInput({ conversationId }: Props) {
   }, [conversationId, sendTyping]);
 
   useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handleOutside = (event: MouseEvent) => {
+      if (emojiWrapRef.current && !emojiWrapRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [showEmojiPicker]);
+
+  useEffect(() => {
     if (!showAttachmentMenu) return;
     const handleOutside = (event: MouseEvent) => {
       if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target as Node)) {
@@ -160,6 +174,7 @@ export function MessageInput({ conversationId }: Props) {
     setSending(true);
     clearTypingState(typingTimeoutRef, sendTyping, conversationId);
     setText("");
+    setShowEmojiPicker(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
       await sendMessage(conversationId, trimmed);
@@ -187,6 +202,27 @@ export function MessageInput({ conversationId }: Props) {
     const textarea = event.target;
     textarea.style.height = "auto";
     textarea.style.height = Math.min(textarea.scrollHeight, 160) + "px";
+  }
+
+  function insertEmoji(emoji: string) {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      const nextText = `${text}${emoji}`;
+      setText(nextText);
+      queueTypingUpdate(nextText, typingTimeoutRef, sendTyping, conversationId);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? text.length;
+    const end = textarea.selectionEnd ?? text.length;
+    const nextText = text.slice(0, start) + emoji + text.slice(end);
+    setText(nextText);
+    queueTypingUpdate(nextText, typingTimeoutRef, sendTyping, conversationId);
+
+    requestAnimationFrame(() => {
+      textarea.selectionStart = textarea.selectionEnd = start + [...emoji].length;
+      textarea.focus();
+    });
   }
 
   async function handleAttachmentSelected(file: File, type: Extract<MessageType, "image" | "video" | "audio" | "file">) {
@@ -365,6 +401,7 @@ export function MessageInput({ conversationId }: Props) {
             aria-label="Attach"
             onClick={() => {
               setShowAttachmentMenu((value) => !value);
+              setShowEmojiPicker(false);
             }}
             disabled={sending || isRecording}
           >
@@ -435,6 +472,28 @@ export function MessageInput({ conversationId }: Props) {
           className="input-field"
           disabled={isRecording || sending}
         />
+
+        <div className="relative" ref={emojiWrapRef}>
+          {showEmojiPicker && (
+            <div className="absolute bottom-full right-0 z-50 mb-2 overflow-hidden rounded-2xl shadow-2xl">
+              <EmojiPickerPanel onSelect={insertEmoji} />
+            </div>
+          )}
+          <button
+            className={`input-action ${showEmojiPicker ? "text-primary" : ""}`}
+            title="Emoji"
+            aria-label="Emoji"
+            onClick={() => {
+              setShowEmojiPicker((value) => !value);
+              setShowAttachmentMenu(false);
+            }}
+            disabled={sending || isRecording}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z" />
+            </svg>
+          </button>
+        </div>
 
         {text.trim() ? (
           <button onClick={() => void handleSend()} disabled={sending} className="send-btn" title="Send">
