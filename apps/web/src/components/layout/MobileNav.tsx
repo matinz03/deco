@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 
 const NAV_ITEMS = [
@@ -37,6 +37,7 @@ const NAV_ITEMS = [
 
 export function MobileNav() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   // Hide bottom nav when inside a conversation on mobile — ChatHeader has a back button
   const isInConversation = /^\/inbox\/.+/.test(pathname);
 
@@ -49,8 +50,8 @@ export function MobileNav() {
           const hrefPath = item.href.split("?")[0]!;
           const hrefTab = new URLSearchParams(item.href.split("?")[1] ?? "").get("tab");
           const isActive = hrefTab
-            ? pathname === hrefPath // groups tab — only active on exact path match (tab handled by page)
-            : pathname === hrefPath || (pathname.startsWith(hrefPath) && hrefPath !== "/inbox");
+            ? pathname === hrefPath && searchParams.get("tab") === hrefTab
+            : (pathname === hrefPath && !searchParams.get("tab")) || pathname.startsWith(hrefPath + "/");
           return (
             <Link
               key={item.href}
