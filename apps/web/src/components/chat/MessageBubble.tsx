@@ -112,7 +112,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             {/* Reaction picker popover */}
             <AnimatePresence>
               {showReactions && (
-                <div className={`absolute bottom-full mb-1 z-50 ${isSent ? "right-0" : "left-0"}`}>
+                <div className={`absolute bottom-full mb-1 z-50 ${isSent ? "right-0" : "left-0"} w-max`}>
                   <ReactionPicker
                     onSelect={(emoji) => {
                       void toggleReaction(msg.conversationId, msg.id, emoji);
