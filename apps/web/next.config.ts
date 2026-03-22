@@ -12,12 +12,9 @@ const nextConfig: NextConfig = {
 
   // Image optimization — allow your own domain + R2 CDN
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: process.env.R2_PUBLIC_URL?.replace("https://", "") ?? "",
-      },
-    ],
+    remotePatterns: process.env.R2_PUBLIC_URL
+      ? [{ protocol: "https" as const, hostname: process.env.R2_PUBLIC_URL.replace(/^https?:\/\//, "") }]
+      : [],
   },
 
   // Security headers
