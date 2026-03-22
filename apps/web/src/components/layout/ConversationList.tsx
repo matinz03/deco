@@ -62,7 +62,7 @@ export function ConversationList() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto chat-scroll">
+      <div className="flex-1 overflow-y-auto chat-scroll pb-16 md:pb-0">
         {loading ? (
           <ConversationSkeleton />
         ) : filtered.length === 0 ? (
