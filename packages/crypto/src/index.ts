@@ -38,7 +38,7 @@ export function deriveSharedSecret(
 export function encryptMessage(plaintext: string, sharedSecretB64: string): string {
   const key = decodeBase64(sharedSecretB64);
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const message = encodeUTF8(plaintext);
+  const message = decodeUTF8(plaintext);
   const ciphertext = nacl.secretbox(message, nonce, key);
 
   // Pack nonce + ciphertext — nonce is safe to transmit
@@ -59,7 +59,7 @@ export function decryptMessage(encryptedB64: string, sharedSecretB64: string): s
   const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
   if (!plaintext) throw new Error("Decryption failed — message may be corrupted or tampered with");
 
-  return decodeUTF8(plaintext);
+  return encodeUTF8(plaintext);
 }
 
 // ─── Key Storage (IndexedDB) ──────────────────────────────────────────────────
