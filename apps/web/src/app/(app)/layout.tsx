@@ -10,8 +10,12 @@ import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverl
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  // Detect when user is inside a specific conversation
-  const isInConversation = /^\/inbox\/.+/.test(pathname);
+  // Only show the ConversationList as the full-width panel on /inbox root (mobile)
+  const isInboxRoot = pathname === "/inbox";
+  // Hide ConversationList sidebar on mobile for any non-inbox route
+  const showSidebarMobile = isInboxRoot;
+  // Show main panel on mobile for everything except inbox root
+  const showMainMobile = !isInboxRoot;
 
   return (
     <div className="h-app flex overflow-hidden bg-background">
@@ -22,25 +26,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Panel 2 — Conversation list:
-          mobile: full-width when NOT in a conversation
+          mobile: full-width only on /inbox root
           tablet+: always visible at fixed width */}
       <aside
         className={`
-          flex flex-col bg-sidebar border-r border-sidebar relative
-          ${isInConversation ? "hidden md:flex md:w-[300px] md:shrink-0" : "flex w-full md:w-[300px] md:shrink-0"}
+          flex-col bg-sidebar border-r border-sidebar relative
+          ${showSidebarMobile ? "flex w-full" : "hidden"} md:flex md:w-[300px] md:shrink-0
         `}
       >
         <NoiseOverlay />
         <ConversationList />
       </aside>
 
-      {/* Panel 3 — Chat window:
-          mobile: full-width when IN a conversation, hidden otherwise
+      {/* Panel 3 — Main content:
+          mobile: shown for all routes except /inbox root
           tablet+: always visible, takes remaining space */}
       <main
         className={`
           flex-col min-w-0 bg-surface overflow-hidden
-          ${isInConversation ? "flex flex-1" : "hidden md:flex md:flex-1"}
+          ${showMainMobile ? "flex flex-1" : "hidden"} md:flex md:flex-1
         `}
       >
         <AnimatePresence mode="wait">
