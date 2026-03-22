@@ -72,7 +72,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="overflow-y-auto h-full w-full"><div className="max-w-xl flex flex-col px-4 pt-10 pb-10 mx-auto">
+    <div className="overflow-y-auto h-full w-full"><div className="max-w-xl flex flex-col px-4 pt-10 pb-24 md:pb-10 mx-auto">
       <h1 className="mb-8 text-xl font-semibold">Settings</h1>
 
       <section className="mb-8">

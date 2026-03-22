@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -30,7 +31,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
       {/* Panel 1 — Nav rail: hidden on mobile, visible md+ */}
       <div className="hidden md:relative md:block md:shrink-0">
-        <NavRail />
+        <Suspense>
+          <NavRail />
+        </Suspense>
         <NoiseOverlay />
       </div>
 
@@ -44,7 +47,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         `}
       >
         <NoiseOverlay />
-        <ConversationList />
+        <Suspense>
+          <ConversationList />
+        </Suspense>
       </aside>
 
       {/* Panel 3 — Main content:
@@ -71,7 +76,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </main>
 
       {/* Mobile bottom tab bar — hidden inside conversations */}
-      <MobileNav />
+      <Suspense>
+        <MobileNav />
+      </Suspense>
 
       {/* Global keyboard shortcuts overlay */}
       <KeyboardShortcutsOverlay />
