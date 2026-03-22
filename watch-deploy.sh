@@ -3,7 +3,7 @@
 
 REPO_DIR=~/deco
 BRANCH=master
-INTERVAL=30
+INTERVAL=5
 
 echo "Watching $BRANCH for changes every ${INTERVAL}s... (Ctrl+C to stop)"
 
