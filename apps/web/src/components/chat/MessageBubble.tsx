@@ -11,7 +11,7 @@ interface Props {
 }
 
 export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
-  const text = msg.decryptedContent ?? msg.encryptedContent;
+  const text = getMessageText(msg);
   const time = format(new Date(msg.sentAt), "HH:mm");
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
 
@@ -124,4 +124,16 @@ function groupReactions(reactions: Message["reactions"]): [string, number][] {
   const map = new Map<string, number>();
   for (const r of reactions) map.set(r.emoji, (map.get(r.emoji) ?? 0) + 1);
   return Array.from(map.entries());
+}
+
+function getMessageText(message: Message) {
+  if (message.decryptedContent) {
+    return message.decryptedContent;
+  }
+
+  if (message.encryptedContent) {
+    return "Encrypted message unavailable on this device";
+  }
+
+  return "";
 }

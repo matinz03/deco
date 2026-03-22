@@ -49,7 +49,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     async fetchConversations() {
       const rawConversations = await api.conversations.list();
       const conversations = await hydrateConversationSummaries(rawConversations);
-      set({ conversations });
+      const existingMessages = get().messages;
+      const hydratedMessages = await rehydrateConversationMessages(existingMessages, conversations);
+      set({ conversations, messages: hydratedMessages });
     },
 
     async fetchMessages(conversationId) {
@@ -362,6 +364,20 @@ async function hydrateConversationSummaries(conversations: Conversation[]) {
 async function hydrateMessages(messages: Message[], conversation?: Conversation) {
   const hydrated = await Promise.all(messages.map((message) => hydrateMessage(message, conversation)));
   return sortMessages(hydrated);
+}
+
+async function rehydrateConversationMessages(
+  messagesByConversation: Record<string, Message[]>,
+  conversations: Conversation[]
+) {
+  const entries = await Promise.all(
+    Object.entries(messagesByConversation).map(async ([conversationId, messages]) => {
+      const conversation = conversations.find((item) => item.id === conversationId);
+      return [conversationId, await hydrateMessages(messages, conversation)] as const;
+    })
+  );
+
+  return Object.fromEntries(entries);
 }
 
 async function hydrateMessage(message: Message, conversation?: Conversation) {
