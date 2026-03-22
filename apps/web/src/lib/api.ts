@@ -262,6 +262,18 @@ export const api = {
       });
       return mapConversation(raw);
     },
+
+    update: async (id: string, body: { name?: string; description?: string; avatarUrl?: string }) => {
+      const raw = await request<unknown>(`/api/v1/conversations/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: body.name,
+          description: body.description,
+          avatar_url: body.avatarUrl,
+        }),
+      });
+      return mapConversation(raw);
+    },
   },
 
   messages: {

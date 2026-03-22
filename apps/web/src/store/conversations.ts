@@ -26,6 +26,7 @@ interface ConversationState {
   markConversationRead: (conversationId: string) => void;
   handleIncomingEvent: (event: WSEvent) => void;
   createConversation: (opts: { type: string; name?: string; memberIds: string[] }) => Promise<Conversation>;
+  updateConversation: (conversationId: string, data: { name?: string; description?: string; avatarUrl?: string }) => Promise<Conversation>;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => {
@@ -327,6 +328,23 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           : [conv, ...s.conversations].sort(sortConversationList),
       }));
       return conv;
+    },
+
+    async updateConversation(conversationId, data) {
+      const updatedConversation = await api.conversations.update(conversationId, data);
+      const [hydratedConversation] = await hydrateConversationSummaries([updatedConversation]);
+
+      if (!hydratedConversation) {
+        throw new Error("Failed to update conversation");
+      }
+
+      set((s) => ({
+        conversations: s.conversations
+          .map((item) => (item.id === conversationId ? { ...item, ...hydratedConversation } : item))
+          .sort(sortConversationList),
+      }));
+
+      return hydratedConversation;
     },
 
     handleIncomingEvent(event) {
