@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -49,7 +50,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.pool.Query(r.Context(), `
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-				m.media_url, m.media_mime_type, m.media_size,
+				m.media_url, m.media_name, m.media_mime_type, m.media_size,
 				m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
@@ -64,7 +65,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.pool.Query(r.Context(), `
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-				m.media_url, m.media_mime_type, m.media_size,
+				m.media_url, m.media_name, m.media_mime_type, m.media_size,
 				m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
@@ -88,7 +89,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var sender models.User
 		if err := rows.Scan(
 			&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-			&msg.MediaURL, &msg.MediaMimeType, &msg.MediaSize,
+			&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
 			&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 			&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 		); err != nil {
@@ -155,30 +156,42 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Type             string  `json:"type"`
 		EncryptedContent string  `json:"encrypted_content"`
+		MediaURL         string  `json:"media_url"`
+		MediaName        string  `json:"media_name"`
+		MediaMimeType    string  `json:"media_mime_type"`
+		MediaSize        *int64  `json:"media_size"`
 		ReplyToID        *string `json:"reply_to_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.EncryptedContent == "" {
+	if req.Type == "" {
+		req.Type = "text"
+	}
+	isMediaMessage := req.Type == "image" || req.Type == "video" || req.Type == "audio" || req.Type == "file"
+	if !isMediaMessage && req.EncryptedContent == "" {
 		respondError(w, http.StatusBadRequest, "encrypted_content is required")
 		return
 	}
-	if req.Type == "" {
-		req.Type = "text"
+	if isMediaMessage && req.MediaURL == "" {
+		respondError(w, http.StatusBadRequest, "media_url is required for media messages")
+		return
 	}
 
 	var msg models.Message
 	err := h.pool.QueryRow(r.Context(), `
-		INSERT INTO messages (conversation_id, sender_id, type, encrypted_content, reply_to_id)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO messages (
+			conversation_id, sender_id, type, encrypted_content,
+			media_url, media_name, media_mime_type, media_size, reply_to_id
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_mime_type, media_size,
+		          media_url, media_name, media_mime_type, media_size,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
-	`, convID, userID, req.Type, req.EncryptedContent, req.ReplyToID).Scan(
+	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.ReplyToID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaMimeType, &msg.MediaSize,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
 		&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
@@ -225,11 +238,11 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		SET encrypted_content = $1, is_edited = true, edited_at = NOW()
 		WHERE id = $2 AND conversation_id = $3 AND sender_id = $4 AND is_deleted = false
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_mime_type, media_size,
+		          media_url, media_name, media_mime_type, media_size,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
 	`, req.EncryptedContent, msgID, convID, userID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaMimeType, &msg.MediaSize,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
 		&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
@@ -412,6 +425,14 @@ func (h *MessageHandler) broadcastToConversation(r *http.Request, convID string,
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func nullableString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (h *MessageHandler) isConversationMember(r *http.Request, convID, userID string) bool {

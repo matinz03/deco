@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { useTheme } from "@/components/ui/ThemeProvider";
@@ -26,8 +27,12 @@ export default function SettingsPage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl ?? "");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [avatarProcessing, setAvatarProcessing] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [mode, setMode] = useState<"create" | "change" | null>(null);
   const [passphrase, setPassphrase] = useState("");
@@ -124,6 +129,8 @@ export default function SettingsPage() {
                 onClick={() => {
                   setDisplayName(user?.displayName ?? "");
                   setBio(user?.bio ?? "");
+                  setAvatarUrl(user?.avatarUrl ?? "");
+                  setAvatarFile(null);
                   setProfileError("");
                   setEditingProfile(true);
                 }}
@@ -141,10 +148,24 @@ export default function SettingsPage() {
                   setProfileError("Display name cannot be empty");
                   return;
                 }
+                if (avatarProcessing) {
+                  setProfileError("Please wait for the image to finish processing");
+                  return;
+                }
                 setProfileSaving(true);
                 setProfileError("");
                 try {
-                  await updateProfile({ displayName: displayName.trim(), bio: bio.trim() });
+                  let nextAvatarUrl = avatarUrl;
+                  if (avatarFile) {
+                    const upload = await api.uploads.create(avatarFile, "avatar", avatarFile.name);
+                    nextAvatarUrl = upload.url;
+                  }
+                  await updateProfile({
+                    displayName: displayName.trim(),
+                    bio: bio.trim(),
+                    avatarUrl: nextAvatarUrl,
+                  });
+                  setAvatarFile(null);
                   setEditingProfile(false);
                 } catch {
                   setProfileError("Failed to save changes");
@@ -154,6 +175,37 @@ export default function SettingsPage() {
               }}
               className="border-b border-sidebar px-4 py-4 flex flex-col gap-3"
             >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(event) =>
+                  void handleAvatarSelect(
+                    event,
+                    setAvatarUrl,
+                    setAvatarFile,
+                    setAvatarProcessing,
+                    setProfileError
+                  )
+                }
+              />
+              <div className="flex items-center gap-4">
+                <Avatar src={avatarUrl} name={displayName || user?.displayName || "?"} size="lg" />
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={avatarProcessing}
+                    className="rounded-xl border border-sidebar px-4 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                  >
+                    {avatarProcessing ? "Processing image..." : "Choose profile picture"}
+                  </button>
+                  <p className="text-xs text-muted">
+                    JPG, PNG, GIF, or WebP. We resize it automatically before saving.
+                  </p>
+                </div>
+              </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-muted">Display name</label>
                 <input
@@ -179,12 +231,16 @@ export default function SettingsPage() {
                 <p className="text-sm text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">{profileError}</p>
               )}
               <div className="flex gap-2">
-                <button type="submit" disabled={profileSaving} className="btn-primary">
+                <button type="submit" disabled={profileSaving || avatarProcessing} className="btn-primary">
                   {profileSaving ? "Saving…" : "Save"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditingProfile(false)}
+                  onClick={() => {
+                    setAvatarUrl(user?.avatarUrl ?? "");
+                    setAvatarFile(null);
+                    setEditingProfile(false);
+                  }}
                   className="rounded-xl border border-sidebar px-4 py-3 text-sm font-medium text-muted hover:text-foreground transition-colors"
                 >
                   Cancel
@@ -393,4 +449,83 @@ function Toggle() {
       <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-muted-foreground/40 transition-all" />
     </div>
   );
+}
+
+async function handleAvatarSelect(
+  event: ChangeEvent<HTMLInputElement>,
+  setAvatarUrl: (value: string) => void,
+  setAvatarFile: (value: File | null) => void,
+  setAvatarProcessing: (value: boolean) => void,
+  setProfileError: (value: string) => void
+) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    setProfileError("Please choose an image file");
+    return;
+  }
+  if (file.size > 6 * 1024 * 1024) {
+    setProfileError("Please choose an image smaller than 6MB");
+    return;
+  }
+
+  setAvatarProcessing(true);
+  setProfileError("");
+
+  try {
+    const resized = await resizeImage(file, 512);
+    setAvatarUrl(URL.createObjectURL(resized));
+    setAvatarFile(resized);
+  } catch {
+    setProfileError("We couldn't process that image");
+  } finally {
+    setAvatarProcessing(false);
+  }
+}
+
+async function resizeImage(file: File, maxSize: number) {
+  const sourceUrl = await fileToDataUrl(file);
+  const image = await loadImage(sourceUrl);
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas is not available");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const quality = mimeType === "image/png" ? undefined : 0.86;
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType, quality));
+  if (!blob) {
+    throw new Error("Image encoding failed");
+  }
+  const extension = mimeType === "image/png" ? "png" : "jpg";
+  return new File([blob], `avatar.${extension}`, { type: mimeType });
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
 }

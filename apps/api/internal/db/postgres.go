@@ -69,5 +69,14 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		END $$;
 	`)
 
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE messages
+		ADD COLUMN IF NOT EXISTS media_name TEXT
+	`)
+
 	return err
 }

@@ -8,6 +8,8 @@ import type {
   KeyBackupRecord,
   Member,
   MemberRole,
+  UploadKind,
+  UploadResponse,
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -20,12 +22,13 @@ class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("deco_token") : null;
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
 
   const res = await fetch(`${BASE}${path}`, {
     cache: "no-store",
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
@@ -66,6 +69,7 @@ export function mapMessage(r: any): Message {
     encryptedContent: r.encrypted_content ?? r.encryptedContent ?? "",
     decryptedContent: r.decrypted_content ?? r.decryptedContent,
     mediaUrl: r.media_url ?? r.mediaUrl,
+    mediaName: r.media_name ?? r.mediaName,
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
     replyToId: r.reply_to_id ?? r.replyToId,
@@ -127,6 +131,17 @@ function mapKeyBackupResponse(r: any): KeyBackupResponse {
   return {
     exists: Boolean(r?.exists),
     backup: r?.backup ? mapKeyBackupRecord(r.backup) : undefined,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapUploadResponse(r: any): UploadResponse {
+  return {
+    url: r.url ?? "",
+    mimeType: r.mime_type ?? r.mimeType ?? "",
+    size: r.size ?? 0,
+    name: r.name ?? "",
+    kind: r.kind ?? "file",
   };
 }
 
@@ -332,13 +347,28 @@ export const api = {
       return raw.map(mapMessage);
     },
 
-    send: async (conversationId: string, body: { encryptedContent: string; type?: string; replyToId?: string }) => {
+    send: async (
+      conversationId: string,
+      body: {
+        encryptedContent?: string;
+        type?: string;
+        replyToId?: string;
+        mediaUrl?: string;
+        mediaName?: string;
+        mediaMimeType?: string;
+        mediaSize?: number;
+      }
+    ) => {
       const raw = await request<unknown>(
         `/api/v1/conversations/${conversationId}/messages`,
         { method: "POST", body: JSON.stringify({
           encrypted_content: body.encryptedContent,
           type: body.type,
           reply_to_id: body.replyToId,
+          media_url: body.mediaUrl,
+          media_name: body.mediaName,
+          media_mime_type: body.mediaMimeType,
+          media_size: body.mediaSize,
         }) }
       );
       return mapMessage(raw);
@@ -420,6 +450,21 @@ export const api = {
         method: "DELETE",
       });
       return mapKeyBackupResponse(raw);
+    },
+  },
+
+  uploads: {
+    create: async (file: File | Blob, kind: UploadKind, name?: string) => {
+      const form = new FormData();
+      const filename = name ?? (file instanceof File ? file.name : `${kind}-${Date.now()}`);
+      form.append("file", file, filename);
+      form.append("kind", kind);
+
+      const raw = await request<unknown>("/api/v1/uploads", {
+        method: "POST",
+        body: form,
+      });
+      return mapUploadResponse(raw);
     },
   },
 };
