@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
 import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
-import type { Conversation, Message, WSEvent } from "@deco/types";
+import type { Conversation, Member, Message, WSEvent } from "@deco/types";
 import { useAuthStore } from "./auth";
 
 type PresenceState = {
@@ -27,6 +27,11 @@ interface ConversationState {
   handleIncomingEvent: (event: WSEvent) => void;
   createConversation: (opts: { type: string; name?: string; memberIds: string[] }) => Promise<Conversation>;
   updateConversation: (conversationId: string, data: { name?: string; description?: string; avatarUrl?: string }) => Promise<Conversation>;
+  listMembers: (conversationId: string) => Promise<Member[]>;
+  addMember: (conversationId: string, userId: string) => Promise<Member[]>;
+  updateMemberRole: (conversationId: string, userId: string, role: "admin" | "member") => Promise<Member[]>;
+  removeMember: (conversationId: string, userId: string) => Promise<Member[]>;
+  deleteConversation: (conversationId: string) => Promise<void>;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => {
@@ -345,6 +350,46 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }));
 
       return hydratedConversation;
+    },
+
+    async listMembers(conversationId) {
+      const members = await api.conversations.listMembers(conversationId);
+      set((s) => ({
+        conversations: s.conversations.map((item) =>
+          item.id === conversationId
+            ? { ...item, members, memberCount: members.length }
+            : item
+        ),
+      }));
+      return members;
+    },
+
+    async addMember(conversationId, userId) {
+      await api.conversations.addMember(conversationId, userId);
+      return get().listMembers(conversationId);
+    },
+
+    async updateMemberRole(conversationId, userId, role) {
+      await api.conversations.updateMemberRole(conversationId, userId, role);
+      return get().listMembers(conversationId);
+    },
+
+    async removeMember(conversationId, userId) {
+      await api.conversations.removeMember(conversationId, userId);
+      return get().listMembers(conversationId);
+    },
+
+    async deleteConversation(conversationId) {
+      await api.conversations.remove(conversationId);
+      set((s) => {
+        const nextMessages = { ...s.messages };
+        delete nextMessages[conversationId];
+        return {
+          conversations: s.conversations.filter((item) => item.id !== conversationId),
+          messages: nextMessages,
+          activeConversationId: s.activeConversationId === conversationId ? null : s.activeConversationId,
+        };
+      });
     },
 
     handleIncomingEvent(event) {
