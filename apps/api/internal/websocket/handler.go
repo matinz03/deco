@@ -74,6 +74,7 @@ func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logge
 // Handles incoming client events (typing, read receipts).
 func (c *Client) readPump(conn *websocket.Conn, hub *Hub, pool *pgxpool.Pool, logger *zap.Logger) {
 	defer func() {
+		pool.Exec(context.Background(), `UPDATE users SET last_seen_at = NOW() WHERE id = $1`, c.UserID)
 		hub.unregister <- c
 		conn.Close()
 	}()

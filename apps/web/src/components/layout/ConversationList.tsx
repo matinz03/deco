@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConversationStore } from "@/store/conversations";
+import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { NewConversationModal } from "@/components/ui/NewConversationModal";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -11,7 +12,8 @@ import type { Conversation } from "@deco/types";
 
 export function ConversationList() {
   const pathname = usePathname();
-  const { conversations, fetchConversations } = useConversationStore();
+  const { conversations, fetchConversations, presence } = useConversationStore();
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -69,7 +71,15 @@ export function ConversationList() {
         ) : (
           <ul>
             {filtered.map((conv) => (
-              <ConversationItem key={conv.id} conversation={conv} isActive={pathname === `/inbox/${conv.id}`} />
+              <ConversationItem
+                key={conv.id}
+                conversation={conv}
+                isActive={pathname === `/inbox/${conv.id}`}
+                isOnline={Boolean(
+                  conv.type === "direct" &&
+                  conv.members?.some((member) => member.userId !== currentUserId && presence[member.userId] === "online")
+                )}
+              />
             ))}
           </ul>
         )}
@@ -78,7 +88,15 @@ export function ConversationList() {
   );
 }
 
-function ConversationItem({ conversation: c, isActive }: { conversation: Conversation; isActive: boolean }) {
+function ConversationItem({
+  conversation: c,
+  isActive,
+  isOnline,
+}: {
+  conversation: Conversation;
+  isActive: boolean;
+  isOnline: boolean;
+}) {
   const title = c.name || "Unknown conversation";
   const lastMessageText = c.lastMessage?.isDeleted
     ? "Message deleted"
@@ -98,7 +116,11 @@ function ConversationItem({ conversation: c, isActive }: { conversation: Convers
         <div className="relative shrink-0">
           <Avatar src={c.avatarUrl} name={title} size="md" />
           {c.type === "direct" && (
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-sidebar" />
+            <span
+              className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-sidebar ${
+                isOnline ? "bg-green-500" : "bg-muted-foreground/30"
+              }`}
+            />
           )}
         </div>
 

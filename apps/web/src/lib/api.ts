@@ -134,8 +134,35 @@ export function mapWSEvent(event: any): WSEvent {
         },
       };
     case "message.reaction":
+      return {
+        type: event.type,
+        payload: {
+          action: event.payload?.action ?? "",
+          reaction: event.payload?.reaction
+            ? mapReaction(event.payload.reaction)
+            : undefined,
+          messageId: event.payload?.message_id ?? event.payload?.messageId ?? "",
+          userId: event.payload?.user_id ?? event.payload?.userId ?? "",
+          emoji: event.payload?.emoji ?? "",
+        },
+      };
     case "typing":
+      return {
+        type: event.type,
+        payload: {
+          conversationId: event.payload?.conversation_id ?? event.payload?.conversationId ?? "",
+          userId: event.payload?.user_id ?? event.payload?.userId ?? "",
+          isTyping: Boolean(event.payload?.is_typing ?? event.payload?.isTyping ?? true),
+        },
+      };
     case "presence":
+      return {
+        type: event.type,
+        payload: {
+          userId: event.payload?.user_id ?? event.payload?.userId ?? "",
+          status: event.payload?.status ?? "offline",
+        },
+      };
     default:
       return event as WSEvent;
   }
@@ -230,6 +257,11 @@ export const api = {
       request(`/api/v1/conversations/${conversationId}/messages/${messageId}/reactions`, {
         method: "POST",
         body: JSON.stringify({ emoji }),
+      }),
+
+    removeReaction: (conversationId: string, messageId: string, emoji: string) =>
+      request(`/api/v1/conversations/${conversationId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, {
+        method: "DELETE",
       }),
 
     markRead: (conversationId: string) =>

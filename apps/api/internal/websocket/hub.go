@@ -88,20 +88,28 @@ func (h *Hub) Run() {
 				h.clients[client.UserID] = make(map[*Client]struct{})
 			}
 			h.clients[client.UserID][client] = struct{}{}
+			onlineUserIDs := h.onlineUserIDsLocked()
 			h.mu.Unlock()
 			h.setPresence(client.UserID, true)
+			h.sendPresenceSnapshot(client, onlineUserIDs)
+			h.broadcastPresence(client.UserID, "online")
 
 		case client := <-h.unregister:
 			h.mu.Lock()
+			shouldBroadcastOffline := false
 			if clients, ok := h.clients[client.UserID]; ok {
 				delete(clients, client)
 				if len(clients) == 0 {
 					delete(h.clients, client.UserID)
 					h.setPresence(client.UserID, false)
+					shouldBroadcastOffline = true
 				}
 			}
 			h.mu.Unlock()
 			close(client.Send)
+			if shouldBroadcastOffline {
+				h.broadcastPresence(client.UserID, "offline")
+			}
 
 		case msg := <-h.broadcast:
 			h.mu.RLock()
@@ -151,4 +159,60 @@ func (h *Hub) setPresence(userID string, online bool) {
 
 func (h *Hub) Shutdown() {
 	close(h.done)
+}
+
+func (h *Hub) onlineUserIDsLocked() []string {
+	ids := make([]string, 0, len(h.clients))
+	for userID, clients := range h.clients {
+		if len(clients) > 0 {
+			ids = append(ids, userID)
+		}
+	}
+	return ids
+}
+
+func (h *Hub) sendPresenceSnapshot(client *Client, onlineUserIDs []string) {
+	for _, userID := range onlineUserIDs {
+		payload, err := json.Marshal(Event{
+			Type: EventPresence,
+			Payload: mustMarshalPresence(map[string]string{
+				"user_id": userID,
+				"status":  "online",
+			}),
+		})
+		if err != nil {
+			continue
+		}
+
+		select {
+		case client.Send <- payload:
+		default:
+		}
+	}
+}
+
+func (h *Hub) broadcastPresence(userID, status string) {
+	h.mu.RLock()
+	recipients := make([]string, 0, len(h.clients))
+	for recipientID := range h.clients {
+		recipients = append(recipients, recipientID)
+	}
+	h.mu.RUnlock()
+
+	event := Event{
+		Type: EventPresence,
+		Payload: mustMarshalPresence(map[string]string{
+			"user_id": userID,
+			"status":  status,
+		}),
+	}
+
+	for _, recipientID := range recipients {
+		h.SendToUser(recipientID, event) //nolint:errcheck
+	}
+}
+
+func mustMarshalPresence(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }

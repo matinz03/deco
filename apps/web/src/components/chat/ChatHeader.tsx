@@ -1,27 +1,40 @@
 "use client";
 
 import { Avatar } from "@/components/ui/Avatar";
+import { useAuthStore } from "@/store/auth";
+import { useConversationStore } from "@/store/conversations";
+import { formatDistanceToNowStrict } from "date-fns";
 import type { Conversation } from "@deco/types";
 
 interface Props { conversation: Conversation; }
 
 export function ChatHeader({ conversation }: Props) {
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const presence = useConversationStore((s) => s.presence);
   const title = conversation.name || "Unknown conversation";
+  const otherMemberRecord = conversation.members?.find((member) => member.userId !== currentUserId);
+  const otherMember = otherMemberRecord?.user;
+  const isOnline = otherMemberRecord ? presence[otherMemberRecord.userId] === "online" : false;
+  const subtitle = conversation.type === "direct"
+    ? getDirectConversationSubtitle(otherMember?.lastSeenAt, isOnline)
+    : `${conversation.memberCount} members`;
 
   return (
     <header className="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface shrink-0">
       <div className="relative">
         <Avatar src={conversation.avatarUrl} name={title} size="sm" />
         {conversation.type === "direct" && (
-          <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-500 border-2 border-surface" />
+          <span
+            className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border-2 border-surface ${
+              isOnline ? "bg-green-500" : "bg-muted-foreground/30"
+            }`}
+          />
         )}
       </div>
 
       <div className="flex-1 min-w-0">
         <h3 className="text-sm font-semibold truncate">{title}</h3>
-        <p className="text-xs text-muted truncate">
-          {conversation.type === "direct" ? "Online" : `${conversation.memberCount} members`}
-        </p>
+        <p className="text-xs text-muted truncate">{subtitle}</p>
       </div>
 
       {/* Actions */}
@@ -53,4 +66,26 @@ export function ChatHeader({ conversation }: Props) {
       </div>
     </header>
   );
+}
+
+function getDirectConversationSubtitle(lastSeenAt: string | undefined, isOnline: boolean) {
+  if (isOnline) {
+    return "Online";
+  }
+
+  if (!lastSeenAt) {
+    return "Direct message";
+  }
+
+  const lastSeen = new Date(lastSeenAt);
+  if (Number.isNaN(lastSeen.getTime())) {
+    return "Direct message";
+  }
+
+  const diffMs = Date.now() - lastSeen.getTime();
+  if (diffMs < 5 * 60 * 1000) {
+    return "Active recently";
+  }
+
+  return `Last seen ${formatDistanceToNowStrict(lastSeen, { addSuffix: true })}`;
 }

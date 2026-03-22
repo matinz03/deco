@@ -9,6 +9,7 @@ interface ConversationState {
   conversations: Conversation[];
   messages: Record<string, Message[]>;
   activeConversationId: string | null;
+  presence: Record<string, "online" | "offline" | "busy" | "away">;
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
@@ -29,6 +30,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     conversations: [],
     messages: {},
     activeConversationId: null,
+    presence: {},
 
     setActiveConversation(id) {
       set({ activeConversationId: id });
@@ -182,11 +184,55 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         })();
       }
 
+      if (event.type === "message.edited") {
+        void (async () => {
+          const rawEditedMessage = mapMessage(event.payload);
+          const conversation = get().conversations.find(
+            (item) => item.id === rawEditedMessage.conversationId
+          );
+          const editedMessage = await hydrateMessage(rawEditedMessage, conversation);
+
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [editedMessage.conversationId]: upsertMessage(
+                s.messages[editedMessage.conversationId] ?? [],
+                editedMessage
+              ),
+            },
+            conversations: s.conversations.map((item) =>
+              item.id === editedMessage.conversationId && item.lastMessage?.id === editedMessage.id
+                ? { ...item, lastMessage: editedMessage }
+                : item
+            ),
+          }));
+        })();
+      }
+
       if (event.type === "message.read") {
         const { conversationId } = event.payload as { conversationId: string; userId: string; lastReadAt: string };
         set((s) => ({
           conversations: s.conversations.map((c) =>
             c.id === conversationId ? { ...c, unreadCount: 0 } : c
+          ),
+        }));
+      }
+
+      if (event.type === "message.reaction") {
+        const payload = event.payload as {
+          action: "add" | "remove";
+          reaction?: Message["reactions"][number];
+          messageId?: string;
+          userId?: string;
+          emoji?: string;
+        };
+
+        set((s) => ({
+          messages: Object.fromEntries(
+            Object.entries(s.messages).map(([conversationId, messages]) => [
+              conversationId,
+              messages.map((message) => applyReactionEvent(message, payload)),
+            ])
           ),
         }));
       }
@@ -199,6 +245,20 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             [conversationId]: (s.messages[conversationId] ?? []).map((message) =>
               message.id === id ? { ...message, isDeleted: true, decryptedContent: "" } : message
             ),
+          },
+        }));
+      }
+
+      if (event.type === "presence") {
+        const { userId, status } = event.payload as {
+          userId: string;
+          status: "online" | "offline" | "busy" | "away";
+        };
+
+        set((s) => ({
+          presence: {
+            ...s.presence,
+            [userId]: status,
           },
         }));
       }
@@ -243,6 +303,47 @@ function upsertMessage(messages: Message[], incoming: Message) {
 
   next.push(incoming);
   return sortMessages(next);
+}
+
+function applyReactionEvent(
+  message: Message,
+  payload: {
+    action: "add" | "remove";
+    reaction?: Message["reactions"][number];
+    messageId?: string;
+    userId?: string;
+    emoji?: string;
+  }
+) {
+  const targetMessageId = payload.reaction?.messageId ?? payload.messageId;
+  if (message.id !== targetMessageId) {
+    return message;
+  }
+
+  if (payload.action === "add" && payload.reaction) {
+    const exists = message.reactions.some(
+      (reaction) =>
+        reaction.messageId === payload.reaction?.messageId &&
+        reaction.userId === payload.reaction?.userId &&
+        reaction.emoji === payload.reaction?.emoji
+    );
+
+    return exists
+      ? message
+      : { ...message, reactions: [...message.reactions, payload.reaction] };
+  }
+
+  if (payload.action === "remove") {
+    return {
+      ...message,
+      reactions: message.reactions.filter(
+        (reaction) =>
+          !(reaction.userId === payload.userId && reaction.emoji === payload.emoji)
+      ),
+    };
+  }
+
+  return message;
 }
 
 async function hydrateConversationSummaries(conversations: Conversation[]) {
