@@ -9,9 +9,11 @@ const AuthBackground = dynamic(
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-app flex items-center justify-center bg-background relative overflow-hidden">
+    <div className="h-app bg-background relative overflow-hidden">
       <AuthBackground />
-      <div className="relative z-10 w-full max-w-md px-6">{children}</div>
+      <div className="relative z-10 h-full overflow-y-auto flex items-center justify-center py-8">
+        <div className="w-full max-w-md px-6">{children}</div>
+      </div>
     </div>
   );
 }

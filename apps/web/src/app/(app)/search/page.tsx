@@ -46,7 +46,7 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-xl mx-auto w-full px-4 pt-10">
+    <div className="overflow-y-auto h-full w-full"><div className="flex flex-col max-w-xl mx-auto w-full px-4 pt-10 pb-10">
       <h1 className="text-xl font-semibold mb-6">Find people</h1>
 
       {/* Search input */}
@@ -104,6 +104,6 @@ export default function SearchPage() {
       {!query && (
         <p className="text-sm text-muted text-center mt-8">Type at least 2 characters to search.</p>
       )}
-    </div>
+    </div></div>
   );
 }
