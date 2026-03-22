@@ -342,6 +342,18 @@ export const api = {
       return mapUser(raw);
     },
 
+    updateMe: async (body: { displayName?: string; bio?: string; avatarUrl?: string }) => {
+      const raw = await request<unknown>("/api/v1/users/me", {
+        method: "PATCH",
+        body: JSON.stringify({
+          display_name: body.displayName,
+          bio: body.bio,
+          avatar_url: body.avatarUrl,
+        }),
+      });
+      return mapUser(raw);
+    },
+
     getKeyBackup: async () => {
       const raw = await request<unknown>("/api/v1/users/me/key-backup");
       return mapKeyBackupResponse(raw);

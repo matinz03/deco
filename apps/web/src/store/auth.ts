@@ -40,6 +40,7 @@ interface AuthState {
   deleteKeyBackup: () => Promise<void>;
   dismissBackupPrompt: () => void;
   clearBackupError: () => void;
+  updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<void>;
 }
 
 async function refreshConversationState() {
@@ -302,5 +303,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   clearBackupError() {
     set({ backupError: null });
+  },
+
+  async updateProfile(data) {
+    const updated = await api.users.updateMe(data);
+    set({ user: updated });
+    localStorage.setItem("deco_user", JSON.stringify(updated));
   },
 }));

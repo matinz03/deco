@@ -22,6 +22,13 @@ export default function SettingsPage() {
   const deleteKeyBackup = useAuthStore((s) => s.deleteKeyBackup);
   const clearBackupError = useAuthStore((s) => s.clearBackupError);
 
+  const updateProfile = useAuthStore((s) => s.updateProfile);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [displayName, setDisplayName] = useState(user?.displayName ?? "");
+  const [bio, setBio] = useState(user?.bio ?? "");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+
   const [mode, setMode] = useState<"create" | "change" | null>(null);
   const [passphrase, setPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
@@ -111,8 +118,81 @@ export default function SettingsPage() {
               <p className="truncate font-semibold">{user?.displayName}</p>
               <p className="truncate text-sm text-muted">@{user?.username}</p>
             </div>
-            <button className="ml-auto shrink-0 text-sm text-primary hover:underline">Edit</button>
+            {!editingProfile && (
+              <button
+                className="ml-auto shrink-0 text-sm text-primary hover:underline"
+                onClick={() => {
+                  setDisplayName(user?.displayName ?? "");
+                  setBio(user?.bio ?? "");
+                  setProfileError("");
+                  setEditingProfile(true);
+                }}
+              >
+                Edit
+              </button>
+            )}
           </div>
+
+          {editingProfile && (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!displayName.trim()) {
+                  setProfileError("Display name cannot be empty");
+                  return;
+                }
+                setProfileSaving(true);
+                setProfileError("");
+                try {
+                  await updateProfile({ displayName: displayName.trim(), bio: bio.trim() });
+                  setEditingProfile(false);
+                } catch {
+                  setProfileError("Failed to save changes");
+                } finally {
+                  setProfileSaving(false);
+                }
+              }}
+              className="border-b border-sidebar px-4 py-4 flex flex-col gap-3"
+            >
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted">Display name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="input"
+                  placeholder="Your display name"
+                  autoFocus
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted">Bio</label>
+                <input
+                  type="text"
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  className="input"
+                  placeholder="A short bio (optional)"
+                />
+              </div>
+              {profileError && (
+                <p className="text-sm text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">{profileError}</p>
+              )}
+              <div className="flex gap-2">
+                <button type="submit" disabled={profileSaving} className="btn-primary">
+                  {profileSaving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingProfile(false)}
+                  className="rounded-xl border border-sidebar px-4 py-3 text-sm font-medium text-muted hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="flex items-center justify-between px-4 py-3">
             <span className="text-sm text-muted">Username</span>
             <span className="text-sm text-muted">@{user?.username}</span>
