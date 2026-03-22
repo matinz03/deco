@@ -17,6 +17,8 @@ interface Props {
 }
 
 export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
+  if (msg.isDeleted) return null;
+
   const text = getMessageText(msg);
   const time = format(new Date(msg.sentAt), "HH:mm");
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
@@ -73,7 +75,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
 
     // Single tap — wait 1.5s, then open emoji bar if no second tap
     tapTimer.current = setTimeout(() => {
-      if (tapCount.current === 1 && !msg.isDeleted) {
+      if (tapCount.current === 1) {
         setShowReactions((v) => !v);
       }
       tapCount.current = 0;
@@ -134,9 +136,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
               )}
 
               {/* Text */}
-              {msg.isDeleted ? (
-                <span className="italic opacity-50">Message deleted</span>
-              ) : isEditing ? (
+              {isEditing ? (
                 <div className="min-w-[220px]">
                   <textarea
                     value={draft}
@@ -188,17 +188,15 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             </motion.div>
 
             {/* Reaction picker trigger — shows on hover (desktop) */}
-            {!msg.isDeleted && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowReactions((v) => !v); }}
-                className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity
-                  w-6 h-6 rounded-full bg-surface border border-border shadow-sm flex items-center justify-center text-xs
-                  ${isSent ? "-left-8" : "-right-8"}`}
-                aria-label="Add reaction"
-              >
-                <span>😊</span>
-              </button>
-            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowReactions((v) => !v); }}
+              className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity
+                w-6 h-6 rounded-full bg-surface border border-border shadow-sm flex items-center justify-center text-xs
+                ${isSent ? "-left-8" : "-right-8"}`}
+              aria-label="Add reaction"
+            >
+              <span>😊</span>
+            </button>
 
             {/* Reaction picker popover */}
             <AnimatePresence>
