@@ -14,6 +14,7 @@ interface ConversationState {
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
   setActiveConversation: (id: string | null) => void;
+  markConversationRead: (conversationId: string) => void;
   handleIncomingEvent: (event: WSEvent) => void;
   createConversation: (opts: { type: string; name?: string; memberIds: string[] }) => Promise<Conversation>;
 }
@@ -31,6 +32,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
 
     setActiveConversation(id) {
       set({ activeConversationId: id });
+    },
+
+    markConversationRead(conversationId) {
+      set((s) => ({
+        conversations: s.conversations.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, unreadCount: 0 }
+            : conversation
+        ),
+      }));
     },
 
     async fetchConversations() {

@@ -12,7 +12,7 @@ interface Props { conversationId: string; }
 
 export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
-  const { messages, fetchMessages, setActiveConversation, conversations } = useConversationStore();
+  const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const conversation = conversations.find((c) => c.id === conversationId);
@@ -20,15 +20,25 @@ export function ChatPanel({ conversationId }: Props) {
 
   useEffect(() => {
     setActiveConversation(conversationId);
+    markConversationRead(conversationId);
     void fetchMessages(conversationId);
     void api.messages.markRead(conversationId).catch(() => {});
     return () => setActiveConversation(null);
-  }, [conversationId, setActiveConversation, fetchMessages]);
+  }, [conversationId, setActiveConversation, markConversationRead, fetchMessages]);
 
   useEffect(() => {
     if (convMessages.length === 0) return;
+    markConversationRead(conversationId);
     void api.messages.markRead(conversationId).catch(() => {});
-  }, [conversationId, convMessages.length]);
+  }, [conversationId, convMessages.length, markConversationRead]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void fetchMessages(conversationId);
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [conversationId, fetchMessages]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
