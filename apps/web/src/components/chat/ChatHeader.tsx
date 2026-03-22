@@ -23,7 +23,7 @@ export function ChatHeader({ conversation }: Props) {
     : `${conversation.memberCount} members`;
 
   return (
-    <header className="flex items-center gap-2 px-3 md:px-4 py-3 border-b border-border bg-surface shrink-0">
+    <header className="chat-header">
       {/* Back button — mobile only */}
       <button
         onClick={() => router.back()}
@@ -42,13 +42,13 @@ export function ChatHeader({ conversation }: Props) {
         )}
       </div>
 
-      <div className="flex-1 min-w-0">
-        <h3 className="text-sm font-semibold truncate">{title}</h3>
-        <p className="text-xs text-muted truncate">{subtitle}</p>
+      <div className="chat-header-info">
+        <h3 className="chat-header-name">{title}</h3>
+        <p className="chat-header-status">{subtitle}</p>
       </div>
 
       {/* Actions — collapse to just "more" on small screens */}
-      <div className="flex items-center gap-0.5">
+      <div className="chat-actions">
         <button className="hidden sm:flex icon-btn" title="Search in conversation" aria-label="Search in conversation">
           <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />

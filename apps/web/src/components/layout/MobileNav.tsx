@@ -43,8 +43,8 @@ export function MobileNav() {
   if (isInConversation) return null;
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-nav border-t border-sidebar safe-area-bottom">
-      <div className="flex items-center justify-around h-16">
+    <nav className="mobile-nav">
+      <div className="mobile-nav-items">
         {NAV_ITEMS.map((item) => {
           const hrefPath = item.href.split("?")[0]!;
           const hrefTab = new URLSearchParams(item.href.split("?")[1] ?? "").get("tab");
@@ -56,15 +56,15 @@ export function MobileNav() {
               key={item.href}
               href={item.href}
               aria-label={item.label}
-              className="flex flex-col items-center justify-center gap-1 flex-1 h-full px-2 transition-colors"
+              className="mobile-nav-item"
             >
               <motion.span
                 whileTap={{ scale: 0.88 }}
                 transition={{ type: "spring", stiffness: 500, damping: 28 }}
-                className={`flex flex-col items-center gap-1 ${isActive ? "text-foreground" : "text-muted"}`}
+                className={`mobile-nav-icon ${isActive ? "text-foreground" : "text-muted"}`}
               >
                 {item.icon}
-                <span className="text-[10px] font-medium">{item.label}</span>
+                <span className="mobile-nav-label">{item.label}</span>
                 {isActive && (
                   <motion.span
                     layoutId="mobile-indicator"

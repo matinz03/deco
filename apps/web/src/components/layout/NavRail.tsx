@@ -52,19 +52,19 @@ export function NavRail() {
   const user = useAuthStore((s) => s.user);
 
   return (
-    <nav className="w-[64px] shrink-0 flex flex-col items-center py-4 gap-1 bg-nav border-r border-sidebar">
+    <nav className="nav-rail">
       {/* Logo */}
       <motion.div
-        className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center mb-3"
+        className="nav-logo"
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.95 }}
         transition={{ type: "spring", stiffness: 500, damping: 30 }}
       >
-        <span className="text-primary-foreground font-bold text-sm">D</span>
+        <span className="nav-logo-text">D</span>
       </motion.div>
 
       {/* Nav items */}
-      <div className="flex flex-col items-center gap-1 flex-1">
+      <div className="nav-items">
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href.split("?")[0]!);
           return (
@@ -73,7 +73,7 @@ export function NavRail() {
               href={item.href}
               title={item.label}
               aria-label={item.label}
-              className={`icon-btn relative ${isActive ? "bg-accent text-foreground" : ""}`}
+              className={`nav-item ${isActive ? "nav-item--active" : ""}`}
             >
               <motion.span
                 whileHover={{ scale: 1.1 }}
@@ -87,7 +87,7 @@ export function NavRail() {
                 {isActive && (
                   <motion.span
                     layoutId="nav-indicator"
-                    className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full"
+                    className="nav-indicator"
                     initial={{ opacity: 0, scaleY: 0 }}
                     animate={{ opacity: 1, scaleY: 1 }}
                     exit={{ opacity: 0, scaleY: 0 }}

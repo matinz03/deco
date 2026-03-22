@@ -31,8 +31,8 @@ export function ConversationList() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-base">Messages</h2>
+      <div className="sidebar-header">
+        <h2 className="sidebar-title">Messages</h2>
         <button
           className="icon-btn"
           title="New conversation"
@@ -47,9 +47,9 @@ export function ConversationList() {
 
       <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} />
 
-      <div className="px-3 pb-3">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="sidebar-search-wrap">
+        <div className="sidebar-search">
+          <svg className="sidebar-search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
           <input
@@ -57,16 +57,16 @@ export function ConversationList() {
             placeholder="Search conversations..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-muted border-0 focus:outline-none focus:ring-1 focus:ring-ring/30 placeholder:text-muted-foreground/50"
+            className="sidebar-search-input"
           />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto chat-scroll pb-16 md:pb-0">
+      <div className="sidebar-list">
         {loading ? (
           <ConversationSkeleton />
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-6">
+          <div className="sidebar-empty">
             <p className="text-sm text-muted">No conversations yet.</p>
             <p className="text-xs text-muted">Start a new one with the + button.</p>
           </div>
@@ -119,29 +119,27 @@ function ConversationItem({
     >
       <Link
         href={`/inbox/${conversation.id}`}
-        className={`flex items-center gap-3 px-3 py-3 mx-2 rounded-xl transition-all ${
-          isActive ? "bg-accent" : "hover:bg-accent/50"
-        }`}
+        className={`conv-item ${isActive ? "conv-item--active" : ""}`}
       >
-        <div className="relative shrink-0">
+        <div className="conv-avatar-wrap">
           <Avatar src={conversation.avatarUrl} name={title} size="md" />
           {conversation.type === "direct" && (
             <OnlineDot isOnline={isOnline} borderClass="border-sidebar" />
           )}
         </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium truncate">{title}</span>
-            <span className="text-[11px] text-muted shrink-0">{timeStr}</span>
+        <div className="conv-meta">
+          <div className="conv-row">
+            <span className="conv-name">{title}</span>
+            <span className="conv-time">{timeStr}</span>
           </div>
-          <div className="flex items-center justify-between gap-2 mt-0.5">
-            <p className="text-xs text-muted truncate">{lastMessageText}</p>
+          <div className="conv-row mt-0.5">
+            <p className="conv-preview">{lastMessageText}</p>
             {conversation.unreadCount > 0 && (
               <motion.span
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
-                className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-semibold flex items-center justify-center px-1"
+                className="unread-badge"
               >
                 {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
               </motion.span>
