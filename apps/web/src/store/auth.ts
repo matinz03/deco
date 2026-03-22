@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
-import { wsClient } from "@/lib/websocket";
+import { wsClient, resolveWebSocketURL } from "@/lib/websocket";
 import {
   generateKeyPair,
   storePrivateKey,
@@ -41,8 +41,6 @@ interface AuthState {
   dismissBackupPrompt: () => void;
   clearBackupError: () => void;
 }
-
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080";
 
 async function refreshConversationState() {
   const { useConversationStore } = await import("./conversations");
@@ -134,7 +132,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     const user: User = JSON.parse(userRaw);
     set({ token, user });
-    wsClient.connect(WS_URL);
+    wsClient.connect(resolveWebSocketURL());
     await syncKeyBackupState(user, "hydrate", set);
     set({ isHydrated: true });
   },
@@ -143,7 +141,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { token, user } = await api.auth.login({ email, phone, password });
     persistAuth(token, user);
     set({ token, user });
-    wsClient.connect(WS_URL);
+    wsClient.connect(resolveWebSocketURL());
     await syncKeyBackupState(user, "login", set);
   },
 
@@ -162,7 +160,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     persistAuth(token, user);
     set({ token, user });
-    wsClient.connect(WS_URL);
+    wsClient.connect(resolveWebSocketURL());
     await syncKeyBackupState(user, "signup", set);
   },
 
