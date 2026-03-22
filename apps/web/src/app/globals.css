@@ -171,6 +171,11 @@
   /* Full height helper for app shell */
   .h-app { height: 100dvh; }
 
+  /* iOS safe-area support for bottom nav and input */
+  .safe-area-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
   /* Glassmorphism panels */
   .glass-nav {
     background-color: hsl(var(--nav) / 0.85);
