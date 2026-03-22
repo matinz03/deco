@@ -11,11 +11,12 @@ import type { User } from "@deco/types";
 interface Props {
   open: boolean;
   onClose: () => void;
+  initialMode?: Mode;
 }
 
 type Mode = "direct" | "group";
 
-export function NewConversationModal({ open, onClose }: Props) {
+export function NewConversationModal({ open, onClose, initialMode = "direct" }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<Mode>("direct");
@@ -32,7 +33,7 @@ export function NewConversationModal({ open, onClose }: Props) {
       return;
     }
 
-    setMode("direct");
+    setMode(initialMode);
     setQuery("");
     setGroupName("");
     setResults([]);
@@ -40,7 +41,7 @@ export function NewConversationModal({ open, onClose }: Props) {
 
     const timer = window.setTimeout(() => inputRef.current?.focus(), 50);
     return () => window.clearTimeout(timer);
-  }, [open]);
+  }, [open, initialMode]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {

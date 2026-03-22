@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
@@ -47,9 +47,17 @@ const NAV_ITEMS = [
   },
 ];
 
-export function NavRail() {
+export function NavRail({
+  sidebarCollapsed,
+  onToggleSidebar,
+}: {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
+  const tab = searchParams.get("tab") ?? "messages";
 
   return (
     <nav className="nav-rail">
@@ -66,7 +74,14 @@ export function NavRail() {
       {/* Nav items */}
       <div className="nav-items">
         {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href.split("?")[0]!);
+          const isGroupsItem = item.href.includes("tab=groups");
+          const isMessagesItem = item.href === "/inbox";
+          const isInboxRoute = pathname.startsWith("/inbox");
+          const isActive = isGroupsItem
+            ? isInboxRoute && tab === "groups"
+            : isMessagesItem
+              ? isInboxRoute && tab !== "groups"
+              : pathname === item.href || pathname.startsWith(item.href.split("?")[0]!);
           return (
             <Link
               key={item.href}
@@ -99,6 +114,24 @@ export function NavRail() {
           );
         })}
       </div>
+
+      <button
+        type="button"
+        onClick={onToggleSidebar}
+        className="absolute -right-4 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-sidebar bg-surface text-muted shadow-lg transition-colors hover:text-foreground md:flex"
+        aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        <svg
+          className={`h-4 w-4 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" />
+        </svg>
+      </button>
 
       {/* User avatar */}
       <button className="relative group" aria-label="Your profile">
