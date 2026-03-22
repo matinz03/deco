@@ -19,6 +19,7 @@ interface ConversationState {
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
+  toggleReaction: (conversationId: string, messageId: string, emoji: string) => Promise<void>;
   setActiveConversation: (id: string | null) => void;
   markConversationRead: (conversationId: string) => void;
   handleIncomingEvent: (event: WSEvent) => void;
@@ -134,6 +135,79 @@ export const useConversationStore = create<ConversationState>((set, get) => {
               m.id === tempId ? { ...m, status: "failed" as const } : m
             ),
           },
+        }));
+      }
+    },
+
+    async toggleReaction(conversationId, messageId, emoji) {
+      const user = useAuthStore.getState().user;
+      if (!user) return;
+
+      const message = get().messages[conversationId]?.find((item) => item.id === messageId);
+      const existingReaction = message?.reactions.find(
+        (reaction) => reaction.userId === user.id && reaction.emoji === emoji
+      );
+
+      const optimisticPayload = existingReaction
+        ? {
+            action: "remove" as const,
+            messageId,
+            userId: user.id,
+            emoji,
+          }
+        : {
+            action: "add" as const,
+            reaction: {
+              messageId,
+              userId: user.id,
+              user,
+              emoji,
+              createdAt: new Date().toISOString(),
+            },
+          };
+
+      set((s) => ({
+        messages: Object.fromEntries(
+          Object.entries(s.messages).map(([id, messages]) => [
+            id,
+            id === conversationId
+              ? messages.map((item) => applyReactionEvent(item, optimisticPayload))
+              : messages,
+          ])
+        ),
+      }));
+
+      try {
+        if (existingReaction) {
+          await api.messages.removeReaction(conversationId, messageId, emoji);
+        } else {
+          await api.messages.react(conversationId, messageId, emoji);
+        }
+      } catch {
+        set((s) => ({
+          messages: Object.fromEntries(
+            Object.entries(s.messages).map(([id, messages]) => [
+              id,
+              id === conversationId
+                ? messages.map((item) =>
+                    applyReactionEvent(
+                      item,
+                      existingReaction
+                        ? {
+                            action: "add" as const,
+                            reaction: existingReaction,
+                          }
+                        : {
+                            action: "remove" as const,
+                            messageId,
+                            userId: user.id,
+                            emoji,
+                          }
+                    )
+                  )
+                : messages,
+            ])
+          ),
         }));
       }
     },
