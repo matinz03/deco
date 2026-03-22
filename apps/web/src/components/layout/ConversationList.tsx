@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
+import { OnlineDot } from "@/components/ui/OnlineDot";
 import { NewConversationModal } from "@/components/ui/NewConversationModal";
+import { ConversationSkeleton } from "@/components/layout/ConversationSkeleton";
 import { formatDistanceToNowStrict } from "date-fns";
 import type { Conversation } from "@deco/types";
 
@@ -16,8 +19,11 @@ export function ConversationList() {
   const currentUserId = useAuthStore((s) => s.user?.id);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { fetchConversations(); }, [fetchConversations]);
+  useEffect(() => {
+    void fetchConversations().finally(() => setLoading(false));
+  }, [fetchConversations]);
 
   const filtered = conversations.filter((conversation) =>
     (conversation.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
@@ -27,7 +33,12 @@ export function ConversationList() {
     <div className="flex flex-col h-full">
       <div className="px-4 pt-4 pb-3 flex items-center justify-between">
         <h2 className="font-semibold text-base">Messages</h2>
-        <button className="icon-btn" title="New conversation" onClick={() => setModalOpen(true)}>
+        <button
+          className="icon-btn"
+          title="New conversation"
+          aria-label="New conversation"
+          onClick={() => setModalOpen(true)}
+        >
           <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
@@ -52,26 +63,30 @@ export function ConversationList() {
       </div>
 
       <div className="flex-1 overflow-y-auto chat-scroll">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <ConversationSkeleton />
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-6">
             <p className="text-sm text-muted">No conversations yet.</p>
             <p className="text-xs text-muted">Start a new one with the + button.</p>
           </div>
         ) : (
           <ul>
-            {filtered.map((conversation) => (
-              <ConversationItem
-                key={conversation.id}
-                conversation={conversation}
-                isActive={pathname === `/inbox/${conversation.id}`}
-                isOnline={Boolean(
-                  conversation.type === "direct" &&
-                  conversation.members?.some(
-                    (member) => member.userId !== currentUserId && presence[member.userId] === "online"
-                  )
-                )}
-              />
-            ))}
+            <AnimatePresence initial={false}>
+              {filtered.map((conversation) => (
+                <ConversationItem
+                  key={conversation.id}
+                  conversation={conversation}
+                  isActive={pathname === `/inbox/${conversation.id}`}
+                  isOnline={Boolean(
+                    conversation.type === "direct" &&
+                    conversation.members?.some(
+                      (member) => member.userId !== currentUserId && presence[member.userId] === "online"
+                    )
+                  )}
+                />
+              ))}
+            </AnimatePresence>
           </ul>
         )}
       </div>
@@ -95,7 +110,13 @@ function ConversationItem({
     : "";
 
   return (
-    <li>
+    <motion.li
+      layout
+      initial={{ opacity: 0, x: -12 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -12 }}
+      transition={{ type: "spring", stiffness: 350, damping: 30 }}
+    >
       <Link
         href={`/inbox/${conversation.id}`}
         className={`flex items-center gap-3 px-3 py-3 mx-2 rounded-xl transition-all ${
@@ -105,11 +126,7 @@ function ConversationItem({
         <div className="relative shrink-0">
           <Avatar src={conversation.avatarUrl} name={title} size="md" />
           {conversation.type === "direct" && (
-            <span
-              className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-sidebar ${
-                isOnline ? "bg-green-500" : "bg-muted-foreground/30"
-              }`}
-            />
+            <OnlineDot isOnline={isOnline} borderClass="border-sidebar" />
           )}
         </div>
 
@@ -121,33 +138,25 @@ function ConversationItem({
           <div className="flex items-center justify-between gap-2 mt-0.5">
             <p className="text-xs text-muted truncate">{lastMessageText}</p>
             {conversation.unreadCount > 0 && (
-              <span className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-semibold flex items-center justify-center px-1">
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-semibold flex items-center justify-center px-1"
+              >
                 {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
-              </span>
+              </motion.span>
             )}
           </div>
         </div>
       </Link>
-    </li>
+    </motion.li>
   );
 }
 
 function getConversationPreview(conversation: Conversation) {
-  if (!conversation.lastMessage) {
-    return "...";
-  }
-
-  if (conversation.lastMessage.isDeleted) {
-    return "Message deleted";
-  }
-
-  if (conversation.lastMessage.decryptedContent) {
-    return conversation.lastMessage.decryptedContent;
-  }
-
-  if (conversation.lastMessage.type !== "text") {
-    return "Media message";
-  }
-
+  if (!conversation.lastMessage) return "...";
+  if (conversation.lastMessage.isDeleted) return "Message deleted";
+  if (conversation.lastMessage.decryptedContent) return conversation.lastMessage.decryptedContent;
+  if (conversation.lastMessage.type !== "text") return "Media message";
   return "Encrypted message";
 }
