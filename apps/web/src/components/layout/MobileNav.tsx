@@ -58,9 +58,10 @@ export function MobileNav() {
         {NAV_ITEMS.map((item) => {
           const hrefPath = item.href.split("?")[0]!;
           const hrefTab = new URLSearchParams(item.href.split("?")[1] ?? "").get("tab");
+          const currentTab = searchParams.get("tab");
           const isActive = hrefTab
-            ? pathname === hrefPath && searchParams.get("tab") === hrefTab
-            : (pathname === hrefPath && !searchParams.get("tab")) || pathname.startsWith(hrefPath + "/");
+            ? pathname.startsWith(hrefPath) && currentTab === hrefTab
+            : pathname.startsWith(hrefPath) && currentTab !== "groups";
           return (
             <Link
               key={item.href}

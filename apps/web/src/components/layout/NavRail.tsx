@@ -75,8 +75,8 @@ export function NavRail({
           const hrefTab = new URLSearchParams(item.href.split("?")[1] ?? "").get("tab");
           const currentTab = searchParams.get("tab");
           const isActive = hrefTab
-            ? pathname === hrefPath && currentTab === hrefTab
-            : (pathname === hrefPath && !currentTab) || pathname.startsWith(`${hrefPath}/`);
+            ? pathname.startsWith(hrefPath) && currentTab === hrefTab
+            : pathname.startsWith(hrefPath) && currentTab !== "groups";
 
           return (
             <Link
