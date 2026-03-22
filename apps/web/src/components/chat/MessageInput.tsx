@@ -22,13 +22,19 @@ export function MessageInput({ conversationId }: Props) {
       await sendMessage(conversationId, trimmed);
     } finally {
       setSending(false);
+      // Keep focus so keyboard stays open on mobile
+      textareaRef.current?.focus();
     }
   }, [text, sending, conversationId, sendMessage]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+      // On touch devices, let Enter insert a newline naturally
+      const isTouchDevice = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+      if (!isTouchDevice) {
+        e.preventDefault();
+        void handleSend();
+      }
     }
   }
 

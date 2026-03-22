@@ -78,9 +78,9 @@
 
 @layer base {
   * { @apply border-border box-border; }
-  html { @apply h-full; }
+  html { @apply h-full overflow-hidden; }
   body {
-    @apply bg-background text-foreground h-full;
+    @apply bg-background text-foreground h-full overflow-hidden;
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
   }
