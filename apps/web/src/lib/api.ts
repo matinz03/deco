@@ -322,6 +322,22 @@ export const api = {
         method: "DELETE",
       });
     },
+
+    getGroupKey: async (id: string): Promise<{ encryptedKey: string; encryptedBy: string }> => {
+      const raw = await request<Record<string, string>>(`/api/v1/conversations/${id}/group-key`);
+      return { encryptedKey: raw["encrypted_key"] ?? "", encryptedBy: raw["encrypted_by"] ?? "" };
+    },
+
+    putGroupKeys: async (id: string, entries: { userId: string; encryptedKey: string; encryptedBy: string }[]) => {
+      await request(`/api/v1/conversations/${id}/group-keys`, {
+        method: "PUT",
+        body: JSON.stringify(entries.map((e) => ({
+          user_id: e.userId,
+          encrypted_key: e.encryptedKey,
+          encrypted_by: e.encryptedBy,
+        }))),
+      });
+    },
   },
 
   messages: {

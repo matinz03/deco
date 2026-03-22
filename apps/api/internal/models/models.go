@@ -124,3 +124,11 @@ type KeyBackup struct {
 	CreatedAt  time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
+
+type GroupKey struct {
+	ConversationID string    `json:"conversation_id" db:"conversation_id"`
+	UserID         string    `json:"user_id" db:"user_id"`
+	EncryptedBy    string    `json:"encrypted_by" db:"encrypted_by"`
+	EncryptedKey   string    `json:"encrypted_key" db:"encrypted_key"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+}

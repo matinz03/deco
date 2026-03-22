@@ -5,6 +5,36 @@ import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto
 import type { Conversation, Member, Message, WSEvent } from "@deco/types";
 import { useAuthStore } from "./auth";
 
+// In-memory cache of decrypted group keys: conversationId → plaintext group key (base64)
+const groupKeyCache = new Map<string, string>();
+
+async function getOrFetchGroupKey(conversationId: string, conversation: Conversation | undefined): Promise<string | null> {
+  const cached = groupKeyCache.get(conversationId);
+  if (cached) return cached;
+
+  const user = useAuthStore.getState().user;
+  if (!user) return null;
+
+  try {
+    const { encryptedKey, encryptedBy } = await api.conversations.getGroupKey(conversationId);
+    if (!encryptedKey || !encryptedBy) return null;
+
+    const privateKey = await loadPrivateKey(user.id);
+    if (!privateKey) return null;
+
+    // Find encryptor's public key from conversation members
+    const encryptor = conversation?.members?.find((m) => m.userId === encryptedBy)?.user;
+    if (!encryptor?.publicKey) return null;
+
+    const sharedSecret = deriveSharedSecret(encryptor.publicKey, privateKey);
+    const groupKey = decryptMessage(encryptedKey, sharedSecret);
+    groupKeyCache.set(conversationId, groupKey);
+    return groupKey;
+  } catch {
+    return null;
+  }
+}
+
 type PresenceState = {
   status: "online" | "offline" | "busy" | "away";
   lastSeenAt?: string;
@@ -109,15 +139,25 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       try {
         // Encrypt before sending
         const conversation = get().conversations.find((c) => c.id === conversationId);
-        const otherUser = conversation?.members?.find((m) => m.userId !== user.id)?.user;
+        let encryptedContent = text; // fallback (no encryption)
 
-        let encryptedContent = text; // fallback (no encryption without recipient's public key)
-        if (otherUser) {
-          const privateKey = await loadPrivateKey(user.id);
-          if (privateKey) {
-            const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-            const sharedSecret = derive(otherUser.publicKey, privateKey);
-            encryptedContent = encryptMessage(text, sharedSecret);
+        if (conversation?.type === "group") {
+          // Group: encrypt with the shared group key
+          const groupKey = await getOrFetchGroupKey(conversationId, conversation);
+          if (groupKey) {
+            const { encryptMessage } = await import("@deco/crypto");
+            encryptedContent = encryptMessage(text, groupKey);
+          }
+        } else {
+          // DM: encrypt with ECDH shared secret
+          const otherUser = conversation?.members?.find((m) => m.userId !== user.id)?.user;
+          if (otherUser?.publicKey) {
+            const privateKey = await loadPrivateKey(user.id);
+            if (privateKey) {
+              const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+              const sharedSecret = derive(otherUser.publicKey, privateKey);
+              encryptedContent = encryptMessage(text, sharedSecret);
+            }
           }
         }
 
@@ -249,13 +289,21 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }
 
       let encryptedContent = trimmed;
-      const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
-      if (otherUser) {
-        const privateKey = await loadPrivateKey(user.id);
-        if (privateKey) {
-          const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-          const sharedSecret = derive(otherUser.publicKey, privateKey);
-          encryptedContent = encryptMessage(trimmed, sharedSecret);
+      if (conversation?.type === "group") {
+        const groupKey = await getOrFetchGroupKey(conversationId, conversation);
+        if (groupKey) {
+          const { encryptMessage } = await import("@deco/crypto");
+          encryptedContent = encryptMessage(trimmed, groupKey);
+        }
+      } else {
+        const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
+        if (otherUser?.publicKey) {
+          const privateKey = await loadPrivateKey(user.id);
+          if (privateKey) {
+            const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+            const sharedSecret = derive(otherUser.publicKey, privateKey);
+            encryptedContent = encryptMessage(trimmed, sharedSecret);
+          }
         }
       }
 
@@ -336,10 +384,39 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async createConversation(opts) {
-      const [conv] = await hydrateConversationSummaries([await api.conversations.create(opts)]);
-      if (!conv) {
-        throw new Error("Failed to create conversation");
+      const raw = await api.conversations.create(opts);
+      const [conv] = await hydrateConversationSummaries([raw]);
+      if (!conv) throw new Error("Failed to create conversation");
+
+      // For group conversations: generate a group key and distribute it to all members
+      if (opts.type === "group" && conv.members && conv.members.length > 0) {
+        try {
+          const user = useAuthStore.getState().user;
+          const privateKey = user ? await loadPrivateKey(user.id) : null;
+          if (user && privateKey) {
+            const { generateGroupKey, encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+            const groupKey = generateGroupKey();
+            // Cache immediately so this device can use it right away
+            groupKeyCache.set(conv.id, groupKey);
+
+            const entries = conv.members
+              .filter((m) => m.user?.publicKey)
+              .map((m) => {
+                const sharedSecret = derive(m.user!.publicKey, privateKey);
+                return {
+                  userId: m.userId,
+                  encryptedKey: encryptMessage(groupKey, sharedSecret),
+                  encryptedBy: user.id,
+                };
+              });
+
+            await api.conversations.putGroupKeys(conv.id, entries);
+          }
+        } catch {
+          // Non-fatal — messages will show as undecryptable until key is set up
+        }
       }
+
       set((s) => ({
         conversations: s.conversations.some((c) => c.id === conv.id)
           ? s.conversations
@@ -379,7 +456,33 @@ export const useConversationStore = create<ConversationState>((set, get) => {
 
     async addMember(conversationId, userId) {
       await api.conversations.addMember(conversationId, userId);
-      return get().listMembers(conversationId);
+      const members = await get().listMembers(conversationId);
+
+      // Distribute the existing group key to the new member
+      try {
+        const conversation = get().conversations.find((c) => c.id === conversationId);
+        const newMember = members.find((m) => m.userId === userId);
+        if (newMember?.user?.publicKey) {
+          const currentUser = useAuthStore.getState().user;
+          const privateKey = currentUser ? await loadPrivateKey(currentUser.id) : null;
+          if (currentUser && privateKey) {
+            const groupKey = await getOrFetchGroupKey(conversationId, conversation);
+            if (groupKey) {
+              const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+              const sharedSecret = derive(newMember.user.publicKey, privateKey);
+              await api.conversations.putGroupKeys(conversationId, [{
+                userId,
+                encryptedKey: encryptMessage(groupKey, sharedSecret),
+                encryptedBy: currentUser.id,
+              }]);
+            }
+          }
+        }
+      } catch {
+        // Non-fatal
+      }
+
+      return members;
     },
 
     async updateMemberRole(conversationId, userId, role) {
@@ -723,22 +826,23 @@ async function rehydrateConversationMessages(
 
 async function hydrateMessage(message: Message, conversation?: Conversation) {
   const user = useAuthStore.getState().user;
-  if (!user) return message;
-
-  const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
-  if (!otherUser?.publicKey || !message.encryptedContent || message.isDeleted) {
-    return message;
-  }
+  if (!user || !message.encryptedContent || message.isDeleted) return message;
 
   try {
-    const privateKey = await loadPrivateKey(user.id);
-    if (!privateKey) return message;
-
-    const sharedSecret = deriveSharedSecret(otherUser.publicKey, privateKey);
-    return {
-      ...message,
-      decryptedContent: decryptMessage(message.encryptedContent, sharedSecret),
-    };
+    if (conversation?.type === "group") {
+      // Group: decrypt with the shared group key
+      const groupKey = await getOrFetchGroupKey(message.conversationId, conversation);
+      if (!groupKey) return message;
+      return { ...message, decryptedContent: decryptMessage(message.encryptedContent, groupKey) };
+    } else {
+      // DM: decrypt with ECDH shared secret
+      const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
+      if (!otherUser?.publicKey) return message;
+      const privateKey = await loadPrivateKey(user.id);
+      if (!privateKey) return message;
+      const sharedSecret = deriveSharedSecret(otherUser.publicKey, privateKey);
+      return { ...message, decryptedContent: decryptMessage(message.encryptedContent, sharedSecret) };
+    }
   } catch {
     return message;
   }

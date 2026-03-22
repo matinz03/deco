@@ -49,6 +49,8 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 			r.Post("/{conversationID}/members", h.AddMember)
 			r.Patch("/{conversationID}/members/{userID}", h.UpdateMemberRole)
 			r.Delete("/{conversationID}/members/{userID}", h.RemoveMember)
+			r.Get("/{conversationID}/group-key", h.GetGroupKey)
+			r.Put("/{conversationID}/group-keys", h.PutGroupKeys)
 		})
 	})
 }

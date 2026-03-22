@@ -68,6 +68,23 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 			END IF;
 		END $$;
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Group encryption keys: one encrypted copy of the group key per member.
+	// encrypted_key  = group key encrypted with ECDH(encryptor_private, member_public)
+	// encrypted_by   = user_id of the person who encrypted this copy (so recipient knows whose public key to use)
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_keys (
+			conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			encrypted_by    UUID NOT NULL REFERENCES users(id),
+			encrypted_key   TEXT NOT NULL,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (conversation_id, user_id)
+		)
+	`)
 
 	return err
 }
