@@ -1,90 +1,65 @@
 /**
  * @deco/crypto
  *
- * All cryptographic operations for Deco.
- * Uses libsodium (XSalsa20-Poly1305) for symmetric encryption
- * and X25519 for key exchange.
+ * E2E encryption for Deco using tweetnacl (X25519 + XSalsa20-Poly1305).
+ * Pure JavaScript — no WASM, works in all bundlers including Turbopack.
  *
- * IMPORTANT: Keys are NEVER sent to the server.
- * Private keys are stored in the browser's IndexedDB (encrypted with the user's passphrase).
+ * IMPORTANT: Private keys are NEVER sent to the server.
+ * They are stored in the browser's IndexedDB only.
  */
 
-import sodium from "libsodium-wrappers";
-
-let ready = false;
-
-async function ensureReady() {
-  if (!ready) {
-    await sodium.ready;
-    ready = true;
-  }
-}
+import nacl from "tweetnacl";
+import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from "tweetnacl-util";
 
 // ─── Key Generation ───────────────────────────────────────────────────────────
 
-export async function generateKeyPair(): Promise<{
-  publicKey: string;  // Base64 — safe to store on server (used for key exchange)
-  privateKey: string; // Base64 — NEVER leaves the client
-}> {
-  await ensureReady();
-  const keypair = sodium.crypto_box_keypair();
+export function generateKeyPair(): { publicKey: string; privateKey: string } {
+  const keypair = nacl.box.keyPair();
   return {
-    publicKey: sodium.to_base64(keypair.publicKey),
-    privateKey: sodium.to_base64(keypair.privateKey),
+    publicKey: encodeBase64(keypair.publicKey),
+    privateKey: encodeBase64(keypair.secretKey),
   };
 }
 
-// ─── Shared Secret (Key Exchange) ─────────────────────────────────────────────
+// ─── Shared Secret (X25519 Key Exchange) ─────────────────────────────────────
 
-export async function deriveSharedSecret(
+export function deriveSharedSecret(
   theirPublicKeyB64: string,
   myPrivateKeyB64: string
-): Promise<string> {
-  await ensureReady();
-  const theirPublicKey = sodium.from_base64(theirPublicKeyB64);
-  const myPrivateKey = sodium.from_base64(myPrivateKeyB64);
-  const sharedSecret = sodium.crypto_scalarmult(myPrivateKey, theirPublicKey);
-  return sodium.to_base64(sharedSecret);
+): string {
+  const theirPublicKey = decodeBase64(theirPublicKeyB64);
+  const myPrivateKey = decodeBase64(myPrivateKeyB64);
+  const sharedSecret = nacl.scalarMult(myPrivateKey, theirPublicKey);
+  return encodeBase64(sharedSecret);
 }
 
-// ─── Message Encryption ───────────────────────────────────────────────────────
+// ─── Message Encryption (XSalsa20-Poly1305) ───────────────────────────────────
 
-export async function encryptMessage(
-  plaintext: string,
-  sharedSecretB64: string
-): Promise<string> {
-  await ensureReady();
-  const key = sodium.from_base64(sharedSecretB64);
-  // Derive a 32-byte symmetric key from the shared secret
-  const symmetricKey = sodium.crypto_generichash(32, key);
-  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
-  const message = sodium.from_string(plaintext);
-  const ciphertext = sodium.crypto_secretbox_easy(message, nonce, symmetricKey);
+export function encryptMessage(plaintext: string, sharedSecretB64: string): string {
+  const key = decodeBase64(sharedSecretB64);
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+  const message = encodeUTF8(plaintext);
+  const ciphertext = nacl.secretbox(message, nonce, key);
 
-  // Pack nonce + ciphertext together — nonce is safe to transmit
+  // Pack nonce + ciphertext — nonce is safe to transmit
   const combined = new Uint8Array(nonce.length + ciphertext.length);
   combined.set(nonce);
   combined.set(ciphertext, nonce.length);
 
-  return sodium.to_base64(combined);
+  return encodeBase64(combined);
 }
 
-export async function decryptMessage(
-  encryptedB64: string,
-  sharedSecretB64: string
-): Promise<string> {
-  await ensureReady();
-  const key = sodium.from_base64(sharedSecretB64);
-  const symmetricKey = sodium.crypto_generichash(32, key);
-  const combined = sodium.from_base64(encryptedB64);
+export function decryptMessage(encryptedB64: string, sharedSecretB64: string): string {
+  const key = decodeBase64(sharedSecretB64);
+  const combined = decodeBase64(encryptedB64);
 
-  const nonce = combined.slice(0, sodium.crypto_secretbox_NONCEBYTES);
-  const ciphertext = combined.slice(sodium.crypto_secretbox_NONCEBYTES);
+  const nonce = combined.slice(0, nacl.secretbox.nonceLength);
+  const ciphertext = combined.slice(nacl.secretbox.nonceLength);
 
-  const plaintext = sodium.crypto_secretbox_open_easy(ciphertext, nonce, symmetricKey);
-  if (!plaintext) throw new Error("Decryption failed — message may be corrupted");
+  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
+  if (!plaintext) throw new Error("Decryption failed — message may be corrupted or tampered with");
 
-  return sodium.to_string(plaintext);
+  return decodeUTF8(plaintext);
 }
 
 // ─── Key Storage (IndexedDB) ──────────────────────────────────────────────────

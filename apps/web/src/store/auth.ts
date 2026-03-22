@@ -48,7 +48,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   async register({ username, displayName, email, phone, password }) {
     // Generate E2E keypair — private key stored locally ONLY
-    const { publicKey, privateKey } = await generateKeyPair();
+    const { publicKey, privateKey } = generateKeyPair();
 
     const { token, user } = await api.auth.register({
       username,
