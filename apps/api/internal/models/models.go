@@ -70,10 +70,10 @@ type Message struct {
 	Type           MessageType   `json:"type" db:"type"`
 	// Content is the E2E-encrypted ciphertext — server never sees plaintext
 	EncryptedContent string      `json:"encrypted_content" db:"encrypted_content"`
-	// For media messages: reference to R2 object
-	MediaURL       string        `json:"media_url,omitempty" db:"media_url"`
-	MediaMimeType  string        `json:"media_mime_type,omitempty" db:"media_mime_type"`
-	MediaSize      int64         `json:"media_size,omitempty" db:"media_size"`
+	// For media messages: reference to R2 object (nullable)
+	MediaURL       *string       `json:"media_url,omitempty" db:"media_url"`
+	MediaMimeType  *string       `json:"media_mime_type,omitempty" db:"media_mime_type"`
+	MediaSize      *int64        `json:"media_size,omitempty" db:"media_size"`
 	ReplyToID      *string       `json:"reply_to_id,omitempty" db:"reply_to_id"`
 	Reactions      []Reaction    `json:"reactions,omitempty"`
 	Status         MessageStatus `json:"status" db:"status"`

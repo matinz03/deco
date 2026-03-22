@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/matinz03/deco/internal/config"
@@ -22,13 +23,15 @@ type AuthHandler struct {
 type RegisterRequest struct {
 	Username    string `json:"username"`
 	Email       string `json:"email"`
+	Phone       string `json:"phone_number"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
-	PublicKey   string `json:"public_key"` // Client-generated E2E public key
+	PublicKey   string `json:"public_key"`
 }
 
 type LoginRequest struct {
 	Email    string `json:"email"`
+	Phone    string `json:"phone_number"`
 	Password string `json:"password"`
 }
 
@@ -44,7 +47,16 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hash password
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" || req.Password == "" || req.DisplayName == "" || req.PublicKey == "" {
+		respondError(w, http.StatusBadRequest, "username, password, display_name and public_key are required")
+		return
+	}
+	if len(req.Password) < 8 {
+		respondError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		h.logger.Error("bcrypt error", zap.Error(err))
@@ -54,12 +66,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	err = h.pool.QueryRow(r.Context(), `
-		INSERT INTO users (username, email, display_name, password_hash, public_key)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, username, email, display_name, public_key, avatar_url, bio, created_at
-	`, req.Username, req.Email, req.DisplayName, string(hash), req.PublicKey).
+		INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key)
+		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6)
+		RETURNING id, username, COALESCE(email,''), display_name, public_key,
+		          avatar_url, bio, last_seen_at, created_at
+	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey).
 		Scan(&user.ID, &user.Username, &user.Email, &user.DisplayName,
-			&user.PublicKey, &user.AvatarURL, &user.Bio, &user.CreatedAt)
+			&user.PublicKey, &user.AvatarURL, &user.Bio, &user.LastSeenAt, &user.CreatedAt)
 
 	if err != nil {
 		h.logger.Error("failed to create user", zap.Error(err))
@@ -82,15 +95,34 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.Password == "" {
+		respondError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	var query string
+	var identifier string
+	if req.Email != "" {
+		query = `SELECT id, username, COALESCE(email,''), display_name, public_key,
+			avatar_url, bio, last_seen_at, password_hash, created_at
+			FROM users WHERE email = $1`
+		identifier = req.Email
+	} else if req.Phone != "" {
+		query = `SELECT id, username, COALESCE(email,''), display_name, public_key,
+			avatar_url, bio, last_seen_at, password_hash, created_at
+			FROM users WHERE phone_number = $1`
+		identifier = req.Phone
+	} else {
+		respondError(w, http.StatusBadRequest, "email or phone_number is required")
+		return
+	}
 
 	var user models.User
 	var passwordHash string
-	err := h.pool.QueryRow(r.Context(), `
-		SELECT id, username, email, display_name, public_key, avatar_url, bio, password_hash, created_at
-		FROM users WHERE email = $1
-	`, req.Email).Scan(&user.ID, &user.Username, &user.Email, &user.DisplayName,
-		&user.PublicKey, &user.AvatarURL, &user.Bio, &passwordHash, &user.CreatedAt)
-
+	err := h.pool.QueryRow(r.Context(), query, identifier).
+		Scan(&user.ID, &user.Username, &user.Email, &user.DisplayName,
+			&user.PublicKey, &user.AvatarURL, &user.Bio, &user.LastSeenAt,
+			&passwordHash, &user.CreatedAt)
 	if err != nil {
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -100,6 +132,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+
+	h.pool.Exec(r.Context(), `UPDATE users SET last_seen_at = NOW() WHERE id = $1`, user.ID)
 
 	token, err := h.generateToken(user.ID)
 	if err != nil {
@@ -111,13 +145,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	// JWT is stateless; client drops the token.
-	// Optionally: add token to a Redis blocklist here for hard revocation.
 	respondJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	// TODO: implement token refresh with sliding expiry
 	respondError(w, http.StatusNotImplemented, "not yet implemented")
 }
 
@@ -142,42 +173,3 @@ func respondJSON(w http.ResponseWriter, status int, v any) {
 func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{"error": message})
 }
-
-// Stub handlers — to be fleshed out in subsequent phases
-type UserHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
-}
-
-func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request)         {}
-func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request)      {}
-func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request)        {}
-func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request)       {}
-
-type ConversationHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
-}
-
-func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request)          {}
-func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request)        {}
-func (h *ConversationHandler) Get(w http.ResponseWriter, r *http.Request)           {}
-func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request)        {}
-func (h *ConversationHandler) ListMembers(w http.ResponseWriter, r *http.Request)   {}
-func (h *ConversationHandler) AddMember(w http.ResponseWriter, r *http.Request)     {}
-func (h *ConversationHandler) RemoveMember(w http.ResponseWriter, r *http.Request)  {}
-
-type MessageHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
-}
-
-func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request)           {}
-func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request)           {}
-func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request)           {}
-func (h *MessageHandler) Delete(w http.ResponseWriter, r *http.Request)         {}
-func (h *MessageHandler) AddReaction(w http.ResponseWriter, r *http.Request)    {}
-func (h *MessageHandler) RemoveReaction(w http.ResponseWriter, r *http.Request) {}

@@ -50,8 +50,8 @@ type Hub struct {
 }
 
 type broadcastMsg struct {
-	userID  string
-	payload []byte
+	UserID  string `json:"user_id"`
+	Payload []byte `json:"payload"`
 }
 
 func NewHub(rdb *redis.Client, logger *zap.Logger) *Hub {
@@ -105,11 +105,11 @@ func (h *Hub) Run() {
 
 		case msg := <-h.broadcast:
 			h.mu.RLock()
-			clients := h.clients[msg.userID]
+			clients := h.clients[msg.UserID]
 			h.mu.RUnlock()
 			for client := range clients {
 				select {
-				case client.Send <- msg.payload:
+				case client.Send <- msg.Payload:
 				default:
 					// Client send buffer full — drop and disconnect
 					h.unregister <- client
@@ -129,7 +129,7 @@ func (h *Hub) SendToUser(userID string, event Event) error {
 		return err
 	}
 
-	bm := broadcastMsg{userID: userID, payload: payload}
+	bm := broadcastMsg{UserID: userID, Payload: payload}
 	bmBytes, err := json.Marshal(bm)
 	if err != nil {
 		return err

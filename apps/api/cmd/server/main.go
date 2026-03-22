@@ -82,10 +82,10 @@ func main() {
 		handlers.RegisterAuthRoutes(r, pool, cfg, logger)
 		handlers.RegisterUserRoutes(r, pool, cfg, logger)
 		handlers.RegisterConversationRoutes(r, pool, cfg, logger)
-		handlers.RegisterMessageRoutes(r, pool, cfg, logger)
+		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub)
 	})
 
-	// WebSocket endpoint
+	// WebSocket endpoint — auth handled inside the handler via ?token= query param
 	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger))
 
 	// Server

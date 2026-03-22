@@ -1,4 +1,4 @@
-module github.com/bahregram/api
+module github.com/matinz03/deco
 
 go 1.23
 
