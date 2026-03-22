@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
@@ -24,10 +24,40 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const toggleReaction = useConversationStore((s) => s.toggleReaction);
   const [showReactions, setShowReactions] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const tapCount = useRef(0);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  useEffect(() => () => { if (tapTimer.current) clearTimeout(tapTimer.current); }, []);
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  function handleBubbleClick(e: React.MouseEvent) {
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    tapCount.current += 1;
+
+    if (tapTimer.current) {
+      clearTimeout(tapTimer.current);
+      tapTimer.current = null;
+    }
+
+    // Double tap — open context menu immediately
+    if (tapCount.current >= 2) {
+      tapCount.current = 0;
+      setContextMenu(lastPos.current);
+      return;
+    }
+
+    // Single tap — wait 1.5s, then open emoji bar if no second tap
+    tapTimer.current = setTimeout(() => {
+      if (tapCount.current === 1 && !msg.isDeleted) {
+        setShowReactions((v) => !v);
+      }
+      tapCount.current = 0;
+    }, 1500);
   }
 
   return (
@@ -65,12 +95,13 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
           {/* Bubble + reaction trigger */}
           <div className="relative">
             <motion.div
-              className={`relative px-3.5 py-2 rounded-2xl text-sm leading-relaxed
+              className={`relative px-3.5 py-2 rounded-2xl text-sm leading-relaxed cursor-pointer select-none
                 ${isSent ? "bubble-sent rounded-br-sm" : "bubble-received rounded-bl-sm shadow-sm"}
               `}
               initial={{ scale: 0.92, opacity: 0, x: isSent ? 8 : -8 }}
               animate={{ scale: 1, opacity: 1, x: 0 }}
               transition={{ type: "spring", stiffness: 420, damping: 28 }}
+              onClick={handleBubbleClick}
             >
               {/* Media */}
               {msg.type === "image" && msg.mediaUrl && (
@@ -96,10 +127,10 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
               </span>
             </motion.div>
 
-            {/* Reaction picker trigger — shows on group hover */}
+            {/* Reaction picker trigger — shows on hover (desktop) */}
             {!msg.isDeleted && (
               <button
-                onClick={() => setShowReactions((v) => !v)}
+                onClick={(e) => { e.stopPropagation(); setShowReactions((v) => !v); }}
                 className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity
                   w-6 h-6 rounded-full bg-surface border border-border shadow-sm flex items-center justify-center text-xs
                   ${isSent ? "-left-8" : "-right-8"}`}
