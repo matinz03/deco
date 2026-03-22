@@ -262,7 +262,14 @@
   }
 
   .chat-actions {
-    @apply flex items-center gap-0.5;
+    @apply flex items-center gap-1;
+  }
+
+  .chat-action-btn {
+    @apply flex items-center justify-center w-8 h-8 rounded-xl
+           text-foreground/60
+           hover:bg-accent hover:text-foreground
+           active:scale-95 transition-all;
   }
 
   /* ─── Message Input ───────────────────────────────────────────────────── */
