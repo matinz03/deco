@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
@@ -15,6 +15,10 @@ import type { Conversation } from "@deco/types";
 
 export function ConversationList() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab") ?? "messages";
+  const isGroupsTab = tab === "groups";
+
   const { conversations, fetchConversations, presence } = useConversationStore();
   const currentUserId = useAuthStore((s) => s.user?.id);
   const [search, setSearch] = useState("");
@@ -25,18 +29,20 @@ export function ConversationList() {
     void fetchConversations().finally(() => setLoading(false));
   }, [fetchConversations]);
 
-  const filtered = conversations.filter((conversation) =>
-    (conversation.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = conversations
+    .filter((c) => (isGroupsTab ? c.type !== "direct" : c.type === "direct"))
+    .filter((c) =>
+      (c.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
     <div className="flex flex-col h-full">
       <div className="sidebar-header">
-        <h2 className="sidebar-title">Messages</h2>
+        <h2 className="sidebar-title">{isGroupsTab ? "Groups" : "Messages"}</h2>
         <button
           className="icon-btn"
-          title="New conversation"
-          aria-label="New conversation"
+          title={isGroupsTab ? "New group" : "New conversation"}
+          aria-label={isGroupsTab ? "New group" : "New conversation"}
           onClick={() => setModalOpen(true)}
         >
           <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -54,7 +60,7 @@ export function ConversationList() {
           </svg>
           <input
             type="search"
-            placeholder="Search conversations..."
+            placeholder={isGroupsTab ? "Search groups..." : "Search conversations..."}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="sidebar-search-input"
@@ -67,8 +73,22 @@ export function ConversationList() {
           <ConversationSkeleton />
         ) : filtered.length === 0 ? (
           <div className="sidebar-empty">
-            <p className="text-sm text-muted">No conversations yet.</p>
-            <p className="text-xs text-muted">Start a new one with the + button.</p>
+            {isGroupsTab ? (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mb-1">
+                  <svg className="w-6 h-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-medium">No groups yet</p>
+                <p className="text-xs text-muted mt-0.5">Create one with the + button.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted">No conversations yet.</p>
+                <p className="text-xs text-muted">Start a new one with the + button.</p>
+              </>
+            )}
           </div>
         ) : (
           <ul>

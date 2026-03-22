@@ -10,32 +10,32 @@
     --background:         40 25% 93%;
     --surface:            0 0% 100%;
     --surface-raised:     40 20% 97%;
-    --foreground:         30 8% 10%;
-    --muted:              40 15% 88%;
-    --muted-foreground:   30 5% 48%;
-    --border:             40 15% 84%;
+    --foreground:         30 10% 8%;
+    --muted:              40 14% 86%;
+    --muted-foreground:   30 8% 32%;
+    --border:             40 18% 76%;
     --input:              0 0% 100%;
     --ring:               30 8% 10%;
 
     --primary:            30 8% 12%;
     --primary-foreground: 40 25% 93%;
-    --secondary:          40 15% 88%;
+    --secondary:          40 14% 85%;
     --secondary-foreground: 30 8% 12%;
-    --accent:             40 15% 86%;
+    --accent:             40 18% 82%;
     --accent-foreground:  30 8% 12%;
 
     --radius: 0.875rem;
 
     --bubble-sent:        30 8% 12%;
     --bubble-sent-fg:     40 25% 93%;
-    --bubble-received:    0 0% 100%;
-    --bubble-received-fg: 30 8% 10%;
+    --bubble-received:    40 30% 97%;
+    --bubble-received-fg: 30 10% 8%;
 
-    --sidebar:            40 22% 89%;
-    --sidebar-border:     40 15% 82%;
-    --nav:                40 18% 85%;
+    --sidebar:            40 20% 88%;
+    --sidebar-border:     40 18% 74%;
+    --nav:                40 17% 84%;
 
-    --online:             142 71% 45%;
+    --online:             142 71% 38%;
     --destructive:        0 72% 51%;
     --destructive-fg:     0 0% 100%;
     --warning:            38 92% 50%;
@@ -48,25 +48,25 @@
     --surface-raised:     30 5% 13%;
     --foreground:         40 25% 93%;
     --muted:              30 5% 16%;
-    --muted-foreground:   40 10% 55%;
-    --border:             30 5% 18%;
+    --muted-foreground:   40 12% 62%;
+    --border:             30 5% 24%;
     --input:              30 5% 13%;
     --ring:               40 25% 93%;
 
     --primary:            40 25% 93%;
     --primary-foreground: 30 8% 10%;
-    --secondary:          30 5% 16%;
+    --secondary:          30 5% 18%;
     --secondary-foreground: 40 25% 93%;
-    --accent:             30 5% 18%;
+    --accent:             30 6% 22%;
     --accent-foreground:  40 25% 93%;
 
     --bubble-sent:        40 25% 93%;
     --bubble-sent-fg:     30 8% 10%;
-    --bubble-received:    30 5% 16%;
+    --bubble-received:    30 6% 20%;
     --bubble-received-fg: 40 25% 93%;
 
     --sidebar:            30 6% 9%;
-    --sidebar-border:     30 5% 14%;
+    --sidebar-border:     30 5% 18%;
     --nav:                30 6% 8%;
 
     --online:             142 71% 45%;
