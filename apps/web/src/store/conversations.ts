@@ -15,10 +15,12 @@ interface ConversationState {
   messages: Record<string, Message[]>;
   activeConversationId: string | null;
   presence: Record<string, PresenceState>;
+  typing: Record<string, string[]>;
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendTyping: (conversationId: string, isTyping: boolean) => void;
   toggleReaction: (conversationId: string, messageId: string, emoji: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, text: string) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
@@ -45,6 +47,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     messages: {},
     activeConversationId: null,
     presence: {},
+    typing: {},
 
     setActiveConversation(id) {
       set({ activeConversationId: id });
@@ -145,6 +148,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           },
         }));
       }
+    },
+
+    sendTyping(conversationId, isTyping) {
+      wsClient.send({
+        type: "typing",
+        payload: {
+          conversation_id: conversationId,
+          is_typing: isTyping,
+        },
+      });
     },
 
     async toggleReaction(conversationId, messageId, emoji) {
@@ -429,6 +442,10 @@ export const useConversationStore = create<ConversationState>((set, get) => {
               ...s.messages,
               [msg.conversationId]: upsertMessage(s.messages[msg.conversationId] ?? [], msg),
             },
+            typing: {
+              ...s.typing,
+              [msg.conversationId]: (s.typing[msg.conversationId] ?? []).filter((id) => id !== msg.senderId),
+            },
             conversations: s.conversations
               .map((c) =>
                 c.id === msg.conversationId
@@ -561,6 +578,32 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             },
           },
         }));
+      }
+
+      if (event.type === "typing") {
+        const { conversationId, userId, isTyping } = event.payload as {
+          conversationId: string;
+          userId: string;
+          isTyping: boolean;
+        };
+        const currentUserId = useAuthStore.getState().user?.id;
+        if (!conversationId || !userId || userId === currentUserId) {
+          return;
+        }
+
+        set((s) => {
+          const existing = s.typing[conversationId] ?? [];
+          const nextUsers = isTyping
+            ? Array.from(new Set([...existing, userId]))
+            : existing.filter((id) => id !== userId);
+
+          return {
+            typing: {
+              ...s.typing,
+              [conversationId]: nextUsers,
+            },
+          };
+        });
       }
     },
   };

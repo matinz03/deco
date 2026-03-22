@@ -106,16 +106,22 @@ func (c *Client) readPump(conn *websocket.Conn, hub *Hub, pool *pgxpool.Pool, lo
 		switch event.Type {
 		case EventTyping:
 			// Broadcast typing indicator to conversation members
-			// Payload: { "conversation_id": "..." }
+			// Payload: { "conversation_id": "...", "is_typing": true|false }
 			var p struct {
 				ConversationID string `json:"conversation_id"`
+				IsTyping       *bool  `json:"is_typing"`
 			}
 			if json.Unmarshal(event.Payload, &p) == nil && p.ConversationID != "" {
+				isTyping := true
+				if p.IsTyping != nil {
+					isTyping = *p.IsTyping
+				}
 				outEvent := Event{
 					Type:    EventTyping,
-					Payload: mustMarshalPayload(map[string]string{
+					Payload: mustMarshalPayload(map[string]any{
 						"user_id":         c.UserID,
 						"conversation_id": p.ConversationID,
+						"is_typing":       isTyping,
 					}),
 				}
 				rows, err := pool.Query(context.Background(), `SELECT user_id FROM members WHERE conversation_id = $1`, p.ConversationID)
