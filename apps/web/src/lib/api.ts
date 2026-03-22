@@ -191,6 +191,7 @@ export function mapWSEvent(event: any): WSEvent {
         payload: {
           userId: event.payload?.user_id ?? event.payload?.userId ?? "",
           status: event.payload?.status ?? "offline",
+          lastSeenAt: event.payload?.last_seen_at ?? event.payload?.lastSeenAt ?? "",
         },
       };
     default:

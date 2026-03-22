@@ -77,14 +77,14 @@ export function ConversationList() {
                 <ConversationItem
                   key={conversation.id}
                   conversation={conversation}
-                  isActive={pathname === `/inbox/${conversation.id}`}
-                  isOnline={Boolean(
-                    conversation.type === "direct" &&
-                    conversation.members?.some(
-                      (member) => member.userId !== currentUserId && presence[member.userId] === "online"
-                    )
-                  )}
-                />
+                isActive={pathname === `/inbox/${conversation.id}`}
+                isOnline={Boolean(
+                  conversation.type === "direct" &&
+                  conversation.members?.some(
+                    (member) => member.userId !== currentUserId && presence[member.userId]?.status === "online"
+                  )
+                )}
+              />
               ))}
             </AnimatePresence>
           </ul>
