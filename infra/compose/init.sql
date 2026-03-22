@@ -88,6 +88,20 @@ CREATE TABLE reactions (
   PRIMARY KEY (message_id, user_id, emoji)
 );
 
+-- Encrypted private-key backups for cross-device restore
+CREATE TABLE user_key_backups (
+  user_id      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  version      INTEGER NOT NULL,
+  kdf          TEXT NOT NULL,
+  iterations   INTEGER NOT NULL,
+  salt         TEXT NOT NULL,
+  cipher       TEXT NOT NULL,
+  iv           TEXT NOT NULL,
+  ciphertext   TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ─── Auto-update updated_at ───────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
@@ -103,4 +117,8 @@ CREATE TRIGGER trg_users_updated_at
 
 CREATE TRIGGER trg_conversations_updated_at
   BEFORE UPDATE ON conversations
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER trg_user_key_backups_updated_at
+  BEFORE UPDATE ON user_key_backups
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();

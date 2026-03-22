@@ -132,3 +132,23 @@ export interface ApiError {
   error: string;
   code?: string;
 }
+
+export interface KeyBackupPayload {
+  version: number;
+  kdf: "pbkdf2-sha256";
+  iterations: number;
+  salt: string;
+  cipher: "aes-gcm";
+  iv: string;
+  ciphertext: string;
+}
+
+export interface KeyBackupRecord extends KeyBackupPayload {
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KeyBackupResponse {
+  exists: boolean;
+  backup?: KeyBackupRecord;
+}

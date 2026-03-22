@@ -8,6 +8,7 @@ import (
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -121,4 +122,108 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, user)
+}
+
+func (h *UserHandler) GetKeyBackup(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r)
+
+	var backup models.KeyBackup
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT user_id, version, kdf, iterations, salt, cipher, iv, ciphertext, created_at, updated_at
+		FROM user_key_backups
+		WHERE user_id = $1
+	`, userID).Scan(
+		&backup.UserID,
+		&backup.Version,
+		&backup.KDF,
+		&backup.Iterations,
+		&backup.Salt,
+		&backup.Cipher,
+		&backup.IV,
+		&backup.Ciphertext,
+		&backup.CreatedAt,
+		&backup.UpdatedAt,
+	)
+	if err != nil {
+		if err != pgx.ErrNoRows {
+			respondError(w, http.StatusInternalServerError, "failed to load key backup")
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"exists": false})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"exists": true,
+		"backup": backup,
+	})
+}
+
+func (h *UserHandler) PutKeyBackup(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r)
+
+	var req struct {
+		Version    int    `json:"version"`
+		KDF        string `json:"kdf"`
+		Iterations int    `json:"iterations"`
+		Salt       string `json:"salt"`
+		Cipher     string `json:"cipher"`
+		IV         string `json:"iv"`
+		Ciphertext string `json:"ciphertext"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Version <= 0 || req.KDF == "" || req.Iterations <= 0 || req.Salt == "" || req.Cipher == "" || req.IV == "" || req.Ciphertext == "" {
+		respondError(w, http.StatusBadRequest, "missing required backup fields")
+		return
+	}
+
+	var backup models.KeyBackup
+	err := h.pool.QueryRow(r.Context(), `
+		INSERT INTO user_key_backups (user_id, version, kdf, iterations, salt, cipher, iv, ciphertext)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (user_id) DO UPDATE
+		SET version = EXCLUDED.version,
+		    kdf = EXCLUDED.kdf,
+		    iterations = EXCLUDED.iterations,
+		    salt = EXCLUDED.salt,
+		    cipher = EXCLUDED.cipher,
+		    iv = EXCLUDED.iv,
+		    ciphertext = EXCLUDED.ciphertext,
+		    updated_at = NOW()
+		RETURNING user_id, version, kdf, iterations, salt, cipher, iv, ciphertext, created_at, updated_at
+	`, userID, req.Version, req.KDF, req.Iterations, req.Salt, req.Cipher, req.IV, req.Ciphertext).Scan(
+		&backup.UserID,
+		&backup.Version,
+		&backup.KDF,
+		&backup.Iterations,
+		&backup.Salt,
+		&backup.Cipher,
+		&backup.IV,
+		&backup.Ciphertext,
+		&backup.CreatedAt,
+		&backup.UpdatedAt,
+	)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to store key backup")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"exists": true,
+		"backup": backup,
+	})
+}
+
+func (h *UserHandler) DeleteKeyBackup(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r)
+
+	if _, err := h.pool.Exec(r.Context(), `DELETE FROM user_key_backups WHERE user_id = $1`, userID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to delete key backup")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"exists": false})
 }

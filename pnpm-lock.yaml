@@ -86,6 +86,9 @@ importers:
 
   packages/crypto:
     dependencies:
+      '@deco/types':
+        specifier: workspace:*
+        version: link:../types
       tweetnacl:
         specifier: ^1.0.3
         version: 1.0.3

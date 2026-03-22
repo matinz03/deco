@@ -10,6 +10,7 @@
 
 import nacl from "tweetnacl";
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from "tweetnacl-util";
+import type { KeyBackupPayload } from "@deco/types";
 
 // ─── Key Generation ───────────────────────────────────────────────────────────
 
@@ -67,6 +68,10 @@ export function decryptMessage(encryptedB64: string, sharedSecretB64: string): s
 const DB_NAME = "deco_keys";
 const STORE_NAME = "keys";
 
+function toByteArray(input: Uint8Array | number[]): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(input) as Uint8Array<ArrayBuffer>;
+}
+
 function openKeyDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -97,4 +102,125 @@ export async function loadPrivateKey(userID: string): Promise<string | null> {
     req.onsuccess = () => resolve(req.result ?? null);
     req.onerror = () => reject(req.error);
   });
+}
+
+export async function deletePrivateKey(userID: string): Promise<void> {
+  const db = await openKeyDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).delete(`private:${userID}`);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function encryptPrivateKeyForBackup(
+  privateKeyB64: string,
+  passphrase: string
+): Promise<KeyBackupPayload> {
+  if (!passphrase.trim()) {
+    throw new Error("Passphrase is required");
+  }
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new Error("Web Crypto is unavailable on this device");
+  }
+
+  const iterations = 250000;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  const encryptionKey = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt,
+      iterations,
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt"]
+  );
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    encryptionKey,
+    new TextEncoder().encode(privateKeyB64)
+  );
+
+  return {
+    version: 1,
+    kdf: "pbkdf2-sha256",
+    iterations,
+    salt: encodeBase64(salt),
+    cipher: "aes-gcm",
+    iv: encodeBase64(iv),
+    ciphertext: encodeBase64(new Uint8Array(ciphertext)),
+  };
+}
+
+export async function decryptPrivateKeyBackup(
+  payload: KeyBackupPayload,
+  passphrase: string
+): Promise<string> {
+  validateKeyBackupPayload(payload);
+  if (!passphrase.trim()) {
+    throw new Error("Passphrase is required");
+  }
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new Error("Web Crypto is unavailable on this device");
+  }
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  const decryptionKey = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: toByteArray(decodeBase64(payload.salt)),
+      iterations: payload.iterations,
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"]
+  );
+
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: toByteArray(decodeBase64(payload.iv)) },
+      decryptionKey,
+      toByteArray(decodeBase64(payload.ciphertext))
+    );
+
+    return new TextDecoder().decode(plaintext);
+  } catch {
+    throw new Error("Incorrect passphrase");
+  }
+}
+
+export function validateKeyBackupPayload(payload: KeyBackupPayload) {
+  if (payload.version !== 1) {
+    throw new Error("Unsupported key backup version");
+  }
+  if (payload.kdf !== "pbkdf2-sha256" || payload.cipher !== "aes-gcm") {
+    throw new Error("Unsupported key backup format");
+  }
+  if (!payload.salt || !payload.iv || !payload.ciphertext || payload.iterations <= 0) {
+    throw new Error("Invalid key backup payload");
+  }
 }

@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { ThemeProvider } from "@/components/ui/ThemeProvider";
+import { KeyBackupGate } from "@/components/auth/KeyBackupGate";
 import { useAuthStore } from "@/store/auth";
 
 function HydrationGate({ children }: { children: React.ReactNode }) {
@@ -30,7 +31,12 @@ function HydrationGate({ children }: { children: React.ReactNode }) {
 
   if (!isHydrated) return null; // Prevent flash of unauthenticated content
 
-  return <>{children}</>;
+  return (
+    <>
+      <KeyBackupGate />
+      {children}
+    </>
+  );
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

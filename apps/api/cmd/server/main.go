@@ -41,6 +41,9 @@ func main() {
 		logger.Fatal("failed to connect to database", zap.Error(err))
 	}
 	defer pool.Close()
+	if err := db.EnsureSchema(pool); err != nil {
+		logger.Fatal("failed to ensure database schema", zap.Error(err))
+	}
 
 	// Redis
 	rdb, err := db.ConnectRedis(cfg.RedisURL)
