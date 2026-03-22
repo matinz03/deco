@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useConversationStore } from "@/store/conversations";
@@ -66,18 +67,30 @@ export function NewConversationModal({ open, onClose }: Props) {
     }
   };
 
-  if (!open) return null;
-
   return (
+    <AnimatePresence>
+      {open && (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+      <motion.div
+        key="backdrop"
+        className="fixed inset-0 z-40 bg-black/50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
         onClick={onClose}
       />
 
       {/* Modal */}
-      <div className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-surface rounded-2xl shadow-2xl border border-sidebar overflow-hidden">
+      <motion.div
+        key="modal"
+        className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-surface rounded-2xl shadow-2xl border border-sidebar overflow-hidden"
+        initial={{ opacity: 0, scale: 0.95, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 16 }}
+        transition={{ type: "spring", stiffness: 420, damping: 30 }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-sidebar">
           <h2 className="font-semibold text-sm">New conversation</h2>
@@ -145,7 +158,9 @@ export function NewConversationModal({ open, onClose }: Props) {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     </>
+      )}
+    </AnimatePresence>
   );
 }

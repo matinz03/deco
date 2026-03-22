@@ -32,14 +32,6 @@ export function ChatPanel({ conversationId }: Props) {
     void api.messages.markRead(conversationId).catch(() => {});
   }, [conversationId, convMessages.length, markConversationRead]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      void fetchMessages(conversationId);
-    }, 3000);
-
-    return () => window.clearInterval(interval);
-  }, [conversationId, fetchMessages]);
-
   // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
