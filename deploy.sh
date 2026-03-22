@@ -2,7 +2,7 @@
 set -e
 
 cd ~/deco
-git pull origin main
+git pull origin master
 docker compose -f infra/compose/docker-compose.yml build
 docker compose -f infra/compose/docker-compose.yml up -d
 
