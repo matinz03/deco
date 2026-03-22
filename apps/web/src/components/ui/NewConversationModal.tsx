@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -17,6 +18,8 @@ interface Props {
 type Mode = "direct" | "group";
 
 export function NewConversationModal({ open, onClose, initialMode = "direct" }: Props) {
+  const [portalMounted, setPortalMounted] = useState(false);
+  useEffect(() => setPortalMounted(true), []);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<Mode>("direct");
@@ -115,27 +118,32 @@ export function NewConversationModal({ open, onClose, initialMode = "direct" }: 
   }
 
   return (
+    <>
+    {portalMounted && createPortal(
     <AnimatePresence>
       {open && (
-        <>
           <motion.div
-            key="backdrop"
-            className="fixed inset-0 z-40 bg-black/50"
+            key="overlay"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             onClick={onClose}
-          />
-
+          >
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <motion.div
             key="modal"
-            className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-sidebar bg-surface shadow-2xl"
-            initial={{ opacity: 0, scale: 0.95, y: 16 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 16 }}
+            className="relative z-10 w-full sm:max-w-sm overflow-hidden rounded-t-3xl sm:rounded-2xl border border-sidebar bg-surface shadow-2xl"
+            initial={{ opacity: 0, y: 40, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.98 }}
             transition={{ type: "spring", stiffness: 420, damping: 30 }}
+            onClick={(e) => e.stopPropagation()}
           >
+            <div className="sm:hidden flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
             <div className="flex items-center justify-between border-b border-sidebar px-4 py-3">
               <h2 className="text-sm font-semibold">
                 {mode === "direct" ? "New conversation" : "New group"}
@@ -270,8 +278,11 @@ export function NewConversationModal({ open, onClose, initialMode = "direct" }: 
               </div>
             )}
           </motion.div>
-        </>
+          </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
+    )}
+    </>
   );
 }

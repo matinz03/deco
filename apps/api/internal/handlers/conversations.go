@@ -317,8 +317,9 @@ func (h *ConversationHandler) ListMembers(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT u.id, u.username, u.display_name, u.public_key, u.avatar_url,
-		       u.bio, u.last_seen_at, u.created_at, mb.role, mb.joined_at
+		SELECT
+			mb.conversation_id, mb.user_id, mb.role, mb.joined_at, mb.last_read_at,
+			u.id, u.username, u.display_name, u.avatar_url, u.public_key, u.bio, u.last_seen_at, u.created_at
 		FROM members mb
 		JOIN users u ON u.id = mb.user_id
 		WHERE mb.conversation_id = $1
@@ -330,19 +331,18 @@ func (h *ConversationHandler) ListMembers(w http.ResponseWriter, r *http.Request
 	}
 	defer rows.Close()
 
-	type MemberWithUser struct {
-		models.User
-		Role     string `json:"role"`
-		JoinedAt string `json:"joined_at"`
-	}
-
-	members := []MemberWithUser{}
+	members := []models.Member{}
 	for rows.Next() {
-		var m MemberWithUser
-		rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.PublicKey,
-			&m.AvatarURL, &m.Bio, &m.LastSeenAt, &m.CreatedAt,
-			&m.Role, &m.JoinedAt)
-		members = append(members, m)
+		var member models.Member
+		var user models.User
+		if err := rows.Scan(
+			&member.ConversationID, &member.UserID, &member.Role, &member.JoinedAt, &member.LastReadAt,
+			&user.ID, &user.Username, &user.DisplayName, &user.AvatarURL, &user.PublicKey, &user.Bio, &user.LastSeenAt, &user.CreatedAt,
+		); err != nil {
+			continue
+		}
+		member.User = &user
+		members = append(members, member)
 	}
 
 	respondJSON(w, http.StatusOK, members)
