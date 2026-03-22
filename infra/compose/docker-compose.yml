@@ -60,8 +60,8 @@ services:
       R2_BUCKET_NAME: ${R2_BUCKET_NAME}
       R2_PUBLIC_URL: ${R2_PUBLIC_URL}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-    expose:
-      - "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
 
   # ─── Next.js Web ────────────────────────────────────────────────────────────
   web:
@@ -74,8 +74,8 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${APP_URL}/api
       NEXT_PUBLIC_WS_URL: ${APP_URL_WS}/ws
-    expose:
-      - "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
 
 volumes:
   postgres_data:
