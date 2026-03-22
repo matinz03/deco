@@ -19,26 +19,26 @@ function getInitials(name: string) {
     .join("");
 }
 
-// Deterministic color from name
-function getColor(name: string) {
-  const colors = [
-    "bg-violet-500",
-    "bg-blue-500",
-    "bg-emerald-500",
-    "bg-orange-500",
-    "bg-pink-500",
-    "bg-teal-500",
-    "bg-indigo-500",
-    "bg-amber-500",
+// Deterministic gradient from name
+function getGradient(name: string) {
+  const gradients = [
+    "from-violet-500 to-purple-600",
+    "from-blue-500 to-cyan-500",
+    "from-emerald-500 to-teal-500",
+    "from-orange-500 to-amber-400",
+    "from-pink-500 to-rose-500",
+    "from-indigo-500 to-blue-600",
+    "from-amber-500 to-orange-500",
+    "from-teal-500 to-emerald-400",
   ];
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return colors[Math.abs(hash) % colors.length];
+  return gradients[Math.abs(hash) % gradients.length];
 }
 
 export function Avatar({ src, name, size = "md" }: AvatarProps) {
   const sizeClass = SIZES[size];
-  const colorClass = getColor(name);
+  const gradientClass = getGradient(name);
 
   if (src) {
     return (
@@ -52,7 +52,7 @@ export function Avatar({ src, name, size = "md" }: AvatarProps) {
 
   return (
     <div
-      className={`${sizeClass} ${colorClass} rounded-full flex items-center justify-center text-white font-semibold shrink-0`}
+      className={`${sizeClass} bg-gradient-to-br ${gradientClass} rounded-full flex items-center justify-center text-white font-semibold shrink-0`}
       aria-label={name}
     >
       {getInitials(name)}

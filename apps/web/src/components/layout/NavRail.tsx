@@ -1,9 +1,11 @@
 "use client";
 
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
+import { OnlineDot } from "@/components/ui/OnlineDot";
 
 const NAV_ITEMS = [
   {
@@ -52,9 +54,14 @@ export function NavRail() {
   return (
     <nav className="w-[64px] shrink-0 flex flex-col items-center py-4 gap-1 bg-nav border-r border-sidebar">
       {/* Logo */}
-      <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center mb-3">
+      <motion.div
+        className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center mb-3"
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.95 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+      >
         <span className="text-primary-foreground font-bold text-sm">D</span>
-      </div>
+      </motion.div>
 
       {/* Nav items */}
       <div className="flex flex-col items-center gap-1 flex-1">
@@ -65,25 +72,42 @@ export function NavRail() {
               key={item.href}
               href={item.href}
               title={item.label}
+              aria-label={item.label}
               className={`icon-btn relative ${isActive ? "bg-accent text-foreground" : ""}`}
             >
-              {item.icon}
-              {isActive && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
-              )}
+              <motion.span
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                transition={{ type: "spring", stiffness: 500, damping: 28 }}
+                className="flex items-center justify-center"
+              >
+                {item.icon}
+              </motion.span>
+              <AnimatePresence>
+                {isActive && (
+                  <motion.span
+                    layoutId="nav-indicator"
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full"
+                    initial={{ opacity: 0, scaleY: 0 }}
+                    animate={{ opacity: 1, scaleY: 1 }}
+                    exit={{ opacity: 0, scaleY: 0 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 35 }}
+                  />
+                )}
+              </AnimatePresence>
             </Link>
           );
         })}
       </div>
 
       {/* User avatar */}
-      <button className="relative group">
+      <button className="relative group" aria-label="Your profile">
         <Avatar
           src={user?.avatarUrl}
           name={user?.displayName ?? "?"}
           size="sm"
         />
-        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-nav" />
+        <OnlineDot isOnline borderClass="border-nav" />
       </button>
     </nav>
   );

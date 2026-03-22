@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
+import { ChatSkeleton } from "./ChatSkeleton";
+import { TypingIndicator } from "./TypingIndicator";
 
 interface Props { conversationId: string; }
 
@@ -14,6 +17,9 @@ export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
   const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
@@ -21,7 +27,8 @@ export function ChatPanel({ conversationId }: Props) {
   useEffect(() => {
     setActiveConversation(conversationId);
     markConversationRead(conversationId);
-    void fetchMessages(conversationId);
+    setLoading(true);
+    void fetchMessages(conversationId).finally(() => setLoading(false));
     void api.messages.markRead(conversationId).catch(() => {});
     return () => setActiveConversation(null);
   }, [conversationId, setActiveConversation, markConversationRead, fetchMessages]);
@@ -32,26 +39,41 @@ export function ChatPanel({ conversationId }: Props) {
     void api.messages.markRead(conversationId).catch(() => {});
   }, [conversationId, convMessages.length, markConversationRead]);
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom on new messages only when already near bottom
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [convMessages.length]);
+    if (!showScrollBtn) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [convMessages.length, showScrollBtn]);
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBtn(distanceFromBottom > 200);
+  }
 
   if (!conversation) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-muted">Loading…</p>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ChatSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       <ChatHeader conversation={conversation} />
 
       {/* Messages */}
-      <div className="flex-1 chat-scroll px-4 py-4 flex flex-col gap-1">
-        {convMessages.length === 0 ? (
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 chat-scroll px-4 py-4 flex flex-col gap-1"
+      >
+        {loading ? (
+          <ChatSkeleton />
+        ) : convMessages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
             <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
               <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -82,6 +104,26 @@ export function ChatPanel({ conversationId }: Props) {
         )}
       </div>
 
+      {/* Scroll to bottom button */}
+      <AnimatePresence>
+        {showScrollBtn && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ type: "spring", stiffness: 400, damping: 28 }}
+            onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
+            className="absolute bottom-24 right-5 w-9 h-9 rounded-full bg-surface border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-colors z-10"
+            aria-label="Scroll to bottom"
+          >
+            <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <TypingIndicator isTyping={false} />
       <MessageInput conversationId={conversationId} />
     </div>
   );
