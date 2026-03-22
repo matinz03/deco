@@ -162,6 +162,13 @@ func (h *Hub) Shutdown() {
 	close(h.done)
 }
 
+// IsOnline returns true if the user has at least one active WebSocket connection.
+func (h *Hub) IsOnline(userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[userID]) > 0
+}
+
 func (h *Hub) onlineUserIDsLocked() []string {
 	ids := make([]string, 0, len(h.clients))
 	for userID, clients := range h.clients {

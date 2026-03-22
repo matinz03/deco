@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -10,6 +10,7 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
 import { KeyBackupGate } from "@/components/auth/KeyBackupGate";
+import { registerPush } from "@/lib/push";
 
 const AuthBackground = dynamic(
   () => import("@/components/auth/AuthBackground").then((m) => m.AuthBackground),
@@ -18,6 +19,10 @@ const AuthBackground = dynamic(
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+
+  useEffect(() => {
+    void registerPush();
+  }, []);
   // Only show the ConversationList as the full-width panel on /inbox root (mobile)
   const isInboxRoot = pathname === "/inbox";
   // Hide ConversationList sidebar on mobile for any non-inbox route

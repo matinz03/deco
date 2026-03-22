@@ -51,6 +51,17 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 	})
 }
 
+func RegisterPushRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+	h := &PushHandler{pool: pool, cfg: cfg, logger: logger}
+	// Public: VAPID public key (no auth needed — clients need it before subscribing)
+	r.Get("/push/vapid-public-key", h.GetVAPIDPublicKey)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Post("/push/subscribe", h.Subscribe)
+		r.Post("/push/unsubscribe", h.Unsubscribe)
+	})
+}
+
 func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub) {
 	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub}
 	r.Group(func(r chi.Router) {
