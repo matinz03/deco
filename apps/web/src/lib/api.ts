@@ -284,6 +284,24 @@ export const api = {
       return mapMessage(raw);
     },
 
+    edit: async (conversationId: string, messageId: string, body: { encryptedContent: string }) => {
+      const raw = await request<unknown>(
+        `/api/v1/conversations/${conversationId}/messages/${messageId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            encrypted_content: body.encryptedContent,
+          }),
+        }
+      );
+      return mapMessage(raw);
+    },
+
+    delete: (conversationId: string, messageId: string) =>
+      request(`/api/v1/conversations/${conversationId}/messages/${messageId}`, {
+        method: "DELETE",
+      }),
+
     react: (conversationId: string, messageId: string, emoji: string) =>
       request(`/api/v1/conversations/${conversationId}/messages/${messageId}/reactions`, {
         method: "POST",
