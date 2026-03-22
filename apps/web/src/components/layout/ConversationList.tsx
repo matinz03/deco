@@ -39,19 +39,34 @@ export function ConversationList() {
     <div className="flex flex-col h-full">
       <div className="sidebar-header">
         <h2 className="sidebar-title">{isGroupsTab ? "Groups" : "Messages"}</h2>
-        <button
-          className="icon-btn"
-          title={isGroupsTab ? "New group" : "New conversation"}
-          aria-label={isGroupsTab ? "New group" : "New conversation"}
-          onClick={() => setModalOpen(true)}
-        >
-          <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-        </button>
+        {isGroupsTab ? (
+          <button
+            className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            title="Create group"
+            aria-label="Create group"
+            onClick={() => setModalOpen(true)}
+          >
+            Create group +
+          </button>
+        ) : (
+          <button
+            className="icon-btn"
+            title="New conversation"
+            aria-label="New conversation"
+            onClick={() => setModalOpen(true)}
+          >
+            <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
+        )}
       </div>
 
-      <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <NewConversationModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        initialMode={isGroupsTab ? "group" : "direct"}
+      />
 
       {/* Mobile compose FAB — floats above the bottom nav */}
       <button
@@ -92,7 +107,7 @@ export function ConversationList() {
                   </svg>
                 </div>
                 <p className="text-sm font-medium">No groups yet</p>
-                <p className="text-xs text-muted mt-0.5">Create one with the + button.</p>
+                <p className="text-xs text-muted mt-0.5">Create one with the button above.</p>
               </>
             ) : (
               <>
@@ -108,14 +123,19 @@ export function ConversationList() {
                 <ConversationItem
                   key={conversation.id}
                   conversation={conversation}
-                isActive={pathname === `/inbox/${conversation.id}`}
-                isOnline={Boolean(
-                  conversation.type === "direct" &&
-                  conversation.members?.some(
-                    (member) => member.userId !== currentUserId && presence[member.userId]?.status === "online"
-                  )
-                )}
-              />
+                  href={
+                    conversation.type === "direct"
+                      ? `/inbox/${conversation.id}`
+                      : `/inbox/${conversation.id}?tab=groups`
+                  }
+                  isActive={pathname === `/inbox/${conversation.id}`}
+                  isOnline={Boolean(
+                    conversation.type === "direct" &&
+                    conversation.members?.some(
+                      (member) => member.userId !== currentUserId && presence[member.userId]?.status === "online"
+                    )
+                  )}
+                />
               ))}
             </AnimatePresence>
           </ul>
@@ -129,10 +149,12 @@ function ConversationItem({
   conversation,
   isActive,
   isOnline,
+  href,
 }: {
   conversation: Conversation;
   isActive: boolean;
   isOnline: boolean;
+  href: string;
 }) {
   const title = conversation.name || "Unknown conversation";
   const lastMessageText = getConversationPreview(conversation);
@@ -149,7 +171,7 @@ function ConversationItem({
       transition={{ type: "spring", stiffness: 350, damping: 30 }}
     >
       <Link
-        href={`/inbox/${conversation.id}`}
+        href={href}
         className={`conv-item ${isActive ? "conv-item--active" : ""}`}
       >
         <div className="conv-avatar-wrap">

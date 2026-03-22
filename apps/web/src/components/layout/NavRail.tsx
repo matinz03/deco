@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
@@ -47,14 +47,19 @@ const NAV_ITEMS = [
   },
 ];
 
-export function NavRail() {
+export function NavRail({
+  sidebarCollapsed,
+  onToggleSidebar,
+}: {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
 
   return (
     <nav className="nav-rail">
-      {/* Logo */}
       <motion.div
         className="nav-logo"
         whileHover={{ scale: 1.08 }}
@@ -64,14 +69,15 @@ export function NavRail() {
         <span className="nav-logo-text">D</span>
       </motion.div>
 
-      {/* Nav items */}
       <div className="nav-items">
         {NAV_ITEMS.map((item) => {
           const hrefPath = item.href.split("?")[0]!;
           const hrefTab = new URLSearchParams(item.href.split("?")[1] ?? "").get("tab");
+          const currentTab = searchParams.get("tab");
           const isActive = hrefTab
-            ? pathname === hrefPath && searchParams.get("tab") === hrefTab
-            : (pathname === hrefPath && !searchParams.get("tab")) || pathname.startsWith(hrefPath + "/");
+            ? pathname === hrefPath && currentTab === hrefTab
+            : (pathname === hrefPath && !currentTab) || pathname.startsWith(`${hrefPath}/`);
+
           return (
             <Link
               key={item.href}
@@ -105,13 +111,26 @@ export function NavRail() {
         })}
       </div>
 
-      {/* User avatar */}
+      <button
+        type="button"
+        onClick={onToggleSidebar}
+        className="absolute -right-4 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-sidebar bg-surface text-muted shadow-lg transition-colors hover:text-foreground md:flex"
+        aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        <svg
+          className={`h-4 w-4 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" />
+        </svg>
+      </button>
+
       <button className="relative group" aria-label="Your profile">
-        <Avatar
-          src={user?.avatarUrl}
-          name={user?.displayName ?? "?"}
-          size="sm"
-        />
+        <Avatar src={user?.avatarUrl} name={user?.displayName ?? "?"} size="sm" />
         <OnlineDot isOnline borderClass="border-nav" />
       </button>
     </nav>
