@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useConversationStore } from "@/store/conversations";
 
 interface Props { conversationId: string; }
@@ -10,11 +10,27 @@ export function MessageInput({ conversationId }: Props) {
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useConversationStore((s) => s.sendMessage);
+  const sendTyping = useConversationStore((s) => s.sendTyping);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      sendTyping(conversationId, false);
+    };
+  }, [conversationId, sendTyping]);
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    sendTyping(conversationId, false);
     setText("");
     // Reset height
     if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -23,7 +39,7 @@ export function MessageInput({ conversationId }: Props) {
     } finally {
       setSending(false);
     }
-  }, [text, sending, conversationId, sendMessage]);
+  }, [text, sending, conversationId, sendMessage, sendTyping]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -33,7 +49,18 @@ export function MessageInput({ conversationId }: Props) {
   }
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(e.target.value);
+    const nextText = e.target.value;
+    setText(nextText);
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    sendTyping(conversationId, nextText.trim().length > 0);
+    typingTimeoutRef.current = setTimeout(() => {
+      sendTyping(conversationId, false);
+    }, 1500);
+
     // Auto-grow
     const ta = e.target;
     ta.style.height = "auto";

@@ -18,7 +18,7 @@ interface Props { conversationId: string; }
 
 export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
-  const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations } = useConversationStore();
+  const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations, typing } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +27,15 @@ export function ChatPanel({ conversationId }: Props) {
 
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
+  const typingUsers = typing[conversationId] ?? [];
   const useVirtual = convMessages.length > VIRTUAL_THRESHOLD;
+  const typingNames = (conversation?.members ?? [])
+    .filter((member) => typingUsers.includes(member.userId) && member.userId !== user?.id)
+    .map((member) => member.user?.displayName || member.user?.username || "Someone");
+  const typingLabel =
+    typingNames.length <= 1
+      ? typingNames[0]
+      : `${typingNames[0]} and ${typingNames.length - 1} ${typingNames.length - 1 === 1 ? "other" : "others"}`;
 
   const virtualizer = useVirtualizer({
     count: useVirtual ? convMessages.length : 0,
@@ -174,7 +182,7 @@ export function ChatPanel({ conversationId }: Props) {
         )}
       </div>
 
-      <TypingIndicator isTyping={false} />
+      <TypingIndicator isTyping={typingNames.length > 0} name={typingLabel} />
       <MessageInput conversationId={conversationId} />
     </div>
   );
