@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
 import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
-import type { Conversation, Member, Message, WSEvent } from "@deco/types";
+import type { Conversation, Member, Message, MessageType, WSEvent } from "@deco/types";
 import { useAuthStore } from "./auth";
 
 type PresenceState = {
@@ -20,6 +20,17 @@ interface ConversationState {
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendMediaMessage: (
+    conversationId: string,
+    input: {
+      type: Extract<MessageType, "image" | "video" | "audio" | "file">;
+      file: File | Blob;
+      fileName: string;
+      mimeType: string;
+      caption?: string;
+      previewUrl?: string;
+    }
+  ) => Promise<void>;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
   toggleReaction: (conversationId: string, messageId: string, emoji: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, text: string) => Promise<void>;
@@ -107,19 +118,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }));
 
       try {
-        // Encrypt before sending
         const conversation = get().conversations.find((c) => c.id === conversationId);
-        const otherUser = conversation?.members?.find((m) => m.userId !== user.id)?.user;
-
-        let encryptedContent = text; // fallback (no encryption without recipient's public key)
-        if (otherUser) {
-          const privateKey = await loadPrivateKey(user.id);
-          if (privateKey) {
-            const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-            const sharedSecret = derive(otherUser.publicKey, privateKey);
-            encryptedContent = encryptMessage(text, sharedSecret);
-          }
-        }
+        const encryptedContent = await encryptOutgoingContent(conversation, user.id, text);
 
         const confirmed = await api.messages.send(conversationId, { encryptedContent });
 
@@ -139,6 +139,84 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }));
       } catch {
         // Mark optimistic message as failed
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: s.messages[conversationId]!.map((m) =>
+              m.id === tempId ? { ...m, status: "failed" as const } : m
+            ),
+          },
+        }));
+      }
+    },
+
+    async sendMediaMessage(conversationId, input) {
+      const user = useAuthStore.getState().user;
+      if (!user) return;
+
+      const caption = input.caption?.trim() ?? "";
+      const tempId = `temp_${Date.now()}`;
+      const optimisticMsg: Message = {
+        id: tempId,
+        conversationId,
+        senderId: user.id,
+        sender: user,
+        type: input.type,
+        encryptedContent: "",
+        decryptedContent: caption || undefined,
+        mediaUrl: input.previewUrl,
+        mediaName: input.fileName,
+        mediaMimeType: input.mimeType,
+        mediaSize: input.file.size,
+        reactions: [],
+        status: "sending",
+        isEdited: false,
+        isDeleted: false,
+        sentAt: new Date().toISOString(),
+      };
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: [...(s.messages[conversationId] ?? []), optimisticMsg],
+        },
+      }));
+
+      try {
+        const conversation = get().conversations.find((c) => c.id === conversationId);
+        const encryptedContent = await encryptOutgoingContent(conversation, user.id, caption);
+        const uploadKind = input.type === "image" ? "image" : input.type === "video" ? "video" : input.type === "audio" ? "audio" : "file";
+        const upload = await api.uploads.create(input.file, uploadKind, input.fileName);
+        const confirmed = await api.messages.send(conversationId, {
+          type: input.type,
+          encryptedContent,
+          mediaUrl: upload.url,
+          mediaName: upload.name,
+          mediaMimeType: upload.mimeType,
+          mediaSize: upload.size,
+        });
+        const confirmedMessage = await hydrateMessage(confirmed, conversation);
+
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: upsertMessage(
+              (s.messages[conversationId] ?? []).map((m) =>
+                m.id === tempId
+                  ? {
+                      ...confirmedMessage,
+                      decryptedContent: caption || confirmedMessage.decryptedContent,
+                    }
+                  : m
+              ),
+              {
+                ...confirmedMessage,
+                decryptedContent: caption || confirmedMessage.decryptedContent,
+              }
+            ),
+          },
+        }));
+      } catch {
         set((s) => ({
           messages: {
             ...s.messages,
@@ -742,6 +820,26 @@ async function hydrateMessage(message: Message, conversation?: Conversation) {
   } catch {
     return message;
   }
+}
+
+async function encryptOutgoingContent(conversation: Conversation | undefined, userId: string, text: string) {
+  if (!text) {
+    return "";
+  }
+
+  const otherUser = conversation?.members?.find((member) => member.userId !== userId)?.user;
+  let encryptedContent = text;
+
+  if (otherUser) {
+    const privateKey = await loadPrivateKey(userId);
+    if (privateKey) {
+      const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+      const sharedSecret = derive(otherUser.publicKey, privateKey);
+      encryptedContent = encryptMessage(text, sharedSecret);
+    }
+  }
+
+  return encryptedContent;
 }
 
 function notifyAboutMessage(message: Message, conversation?: Conversation) {

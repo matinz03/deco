@@ -73,6 +73,7 @@ type Message struct {
 	EncryptedContent string      `json:"encrypted_content" db:"encrypted_content"`
 	// For media messages: reference to R2 object (nullable)
 	MediaURL       *string       `json:"media_url,omitempty" db:"media_url"`
+	MediaName      *string       `json:"media_name,omitempty" db:"media_name"`
 	MediaMimeType  *string       `json:"media_mime_type,omitempty" db:"media_mime_type"`
 	MediaSize      *int64        `json:"media_size,omitempty" db:"media_size"`
 	ReplyToID      *string       `json:"reply_to_id,omitempty" db:"reply_to_id"`

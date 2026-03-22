@@ -65,6 +65,7 @@ CREATE TABLE messages (
   type              message_type NOT NULL DEFAULT 'text',
   encrypted_content TEXT NOT NULL,   -- Ciphertext only — plaintext never stored
   media_url         TEXT,
+  media_name        TEXT,
   media_mime_type   TEXT,
   media_size        BIGINT,
   reply_to_id       UUID REFERENCES messages(id),

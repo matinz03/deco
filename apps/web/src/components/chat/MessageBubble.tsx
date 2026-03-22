@@ -155,6 +155,41 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
                   loading="lazy"
                 />
               )}
+              {msg.type === "video" && msg.mediaUrl && (
+                <video
+                  src={msg.mediaUrl}
+                  controls
+                  playsInline
+                  className="mb-2 max-h-72 w-full rounded-xl bg-black"
+                />
+              )}
+              {msg.type === "audio" && msg.mediaUrl && (
+                <div className="mb-2 min-w-[240px] rounded-xl bg-black/5 p-2">
+                  <div className="mb-1 text-xs font-medium opacity-70">
+                    {msg.mediaName || "Audio message"}
+                  </div>
+                  <audio src={msg.mediaUrl} controls className="w-full" preload="metadata" />
+                </div>
+              )}
+              {msg.type === "file" && msg.mediaUrl && (
+                <a
+                  href={msg.mediaUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mb-2 flex min-w-[220px] items-center gap-3 rounded-xl border border-border/70 bg-background/50 px-3 py-3 transition-colors hover:bg-accent"
+                >
+                  <div className="rounded-xl bg-muted p-2">
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15A2.25 2.25 0 0 0 6.75 21.75h10.5A2.25 2.25 0 0 0 19.5 19.5v-5.25Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2.25v4.5A1.5 1.5 0 0 0 15 8.25h4.5" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{msg.mediaName || "File attachment"}</div>
+                    <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
+                  </div>
+                </a>
+              )}
 
               {/* Text */}
               {isEditing ? (
@@ -327,6 +362,20 @@ function groupReactions(reactions: Message["reactions"], currentUserId?: string 
 
 function getMessageText(message: Message) {
   if (message.decryptedContent) return message.decryptedContent;
+  if (message.type !== "text" && message.mediaUrl) return "";
   if (message.encryptedContent) return "Encrypted message unavailable on this device";
   return "";
+}
+
+function formatBytes(value?: number) {
+  if (!value) return "Attachment";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  const decimals = unit === 0 ? 0 : 1;
+  return `${size.toFixed(decimals)} ${units[unit]}`;
 }

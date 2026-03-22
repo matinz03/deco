@@ -40,6 +40,7 @@ export interface Conversation {
 
 export type MessageType = "text" | "image" | "video" | "audio" | "file" | "system";
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
+export type UploadKind = "avatar" | "image" | "video" | "audio" | "file";
 
 export interface Message {
   id: string;
@@ -52,6 +53,7 @@ export interface Message {
   // decryptedContent: populated client-side after decryption, never sent to server
   decryptedContent?: string;
   mediaUrl?: string;
+  mediaName?: string;
   mediaMimeType?: string;
   mediaSize?: number;
   replyToId?: string;
@@ -152,4 +154,12 @@ export interface KeyBackupRecord extends KeyBackupPayload {
 export interface KeyBackupResponse {
   exists: boolean;
   backup?: KeyBackupRecord;
+}
+
+export interface UploadResponse {
+  url: string;
+  mimeType: string;
+  size: number;
+  name: string;
+  kind: UploadKind;
 }

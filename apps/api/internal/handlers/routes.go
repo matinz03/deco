@@ -53,6 +53,16 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 	})
 }
 
+func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+	h := &UploadHandler{pool: pool, cfg: cfg, logger: logger}
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Route("/uploads", func(r chi.Router) {
+			r.Post("/", h.Create)
+		})
+	})
+}
+
 func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub) {
 	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub}
 	r.Group(func(r chi.Router) {

@@ -12,6 +12,7 @@ import (
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/db"
 	"github.com/matinz03/deco/internal/handlers"
+	"github.com/matinz03/deco/internal/storage"
 	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,6 +35,9 @@ func main() {
 
 	// Config
 	cfg := config.Load()
+	if err := storage.EnsureDirectories(cfg.UploadRoot); err != nil {
+		logger.Fatal("failed to prepare upload directories", zap.Error(err))
+	}
 
 	// Database
 	pool, err := db.Connect(cfg.DatabaseURL)
@@ -85,10 +89,16 @@ func main() {
 		handlers.RegisterAuthRoutes(r, pool, cfg, logger)
 		handlers.RegisterUserRoutes(r, pool, cfg, logger)
 		handlers.RegisterConversationRoutes(r, pool, cfg, logger)
+		handlers.RegisterUploadRoutes(r, pool, cfg, logger)
 		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub)
 	})
 
 	// WebSocket endpoint — auth handled inside the handler via ?token= query param
+	uploadBase := cfg.PublicUploadBase
+	if uploadBase == "" {
+		uploadBase = "/uploads"
+	}
+	r.Handle(uploadBase+"/*", http.StripPrefix(uploadBase+"/", http.FileServer(http.Dir(cfg.UploadRoot))))
 	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger))
 
 	// Server
