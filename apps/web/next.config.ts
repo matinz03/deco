@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   // Enable React strict mode for catching bugs early
   reactStrictMode: true,
 
+  // Required for Docker: produces a self-contained server.js
+  output: "standalone",
+
   // Transpile shared workspace packages
   transpilePackages: ["@deco/ui", "@deco/crypto", "@deco/types"],
 
