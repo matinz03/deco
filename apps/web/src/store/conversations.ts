@@ -38,7 +38,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async fetchMessages(conversationId) {
-      const { data: rawMessages } = await api.messages.list(conversationId);
+      const rawMessages = await api.messages.list(conversationId);
       const user = useAuthStore.getState().user;
       if (!user) return;
 

@@ -67,9 +67,9 @@ export const api = {
   },
 
   messages: {
-    list: (conversationId: string, cursor?: string) =>
-      request<import("@deco/types").PaginatedResponse<import("@deco/types").Message>>(
-        `/api/v1/conversations/${conversationId}/messages${cursor ? `?cursor=${cursor}` : ""}`
+    list: (conversationId: string, before?: string) =>
+      request<import("@deco/types").Message[]>(
+        `/api/v1/conversations/${conversationId}/messages${before ? `?before=${before}` : ""}`
       ),
 
     send: (conversationId: string, body: { encryptedContent: string; type?: string; replyToId?: string }) =>

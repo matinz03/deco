@@ -72,8 +72,8 @@ services:
     depends_on:
       - api
     environment:
-      NEXT_PUBLIC_API_URL: ${APP_URL}/api
-      NEXT_PUBLIC_WS_URL: ${APP_URL_WS}/ws
+      NEXT_PUBLIC_API_URL: ${APP_URL}
+      NEXT_PUBLIC_WS_URL: ${APP_URL_WS}
     ports:
       - "127.0.0.1:3000:3000"
 
