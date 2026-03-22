@@ -568,3 +568,71 @@ func (h *ConversationHandler) canManageRoles(r *http.Request, convID, userID str
 	}
 	return role == "owner"
 }
+
+// PutGroupKeys stores encrypted group key copies for one or more members.
+// Each entry contains the group key encrypted for a specific member.
+// Body: [{ "user_id": "...", "encrypted_key": "...", "encrypted_by": "..." }]
+func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	callerID := r.Context().Value(middleware.UserIDKey).(string)
+
+	if !h.isConversationMember(r, convID, callerID) {
+		respondError(w, http.StatusForbidden, "not a member")
+		return
+	}
+
+	var entries []struct {
+		UserID       string `json:"user_id"`
+		EncryptedKey string `json:"encrypted_key"`
+		EncryptedBy  string `json:"encrypted_by"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&entries); err != nil || len(entries) == 0 {
+		respondError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.UserID == "" || entry.EncryptedKey == "" || entry.EncryptedBy == "" {
+			respondError(w, http.StatusBadRequest, "missing fields")
+			return
+		}
+		_, err := h.pool.Exec(r.Context(), `
+			INSERT INTO group_keys (conversation_id, user_id, encrypted_by, encrypted_key)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (conversation_id, user_id) DO UPDATE
+			  SET encrypted_key = EXCLUDED.encrypted_key,
+			      encrypted_by  = EXCLUDED.encrypted_by,
+			      created_at    = NOW()
+		`, convID, entry.UserID, entry.EncryptedBy, entry.EncryptedKey)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to store key")
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetGroupKey returns the caller's encrypted copy of the group key.
+func (h *ConversationHandler) GetGroupKey(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	callerID := r.Context().Value(middleware.UserIDKey).(string)
+
+	if !h.isConversationMember(r, convID, callerID) {
+		respondError(w, http.StatusForbidden, "not a member")
+		return
+	}
+
+	var gk models.GroupKey
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT conversation_id, user_id, encrypted_by, encrypted_key, created_at
+		FROM group_keys
+		WHERE conversation_id = $1 AND user_id = $2
+	`, convID, callerID).Scan(&gk.ConversationID, &gk.UserID, &gk.EncryptedBy, &gk.EncryptedKey, &gk.CreatedAt)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "group key not found")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, gk)
+}

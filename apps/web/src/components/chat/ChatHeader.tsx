@@ -189,42 +189,46 @@ export function ChatHeader({ conversation }: Props) {
 
         <div className="chat-actions">
           <button
-            className={`hidden sm:flex icon-btn ${searchOpen ? "text-primary" : ""}`}
+            className={`chat-action-btn hidden sm:flex ${searchOpen ? "!text-primary bg-primary/10" : ""}`}
             title="Search messages"
             aria-label="Search messages"
             onClick={() => setSearchOpen((value) => !value)}
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
             </svg>
           </button>
 
-          <button className="hidden sm:flex icon-btn" title="Voice call" aria-label="Voice call">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <button className="chat-action-btn hidden sm:flex" title="Voice call" aria-label="Voice call">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
             </svg>
           </button>
 
-          <button className="hidden sm:flex icon-btn" title="Video call" aria-label="Video call">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <button className="chat-action-btn hidden sm:flex" title="Video call" aria-label="Video call">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9A2.25 2.25 0 0 0 13.5 5.25h-9A2.25 2.25 0 0 0 2.25 7.5v9A2.25 2.25 0 0 0 4.5 18.75Z" />
             </svg>
           </button>
 
-          <button
-            className="icon-btn"
-            title={isGroup ? "Group settings" : "More options"}
-            aria-label={isGroup ? "Group settings" : "More options"}
-            onClick={() => {
-              if (isGroup) {
-                setSettingsOpen(true);
-              }
-            }}
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-            </svg>
-          </button>
+          {isGroup ? (
+            <button
+              className="chat-action-btn"
+              title="Group settings"
+              aria-label="Group settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+              </svg>
+            </button>
+          ) : (
+            <button className="chat-action-btn" title="More options" aria-label="More options">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+              </svg>
+            </button>
+          )}
         </div>
       </header>
 
@@ -260,10 +264,14 @@ export function ChatHeader({ conversation }: Props) {
                   Clear
                 </button>
               )}
-              <button className="icon-btn" onClick={() => {
-                setSearchOpen(false);
-                setSearchMsg("");
-              }} aria-label="Close search">
+              <button
+                className="icon-btn"
+                onClick={() => {
+                  setSearchOpen(false);
+                  setSearchMsg("");
+                }}
+                aria-label="Close search"
+              >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
                 </svg>
@@ -288,7 +296,7 @@ export function ChatHeader({ conversation }: Props) {
                 <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
                 <motion.div
-                  className="relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-sidebar bg-surface shadow-2xl sm:max-h-[85dvh] sm:max-w-2xl sm:rounded-3xl"
+                  className="relative z-10 flex max-h-[92dvh] min-w-0 w-full flex-col overflow-hidden rounded-t-3xl border border-sidebar bg-surface shadow-2xl sm:max-h-[85dvh] sm:max-w-2xl sm:rounded-3xl"
                   initial={{ y: 40, opacity: 0, scale: 0.98 }}
                   animate={{ y: 0, opacity: 1, scale: 1 }}
                   exit={{ y: 40, opacity: 0, scale: 0.98 }}
@@ -313,7 +321,7 @@ export function ChatHeader({ conversation }: Props) {
                   </div>
 
                   <div className="flex-1 overflow-y-auto">
-                    <div className="grid gap-0 p-5 sm:grid-cols-[1.1fr,0.9fr] sm:gap-6">
+                    <div className="flex flex-col gap-5 p-5 sm:grid sm:grid-cols-[1.1fr,0.9fr] sm:gap-6">
                       <div className="space-y-5">
                         <div className="space-y-3">
                           <label className="flex flex-col gap-1.5">
@@ -416,7 +424,7 @@ export function ChatHeader({ conversation }: Props) {
                         </div>
                       </div>
 
-                      <div className="mt-5 space-y-5 sm:mt-0">
+                      <div className="space-y-5">
                         <div className="space-y-3 rounded-2xl border border-sidebar/80 bg-background/40 p-4">
                           <div>
                             <h5 className="text-sm font-semibold">Add members</h5>

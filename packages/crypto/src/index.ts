@@ -22,6 +22,13 @@ export function generateKeyPair(): { publicKey: string; privateKey: string } {
   };
 }
 
+// ─── Group Key Generation ─────────────────────────────────────────────────────
+
+/** Generate a random 32-byte symmetric key for a group conversation. */
+export function generateGroupKey(): string {
+  return encodeBase64(nacl.randomBytes(nacl.secretbox.keyLength));
+}
+
 // ─── Shared Secret (X25519 Key Exchange) ─────────────────────────────────────
 
 export function deriveSharedSecret(
