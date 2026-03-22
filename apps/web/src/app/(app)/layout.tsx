@@ -4,17 +4,23 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { NavRail } from "@/components/layout/NavRail";
 import { ConversationList } from "@/components/layout/ConversationList";
+import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
+import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
     <div className="h-app flex overflow-hidden bg-background">
-      {/* Panel 1 — Nav rail (narrow icon strip) */}
-      <NavRail />
+      {/* Panel 1 — Nav rail */}
+      <div className="relative shrink-0">
+        <NavRail />
+        <NoiseOverlay />
+      </div>
 
       {/* Panel 2 — Conversation list */}
-      <aside className="w-[300px] shrink-0 flex flex-col bg-sidebar border-r border-sidebar">
+      <aside className="w-[300px] shrink-0 flex flex-col bg-sidebar border-r border-sidebar relative">
+        <NoiseOverlay />
         <ConversationList />
       </aside>
 
@@ -33,6 +39,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {/* Global keyboard shortcuts overlay — triggered by '?' key */}
+      <KeyboardShortcutsOverlay />
     </div>
   );
 }

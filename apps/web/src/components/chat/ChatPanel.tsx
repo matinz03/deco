@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
@@ -10,6 +11,8 @@ import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ChatSkeleton } from "./ChatSkeleton";
 import { TypingIndicator } from "./TypingIndicator";
+
+const VIRTUAL_THRESHOLD = 80;
 
 interface Props { conversationId: string; }
 
@@ -23,6 +26,14 @@ export function ChatPanel({ conversationId }: Props) {
 
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
+  const useVirtual = convMessages.length > VIRTUAL_THRESHOLD;
+
+  const virtualizer = useVirtualizer({
+    count: useVirtual ? convMessages.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 56,
+    overscan: 10,
+  });
 
   useEffect(() => {
     setActiveConversation(conversationId);
@@ -86,19 +97,41 @@ export function ChatPanel({ conversationId }: Props) {
           </div>
         ) : (
           <>
-            {convMessages.map((msg, i) => {
-              const isSent = msg.senderId === user?.id;
-              const prevMsg = convMessages[i - 1];
-              const showAvatar = !isSent && prevMsg?.senderId !== msg.senderId;
-              return (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  isSent={isSent}
-                  showAvatar={showAvatar}
-                />
-              );
-            })}
+            {useVirtual ? (
+              <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+                {virtualizer.getVirtualItems().map((virtualItem) => {
+                  const msg = convMessages[virtualItem.index]!;
+                  const isSent = msg.senderId === user?.id;
+                  const prevMsg = convMessages[virtualItem.index - 1];
+                  const showAvatar = !isSent && prevMsg?.senderId !== msg.senderId;
+                  return (
+                    <div
+                      key={msg.id}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualItem.start}px)`,
+                      }}
+                      ref={virtualizer.measureElement}
+                      data-index={virtualItem.index}
+                    >
+                      <MessageBubble message={msg} isSent={isSent} showAvatar={showAvatar} />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              convMessages.map((msg, i) => {
+                const isSent = msg.senderId === user?.id;
+                const prevMsg = convMessages[i - 1];
+                const showAvatar = !isSent && prevMsg?.senderId !== msg.senderId;
+                return (
+                  <MessageBubble key={msg.id} message={msg} isSent={isSent} showAvatar={showAvatar} />
+                );
+              })
+            )}
             <div ref={bottomRef} />
           </>
         )}
