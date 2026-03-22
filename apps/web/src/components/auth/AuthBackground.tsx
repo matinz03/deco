@@ -112,7 +112,7 @@ function EmojiBackground({ emojis }: { emojis: string[] }) {
             fontSize: `${p.size}px`,
             animationDelay: `${p.delay}s`,
             animationDuration: `${p.duration}s`,
-            transform: `translateX(${p.drift}px)`,
+            marginLeft: `${p.drift}px`,
             bottom: "-10%",
             lineHeight: 1,
           }}
