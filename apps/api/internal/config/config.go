@@ -3,40 +3,34 @@ package config
 import "os"
 
 type Config struct {
-	Port             string
-	Env              string
-	DatabaseURL      string
-	RedisURL         string
-	JWTSecret        string
-	AllowedOrigins   string
-	R2AccountID      string
-	R2AccessKey      string
-	R2SecretKey      string
-	R2BucketName     string
-	R2PublicURL      string
-	AnthropicKey     string
-	VAPIDPublicKey   string
-	VAPIDPrivateKey  string
-	VAPIDSubject     string
+	Port           string
+	Env            string
+	DatabaseURL    string
+	RedisURL       string
+	JWTSecret      string
+	AllowedOrigins string
+	R2AccountID    string
+	R2AccessKey    string
+	R2SecretKey    string
+	R2BucketName   string
+	R2PublicURL    string
+	AnthropicKey   string
 }
 
 func Load() *Config {
 	return &Config{
-		Port:            getEnv("API_PORT", "8080"),
-		Env:             getEnv("API_ENV", "development"),
-		DatabaseURL:     getEnv("DATABASE_URL", ""),
-		RedisURL:        getEnv("REDIS_URL", "redis://localhost:6379"),
-		JWTSecret:       getEnv("JWT_SECRET", "change-me"),
-		AllowedOrigins:  getEnv("ALLOWED_ORIGINS", "http://localhost:3000"),
-		R2AccountID:     getEnv("R2_ACCOUNT_ID", ""),
-		R2AccessKey:     getEnv("R2_ACCESS_KEY_ID", ""),
-		R2SecretKey:     getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:    getEnv("R2_BUCKET_NAME", "deco-media"),
-		R2PublicURL:     getEnv("R2_PUBLIC_URL", ""),
-		AnthropicKey:    getEnv("ANTHROPIC_API_KEY", ""),
-		VAPIDPublicKey:  getEnv("VAPID_PUBLIC_KEY", ""),
-		VAPIDPrivateKey: getEnv("VAPID_PRIVATE_KEY", ""),
-		VAPIDSubject:    getEnv("VAPID_SUBJECT", "mailto:admin@deco.app"),
+		Port:           getEnv("API_PORT", "8080"),
+		Env:            getEnv("API_ENV", "development"),
+		DatabaseURL:    getEnv("DATABASE_URL", ""),
+		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
+		JWTSecret:      getEnv("JWT_SECRET", "change-me"),
+		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3000"),
+		R2AccountID:    getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKey:    getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretKey:    getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:   getEnv("R2_BUCKET_NAME", "deco-media"),
+		R2PublicURL:    getEnv("R2_PUBLIC_URL", ""),
+		AnthropicKey:   getEnv("ANTHROPIC_API_KEY", ""),
 	}
 }
 

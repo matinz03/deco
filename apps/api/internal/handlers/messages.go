@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -199,35 +198,11 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 			Type:    websocket.EventMessage,
 			Payload: mustMarshal(msg),
 		})
-		// Send push notifications to offline members
-		go h.pushToOfflineMembers(convID, userID, sender.DisplayName)
 	}
 
 	h.pool.Exec(r.Context(), `UPDATE conversations SET updated_at = NOW() WHERE id = $1`, convID)
 
 	respondJSON(w, http.StatusCreated, msg)
-}
-
-// pushToOfflineMembers sends a Web Push notification to conversation members who are not connected via WebSocket.
-func (h *MessageHandler) pushToOfflineMembers(convID, senderID, senderName string) {
-	ctx := context.Background()
-	rows, err := h.pool.Query(ctx, `SELECT user_id FROM members WHERE conversation_id = $1 AND user_id != $2`, convID, senderID)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var uid string
-		if rows.Scan(&uid) != nil {
-			continue
-		}
-		if h.hub.IsOnline(uid) {
-			continue // already receiving WS event
-		}
-		// Body intentionally vague — message is E2E encrypted, server never sees plaintext
-		SendPushToUser(ctx, h.pool, h.cfg, h.logger, uid, senderName, "Sent you a message")
-	}
 }
 
 // Edit updates the encrypted content of a message the caller owns.
