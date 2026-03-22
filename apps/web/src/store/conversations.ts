@@ -15,6 +15,7 @@ interface ConversationState {
   sendMessage: (conversationId: string, text: string) => Promise<void>;
   setActiveConversation: (id: string | null) => void;
   handleIncomingEvent: (event: WSEvent) => void;
+  createConversation: (opts: { type: string; name?: string; memberIds: string[] }) => Promise<Conversation>;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => {
@@ -130,6 +131,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           },
         }));
       }
+    },
+
+    async createConversation(opts) {
+      const conv = await api.conversations.create(opts);
+      set((s) => ({
+        conversations: s.conversations.some((c) => c.id === conv.id)
+          ? s.conversations
+          : [conv, ...s.conversations],
+      }));
+      return conv;
     },
 
     handleIncomingEvent(event) {

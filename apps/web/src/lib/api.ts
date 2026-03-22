@@ -73,7 +73,11 @@ export const api = {
     create: (body: { type: string; name?: string; memberIds: string[] }) =>
       request<import("@deco/types").Conversation>("/api/v1/conversations", {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          type: body.type,
+          name: body.name,
+          member_ids: body.memberIds,
+        }),
       }),
   },
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConversationStore } from "@/store/conversations";
 import { Avatar } from "@/components/ui/Avatar";
+import { NewConversationModal } from "@/components/ui/NewConversationModal";
 import { formatDistanceToNowStrict } from "date-fns";
 import type { Conversation } from "@deco/types";
 
@@ -12,6 +13,7 @@ export function ConversationList() {
   const pathname = usePathname();
   const { conversations, fetchConversations } = useConversationStore();
   const [search, setSearch] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
@@ -24,12 +26,14 @@ export function ConversationList() {
       {/* Header */}
       <div className="px-4 pt-4 pb-3 flex items-center justify-between">
         <h2 className="font-semibold text-base">Messages</h2>
-        <button className="icon-btn" title="New conversation">
+        <button className="icon-btn" title="New conversation" onClick={() => setModalOpen(true)}>
           <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
         </button>
       </div>
+
+      <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} />
 
       {/* Search */}
       <div className="px-3 pb-3">
