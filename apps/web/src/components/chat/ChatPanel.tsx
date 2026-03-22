@@ -24,6 +24,7 @@ export function ChatPanel({ conversationId }: Props) {
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const initialScrollDone = useRef(false);
+  const lastScrollTop = useRef(0);
 
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
@@ -88,7 +89,15 @@ export function ChatPanel({ conversationId }: Props) {
     const el = scrollRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowScrollBtn(distanceFromBottom > 200);
+    const scrollingDown = el.scrollTop > lastScrollTop.current;
+    lastScrollTop.current = el.scrollTop;
+    if (distanceFromBottom <= 200) {
+      setShowScrollBtn(false);
+    } else if (scrollingDown) {
+      setShowScrollBtn(true);
+    } else {
+      setShowScrollBtn(false);
+    }
   }
 
   if (!conversation) {
