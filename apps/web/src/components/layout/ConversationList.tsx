@@ -17,6 +17,14 @@ export function ConversationList() {
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void fetchConversations();
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [fetchConversations]);
+
   const filtered = conversations.filter((c) =>
     (c.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
   );
