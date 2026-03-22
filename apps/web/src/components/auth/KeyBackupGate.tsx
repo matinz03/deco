@@ -55,7 +55,7 @@ export function KeyBackupGate() {
   return (
     <>
       {backupWarning && !backupPrompt && (
-        <div className="fixed left-4 right-4 bottom-24 md:bottom-6 md:left-auto md:right-6 md:max-w-sm z-40 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 shadow-lg backdrop-blur">
+        <div className="fixed left-4 right-4 bottom-24 md:bottom-auto md:top-6 md:left-auto md:right-6 md:max-w-sm z-40 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 shadow-lg backdrop-blur">
           {backupWarning}
         </div>
       )}
