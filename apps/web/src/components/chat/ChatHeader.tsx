@@ -17,9 +17,10 @@ export function ChatHeader({ conversation }: Props) {
   const title = conversation.name || "Unknown conversation";
   const otherMemberRecord = conversation.members?.find((member) => member.userId !== currentUserId);
   const otherMember = otherMemberRecord?.user;
-  const isOnline = otherMemberRecord ? presence[otherMemberRecord.userId] === "online" : false;
+  const otherPresence = otherMemberRecord ? presence[otherMemberRecord.userId] : undefined;
+  const isOnline = otherPresence?.status === "online";
   const subtitle = conversation.type === "direct"
-    ? getDirectConversationSubtitle(otherMember?.lastSeenAt, isOnline)
+    ? getDirectConversationSubtitle(otherPresence?.lastSeenAt || otherMember?.lastSeenAt, isOnline)
     : `${conversation.memberCount} members`;
 
   return (

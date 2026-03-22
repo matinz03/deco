@@ -55,9 +55,10 @@ func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logge
 		}
 
 		client := &Client{
-			UserID: userID,
-			Send:   make(chan []byte, 256),
-			hub:    hub,
+			UserID:     userID,
+			LastSeenAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Send:       make(chan []byte, 256),
+			hub:        hub,
 		}
 
 		hub.register <- client
@@ -74,7 +75,8 @@ func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logge
 // Handles incoming client events (typing, read receipts).
 func (c *Client) readPump(conn *websocket.Conn, hub *Hub, pool *pgxpool.Pool, logger *zap.Logger) {
 	defer func() {
-		pool.Exec(context.Background(), `UPDATE users SET last_seen_at = NOW() WHERE id = $1`, c.UserID)
+		c.LastSeenAt = time.Now().UTC().Format(time.RFC3339Nano)
+		pool.Exec(context.Background(), `UPDATE users SET last_seen_at = $2 WHERE id = $1`, c.UserID, c.LastSeenAt)
 		hub.unregister <- c
 		conn.Close()
 	}()

@@ -5,11 +5,16 @@ import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto
 import type { Conversation, Message, WSEvent } from "@deco/types";
 import { useAuthStore } from "./auth";
 
+type PresenceState = {
+  status: "online" | "offline" | "busy" | "away";
+  lastSeenAt?: string;
+};
+
 interface ConversationState {
   conversations: Conversation[];
   messages: Record<string, Message[]>;
   activeConversationId: string | null;
-  presence: Record<string, "online" | "offline" | "busy" | "away">;
+  presence: Record<string, PresenceState>;
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
@@ -252,15 +257,36 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }
 
       if (event.type === "presence") {
-        const { userId, status } = event.payload as {
+        const { userId, status, lastSeenAt } = event.payload as {
           userId: string;
           status: "online" | "offline" | "busy" | "away";
+          lastSeenAt?: string;
         };
 
         set((s) => ({
+          conversations: s.conversations.map((conversation) => ({
+            ...conversation,
+            members: conversation.members?.map((member) =>
+              member.userId === userId && member.user
+                ? {
+                    ...member,
+                    user: {
+                      ...member.user,
+                      lastSeenAt:
+                        status === "online"
+                          ? member.user.lastSeenAt
+                          : (lastSeenAt || member.user.lastSeenAt),
+                    },
+                  }
+                : member
+            ),
+          })),
           presence: {
             ...s.presence,
-            [userId]: status,
+            [userId]: {
+              status,
+              lastSeenAt: status === "online" ? s.presence[userId]?.lastSeenAt : (lastSeenAt || s.presence[userId]?.lastSeenAt),
+            },
           },
         }));
       }

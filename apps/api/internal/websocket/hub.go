@@ -32,6 +32,7 @@ type Event struct {
 type Client struct {
 	UserID         string
 	ConversationID string
+	LastSeenAt     string
 	Send           chan []byte
 	hub            *Hub
 }
@@ -92,7 +93,7 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 			h.setPresence(client.UserID, true)
 			h.sendPresenceSnapshot(client, onlineUserIDs)
-			h.broadcastPresence(client.UserID, "online")
+			h.broadcastPresence(client.UserID, "online", client.LastSeenAt)
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -108,7 +109,7 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 			close(client.Send)
 			if shouldBroadcastOffline {
-				h.broadcastPresence(client.UserID, "offline")
+				h.broadcastPresence(client.UserID, "offline", client.LastSeenAt)
 			}
 
 		case msg := <-h.broadcast:
@@ -175,9 +176,10 @@ func (h *Hub) sendPresenceSnapshot(client *Client, onlineUserIDs []string) {
 	for _, userID := range onlineUserIDs {
 		payload, err := json.Marshal(Event{
 			Type: EventPresence,
-			Payload: mustMarshalPresence(map[string]string{
-				"user_id": userID,
-				"status":  "online",
+			Payload: mustMarshalPresence(map[string]any{
+				"user_id":      userID,
+				"status":       "online",
+				"last_seen_at": "",
 			}),
 		})
 		if err != nil {
@@ -191,7 +193,7 @@ func (h *Hub) sendPresenceSnapshot(client *Client, onlineUserIDs []string) {
 	}
 }
 
-func (h *Hub) broadcastPresence(userID, status string) {
+func (h *Hub) broadcastPresence(userID, status, lastSeenAt string) {
 	h.mu.RLock()
 	recipients := make([]string, 0, len(h.clients))
 	for recipientID := range h.clients {
@@ -201,9 +203,10 @@ func (h *Hub) broadcastPresence(userID, status string) {
 
 	event := Event{
 		Type: EventPresence,
-		Payload: mustMarshalPresence(map[string]string{
-			"user_id": userID,
-			"status":  status,
+		Payload: mustMarshalPresence(map[string]any{
+			"user_id":      userID,
+			"status":       status,
+			"last_seen_at": lastSeenAt,
 		}),
 	}
 

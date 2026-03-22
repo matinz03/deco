@@ -112,6 +112,7 @@ export interface TypingPayload {
 export interface PresencePayload {
   userId: string;
   status: UserPresence["status"];
+  lastSeenAt?: string;
 }
 
 export interface ReadPayload {
