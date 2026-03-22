@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
@@ -49,6 +49,7 @@ const NAV_ITEMS = [
 
 export function NavRail() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
 
   return (
@@ -66,7 +67,11 @@ export function NavRail() {
       {/* Nav items */}
       <div className="nav-items">
         {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href.split("?")[0]!);
+          const hrefPath = item.href.split("?")[0]!;
+          const hrefTab = new URLSearchParams(item.href.split("?")[1] ?? "").get("tab");
+          const isActive = hrefTab
+            ? pathname === hrefPath && searchParams.get("tab") === hrefTab
+            : (pathname === hrefPath && !searchParams.get("tab")) || pathname.startsWith(hrefPath + "/");
           return (
             <Link
               key={item.href}

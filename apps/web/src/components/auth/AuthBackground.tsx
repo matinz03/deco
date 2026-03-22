@@ -93,6 +93,7 @@ export function AuthBackground() {
         camera={{ position: [0, 0, 8], fov: 50 }}
         dpr={[1, 1.5]}
         gl={{ antialias: false, alpha: true }}
+        style={{ pointerEvents: "none" }}
       >
         <Scene />
       </Canvas>
