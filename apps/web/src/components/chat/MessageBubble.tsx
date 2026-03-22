@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "framer-motion";
 import { Avatar } from "@/components/ui/Avatar";
 import { format } from "date-fns";
 import type { Message } from "@deco/types";
@@ -16,7 +17,12 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
 
   return (
-    <div className={`flex items-end gap-2 ${isSent ? "flex-row-reverse" : "flex-row"} animate-fade-in`}>
+    <motion.div
+      className={`flex items-end gap-2 ${isSent ? "flex-row-reverse" : "flex-row"}`}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+    >
       {/* Avatar for received messages */}
       {!isSent && (
         <div className="w-7 shrink-0">
@@ -47,14 +53,16 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
         )}
 
         {/* Bubble */}
-        <div
+        <motion.div
           className={`relative px-3.5 py-2 rounded-2xl text-sm leading-relaxed
             ${isSent
               ? "bubble-sent rounded-br-sm"
               : "bubble-received rounded-bl-sm shadow-sm"
             }
-            ${isSent ? "animate-bubble-in-sent" : "animate-bubble-in-received"}
           `}
+          initial={{ scale: 0.92, opacity: 0, x: isSent ? 8 : -8 }}
+          animate={{ scale: 1, opacity: 1, x: 0 }}
+          transition={{ type: "spring", stiffness: 420, damping: 28 }}
         >
           {/* Media */}
           {msg.type === "image" && msg.mediaUrl && (
@@ -77,7 +85,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             {time}
             {isSent && <DeliveryIcon status={msg.status} />}
           </span>
-        </div>
+        </motion.div>
 
         {/* Reactions */}
         {msg.reactions.length > 0 && (
@@ -94,11 +102,21 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 function DeliveryIcon({ status }: { status: Message["status"] }) {
+  if (status === "sending") {
+    return <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60" />;
+  }
+  if (status === "failed") {
+    return (
+      <svg className="w-3.5 h-3.5 text-destructive" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+      </svg>
+    );
+  }
   if (status === "read") {
     return (
       <svg className="w-3.5 h-3.5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
