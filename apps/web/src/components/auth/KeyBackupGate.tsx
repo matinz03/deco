@@ -122,14 +122,16 @@ export function KeyBackupGate() {
                     ? "Create backup"
                     : "Restore key"}
               </button>
-              <button
-                type="button"
-                onClick={dismissBackupPrompt}
-                disabled={backupBusy}
-                className="rounded-xl border border-sidebar px-4 py-3 text-sm font-medium text-muted transition-colors hover:text-foreground"
-              >
-                Skip for now
-              </button>
+              {backupPrompt === "restore" && (
+                <button
+                  type="button"
+                  onClick={dismissBackupPrompt}
+                  disabled={backupBusy}
+                  className="rounded-xl border border-sidebar px-4 py-3 text-sm font-medium text-muted transition-colors hover:text-foreground"
+                >
+                  Skip for now
+                </button>
+              )}
             </div>
 
             <p className="mt-4 text-xs text-muted">

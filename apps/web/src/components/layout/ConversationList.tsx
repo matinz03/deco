@@ -53,6 +53,17 @@ export function ConversationList() {
 
       <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} />
 
+      {/* Mobile compose FAB — floats above the bottom nav */}
+      <button
+        className="md:hidden fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg active:scale-95 transition-transform"
+        aria-label="New conversation"
+        onClick={() => setModalOpen(true)}
+      >
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+      </button>
+
       <div className="sidebar-search-wrap">
         <div className="sidebar-search">
           <svg className="sidebar-search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

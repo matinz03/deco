@@ -33,12 +33,25 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const tapCount = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPos = useRef({ x: 0, y: 0 });
+  const reactionContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraft(text);
   }, [text, msg.id]);
 
   useEffect(() => () => { if (tapTimer.current) clearTimeout(tapTimer.current); }, []);
+
+  // Close emoji bar on outside click
+  useEffect(() => {
+    if (!showReactions) return;
+    function handleOutsideClick(e: MouseEvent) {
+      if (reactionContainerRef.current && !reactionContainerRef.current.contains(e.target as Node)) {
+        setShowReactions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [showReactions]);
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault();
@@ -79,7 +92,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
         setShowReactions((v) => !v);
       }
       tapCount.current = 0;
-    }, 500);
+    }, 300);
   }
 
   return (
@@ -115,7 +128,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
           )}
 
           {/* Bubble + reaction trigger */}
-          <div className="relative">
+          <div className="relative" ref={reactionContainerRef}>
             <motion.div
               className={`relative px-3.5 py-2 rounded-2xl text-sm leading-relaxed cursor-pointer select-none
                 ${isSent ? "bubble-sent rounded-br-sm" : "bubble-received rounded-bl-sm shadow-sm"}

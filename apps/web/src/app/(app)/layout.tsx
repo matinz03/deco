@@ -9,6 +9,7 @@ import { ConversationList } from "@/components/layout/ConversationList";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
+import { KeyBackupGate } from "@/components/auth/KeyBackupGate";
 
 const AuthBackground = dynamic(
   () => import("@/components/auth/AuthBackground").then((m) => m.AuthBackground),
@@ -82,6 +83,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Global keyboard shortcuts overlay */}
       <KeyboardShortcutsOverlay />
+
+      {/* Passphrase setup / restore gate */}
+      <KeyBackupGate />
     </div>
   );
 }
