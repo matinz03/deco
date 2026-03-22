@@ -27,6 +27,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const editMessage = useConversationStore((s) => s.editMessage);
   const deleteMessage = useConversationStore((s) => s.deleteMessage);
   const [showReactions, setShowReactions] = useState(false);
+  const [pickerAbove, setPickerAbove] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(text);
@@ -34,6 +35,13 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPos = useRef({ x: 0, y: 0 });
   const reactionContainerRef = useRef<HTMLDivElement>(null);
+
+  function openReactions() {
+    // Check if there's enough room above the bubble to show the picker (≥180px)
+    const rect = reactionContainerRef.current?.getBoundingClientRect();
+    setPickerAbove(!rect || rect.top >= 180);
+    setShowReactions((v) => !v);
+  }
 
   useEffect(() => {
     setDraft(text);
@@ -89,7 +97,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
     // Single tap — wait 1.5s, then open emoji bar if no second tap
     tapTimer.current = setTimeout(() => {
       if (tapCount.current === 1) {
-        setShowReactions((v) => !v);
+        openReactions();
       }
       tapCount.current = 0;
     }, 300);
@@ -202,7 +210,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
 
             {/* Reaction picker trigger — shows on hover (desktop) */}
             <button
-              onClick={(e) => { e.stopPropagation(); setShowReactions((v) => !v); }}
+              onClick={(e) => { e.stopPropagation(); openReactions(); }}
               className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity
                 w-6 h-6 rounded-full bg-surface border border-border shadow-sm flex items-center justify-center text-xs
                 ${isSent ? "-left-8" : "-right-8"}`}
@@ -214,7 +222,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             {/* Reaction picker popover */}
             <AnimatePresence>
               {showReactions && (
-                <div className={`absolute bottom-full mb-1 z-50 ${isSent ? "right-0" : "left-0"} w-max`}>
+                <div className={`absolute z-50 ${pickerAbove ? "bottom-full mb-1" : "top-full mt-1"} ${isSent ? "right-0" : "left-0"} w-max`}>
                   <ReactionPicker
                     onSelect={(emoji) => {
                       void toggleReaction(msg.conversationId, msg.id, emoji);

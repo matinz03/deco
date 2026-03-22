@@ -352,7 +352,27 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         void (async () => {
           const rawMsg = mapMessage(event.payload);
           const state = get();
-          const conversation = state.conversations.find((c) => c.id === rawMsg.conversationId);
+          let conversation = state.conversations.find((c) => c.id === rawMsg.conversationId);
+
+          // Conversation not in store yet — new conversation for this user.
+          // Fetch it and add to the list before processing the message.
+          if (!conversation) {
+            try {
+              const rawConv = await api.conversations.get(rawMsg.conversationId);
+              const [hydratedConv] = await hydrateConversationSummaries([rawConv]);
+              if (hydratedConv) {
+                set((s) => ({
+                  conversations: s.conversations.some((c) => c.id === hydratedConv.id)
+                    ? s.conversations
+                    : [hydratedConv, ...s.conversations].sort(sortConversationList),
+                }));
+                conversation = hydratedConv;
+              }
+            } catch {
+              // Couldn't fetch conversation — still process the message below
+            }
+          }
+
           const msg = await hydrateMessage(rawMsg, conversation);
           const currentUserId = useAuthStore.getState().user?.id;
           const shouldNotify =
