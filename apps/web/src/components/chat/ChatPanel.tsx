@@ -23,6 +23,7 @@ export function ChatPanel({ conversationId }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const initialScrollDone = useRef(false);
 
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
@@ -50,12 +51,30 @@ export function ChatPanel({ conversationId }: Props) {
     void api.messages.markRead(conversationId).catch(() => {});
   }, [conversationId, convMessages.length, markConversationRead]);
 
-  // Scroll to bottom on new messages only when already near bottom
+  // Reset initial scroll flag when conversation changes
   useEffect(() => {
+    initialScrollDone.current = false;
+    setShowScrollBtn(false);
+  }, [conversationId]);
+
+  // Scroll logic: instant jump on first load, smooth scroll on new messages
+  useEffect(() => {
+    if (loading || convMessages.length === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (!initialScrollDone.current) {
+      // First render of this conversation — jump instantly to bottom
+      initialScrollDone.current = true;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+
+    // Subsequent messages — smooth scroll only if already near bottom
     if (!showScrollBtn) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [convMessages.length, showScrollBtn]);
+  }, [loading, convMessages.length, showScrollBtn]);
 
   function handleScroll() {
     const el = scrollRef.current;
