@@ -6,6 +6,8 @@ import type {
   KeyBackupPayload,
   KeyBackupResponse,
   KeyBackupRecord,
+  Member,
+  MemberRole,
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -129,12 +131,27 @@ function mapKeyBackupResponse(r: any): KeyBackupResponse {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function mapMember(r: any) {
+export function mapMember(r: any): Member {
+  const maybeFlatUser =
+    r.user ??
+    ((r.id || r.username || r.display_name || r.displayName)
+      ? {
+          id: r.id,
+          username: r.username,
+          display_name: r.display_name ?? r.displayName,
+          avatar_url: r.avatar_url ?? r.avatarUrl,
+          public_key: r.public_key ?? r.publicKey,
+          bio: r.bio,
+          last_seen_at: r.last_seen_at ?? r.lastSeenAt,
+          created_at: r.created_at ?? r.createdAt,
+        }
+      : undefined);
+
   return {
     conversationId: r.conversation_id ?? r.conversationId ?? "",
-    userId: r.user_id ?? r.userId ?? "",
-    user: r.user ? mapUser(r.user) : undefined,
-    role: r.role ?? "member",
+    userId: r.user_id ?? r.userId ?? maybeFlatUser?.id ?? "",
+    user: maybeFlatUser ? mapUser(maybeFlatUser) : undefined,
+    role: (r.role ?? "member") as MemberRole,
     joinedAt: r.joined_at ?? r.joinedAt ?? "",
     lastReadAt: r.last_read_at ?? r.lastReadAt ?? "",
   };
@@ -273,6 +290,37 @@ export const api = {
         }),
       });
       return mapConversation(raw);
+    },
+
+    remove: async (id: string) => {
+      await request(`/api/v1/conversations/${id}`, {
+        method: "DELETE",
+      });
+    },
+
+    listMembers: async (id: string) => {
+      const raw = await request<unknown[]>(`/api/v1/conversations/${id}/members`);
+      return raw.map((member) => ({ ...mapMember(member), conversationId: id }));
+    },
+
+    addMember: async (id: string, userId: string) => {
+      await request(`/api/v1/conversations/${id}/members`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId }),
+      });
+    },
+
+    updateMemberRole: async (id: string, userId: string, role: "admin" | "member") => {
+      await request(`/api/v1/conversations/${id}/members/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+    },
+
+    removeMember: async (id: string, userId: string) => {
+      await request(`/api/v1/conversations/${id}/members/${userId}`, {
+        method: "DELETE",
+      });
     },
   },
 

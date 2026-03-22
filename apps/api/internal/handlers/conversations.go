@@ -270,6 +270,43 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, conv)
 }
 
+func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	userID := middleware.GetUserID(r)
+
+	var conversationType string
+	var role string
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT c.type, mb.role
+		FROM conversations c
+		JOIN members mb ON mb.conversation_id = c.id
+		WHERE c.id = $1 AND mb.user_id = $2
+	`, convID, userID).Scan(&conversationType, &role)
+	if err != nil {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
+	if conversationType != string(models.ConversationTypeGroup) {
+		respondError(w, http.StatusBadRequest, "only groups can be deleted")
+		return
+	}
+
+	if role != "owner" {
+		respondError(w, http.StatusForbidden, "only the group owner can delete this group")
+		return
+	}
+
+	if _, err := h.pool.Exec(r.Context(), `
+		DELETE FROM conversations WHERE id = $1
+	`, convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to delete group")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "group deleted"})
+}
+
 func (h *ConversationHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "conversationID")
 	userID := middleware.GetUserID(r)
@@ -340,6 +377,52 @@ func (h *ConversationHandler) AddMember(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "member added"})
 }
 
+func (h *ConversationHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	targetUserID := chi.URLParam(r, "userID")
+	userID := middleware.GetUserID(r)
+
+	if !h.canManageRoles(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "only the group owner can manage admin roles")
+		return
+	}
+
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	req.Role = strings.TrimSpace(req.Role)
+	if req.Role != "admin" && req.Role != "member" {
+		respondError(w, http.StatusBadRequest, "role must be admin or member")
+		return
+	}
+
+	if targetUserID == userID {
+		respondError(w, http.StatusBadRequest, "owner role cannot be changed")
+		return
+	}
+
+	commandTag, err := h.pool.Exec(r.Context(), `
+		UPDATE members
+		SET role = $1
+		WHERE conversation_id = $2 AND user_id = $3 AND role <> 'owner'
+	`, req.Role, convID, targetUserID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update member role")
+		return
+	}
+	if commandTag.RowsAffected() == 0 {
+		respondError(w, http.StatusNotFound, "member not found")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "member role updated"})
+}
+
 func (h *ConversationHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "conversationID")
 	targetUserID := chi.URLParam(r, "userID")
@@ -350,9 +433,39 @@ func (h *ConversationHandler) RemoveMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	h.pool.Exec(r.Context(), `
+	var actorRole string
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT role FROM members WHERE conversation_id = $1 AND user_id = $2
+	`, convID, userID).Scan(&actorRole); err != nil {
+		respondError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	var targetRole string
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT role FROM members WHERE conversation_id = $1 AND user_id = $2
+	`, convID, targetUserID).Scan(&targetRole)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "member not found")
+		return
+	}
+
+	if targetRole == "owner" {
+		respondError(w, http.StatusBadRequest, "owner cannot be removed")
+		return
+	}
+
+	if actorRole != "owner" && targetRole != "member" {
+		respondError(w, http.StatusForbidden, "admins can only remove regular members")
+		return
+	}
+
+	if _, err := h.pool.Exec(r.Context(), `
 		DELETE FROM members WHERE conversation_id = $1 AND user_id = $2
-	`, convID, targetUserID)
+	`, convID, targetUserID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to remove member")
+		return
+	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "member removed"})
 }
@@ -444,4 +557,14 @@ func (h *ConversationHandler) canManageMembers(r *http.Request, convID, userID s
 		return false
 	}
 	return role == "owner" || role == "admin"
+}
+
+func (h *ConversationHandler) canManageRoles(r *http.Request, convID, userID string) bool {
+	var role string
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT role FROM members WHERE conversation_id = $1 AND user_id = $2
+	`, convID, userID).Scan(&role); err != nil {
+		return false
+	}
+	return role == "owner"
 }
