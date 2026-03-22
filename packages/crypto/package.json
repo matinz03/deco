@@ -9,6 +9,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@deco/types": "workspace:*",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1"
   },

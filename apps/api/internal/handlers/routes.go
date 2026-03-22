@@ -26,6 +26,9 @@ func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, lo
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/me", h.GetMe)
 			r.Patch("/me", h.UpdateMe)
+			r.Get("/me/key-backup", h.GetKeyBackup)
+			r.Put("/me/key-backup", h.PutKeyBackup)
+			r.Delete("/me/key-backup", h.DeleteKeyBackup)
 			r.Get("/search", h.Search)
 			r.Get("/{userID}", h.GetUser)
 		})

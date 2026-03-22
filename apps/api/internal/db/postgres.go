@@ -33,3 +33,41 @@ func Connect(databaseURL string) (*pgxpool.Pool, error) {
 
 	return pool, nil
 }
+
+func EnsureSchema(pool *pgxpool.Pool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS user_key_backups (
+			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			version INTEGER NOT NULL,
+			kdf TEXT NOT NULL,
+			iterations INTEGER NOT NULL,
+			salt TEXT NOT NULL,
+			cipher TEXT NOT NULL,
+			iv TEXT NOT NULL,
+			ciphertext TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger WHERE tgname = 'trg_user_key_backups_updated_at'
+			) THEN
+				CREATE TRIGGER trg_user_key_backups_updated_at
+				  BEFORE UPDATE ON user_key_backups
+				  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+			END IF;
+		END $$;
+	`)
+
+	return err
+}

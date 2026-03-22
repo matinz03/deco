@@ -1,5 +1,12 @@
-import type { User, Conversation, Message } from "@deco/types";
-import type { WSEvent } from "@deco/types";
+import type {
+  User,
+  Conversation,
+  Message,
+  WSEvent,
+  KeyBackupPayload,
+  KeyBackupResponse,
+  KeyBackupRecord,
+} from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -95,6 +102,29 @@ export function mapConversation(r: any): Conversation {
     members: r.members ? r.members.map(mapMember) : undefined,
     createdAt: r.created_at ?? r.createdAt ?? "",
     updatedAt: r.updated_at ?? r.updatedAt ?? "",
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapKeyBackupRecord(r: any): KeyBackupRecord {
+  return {
+    version: r.version,
+    kdf: r.kdf,
+    iterations: r.iterations,
+    salt: r.salt,
+    cipher: r.cipher,
+    iv: r.iv,
+    ciphertext: r.ciphertext,
+    createdAt: r.created_at ?? r.createdAt ?? "",
+    updatedAt: r.updated_at ?? r.updatedAt ?? "",
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapKeyBackupResponse(r: any): KeyBackupResponse {
+  return {
+    exists: Boolean(r?.exists),
+    backup: r?.backup ? mapKeyBackupRecord(r.backup) : undefined,
   };
 }
 
@@ -279,6 +309,26 @@ export const api = {
     getMe: async () => {
       const raw = await request<unknown>("/api/v1/users/me");
       return mapUser(raw);
+    },
+
+    getKeyBackup: async () => {
+      const raw = await request<unknown>("/api/v1/users/me/key-backup");
+      return mapKeyBackupResponse(raw);
+    },
+
+    putKeyBackup: async (payload: KeyBackupPayload) => {
+      const raw = await request<unknown>("/api/v1/users/me/key-backup", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      return mapKeyBackupResponse(raw);
+    },
+
+    deleteKeyBackup: async () => {
+      const raw = await request<unknown>("/api/v1/users/me/key-backup", {
+        method: "DELETE",
+      });
+      return mapKeyBackupResponse(raw);
     },
   },
 };

@@ -111,3 +111,16 @@ type Member struct {
 	JoinedAt       time.Time  `json:"joined_at" db:"joined_at"`
 	LastReadAt     time.Time  `json:"last_read_at" db:"last_read_at"`
 }
+
+type KeyBackup struct {
+	UserID     string    `json:"user_id" db:"user_id"`
+	Version    int       `json:"version" db:"version"`
+	KDF        string    `json:"kdf" db:"kdf"`
+	Iterations int       `json:"iterations" db:"iterations"`
+	Salt       string    `json:"salt" db:"salt"`
+	Cipher     string    `json:"cipher" db:"cipher"`
+	IV         string    `json:"iv" db:"iv"`
+	Ciphertext string    `json:"ciphertext" db:"ciphertext"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+}
