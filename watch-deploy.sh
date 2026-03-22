@@ -16,9 +16,13 @@ while true; do
 
   if [ "$CURRENT" != "$LAST" ]; then
     echo "[$(date '+%H:%M:%S')] New commit detected: $CURRENT — deploying..."
-    bash ~/deco/deploy.sh
+    if bash ~/deco/deploy.sh; then
+      echo "[$(date '+%H:%M:%S')] Deploy succeeded."
+    else
+      echo "[$(date '+%H:%M:%S')] Deploy FAILED — check logs above."
+    fi
     LAST=$CURRENT
-    echo "[$(date '+%H:%M:%S')] Deploy done. Watching for next change..."
+    echo "[$(date '+%H:%M:%S')] Watching for next change..."
   fi
 
   sleep $INTERVAL
