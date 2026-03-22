@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Avatar } from "@/components/ui/Avatar";
+import { useAuthStore } from "@/store/auth";
+import { useConversationStore } from "@/store/conversations";
 import { ReactionPicker } from "./ReactionPicker";
 import { MessageContextMenu } from "./MessageContextMenu";
 import { format } from "date-fns";
@@ -18,6 +20,8 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const text = getMessageText(msg);
   const time = format(new Date(msg.sentAt), "HH:mm");
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const toggleReaction = useConversationStore((s) => s.toggleReaction);
   const [showReactions, setShowReactions] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -110,7 +114,9 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
               {showReactions && (
                 <div className={`absolute bottom-full mb-1 z-50 ${isSent ? "right-0" : "left-0"}`}>
                   <ReactionPicker
-                    onSelect={() => {/* wire to api.messages.react when ready */}}
+                    onSelect={(emoji) => {
+                      void toggleReaction(msg.conversationId, msg.id, emoji);
+                    }}
                     onClose={() => setShowReactions(false)}
                   />
                 </div>
@@ -121,10 +127,15 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
           {/* Reactions */}
           {msg.reactions.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {groupReactions(msg.reactions).map(([emoji, count]) => (
+              {groupReactions(msg.reactions, currentUserId).map(({ emoji, count, reactedByMe }) => (
                 <button
                   key={emoji}
-                  className="flex items-center gap-1 text-xs bg-muted hover:bg-accent px-2 py-0.5 rounded-full transition-colors"
+                  onClick={() => void toggleReaction(msg.conversationId, msg.id, emoji)}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-colors ${
+                    reactedByMe
+                      ? "bg-primary/15 text-primary hover:bg-primary/20"
+                      : "bg-muted hover:bg-accent"
+                  }`}
                 >
                   <span>{emoji}</span>
                   {count > 1 && <span className="text-muted">{count}</span>}
@@ -186,10 +197,21 @@ function DeliveryIcon({ status }: { status: Message["status"] }) {
   );
 }
 
-function groupReactions(reactions: Message["reactions"]): [string, number][] {
-  const map = new Map<string, number>();
-  for (const r of reactions) map.set(r.emoji, (map.get(r.emoji) ?? 0) + 1);
-  return Array.from(map.entries());
+function groupReactions(reactions: Message["reactions"], currentUserId?: string | null) {
+  const map = new Map<string, { count: number; reactedByMe: boolean }>();
+
+  for (const reaction of reactions) {
+    const existing = map.get(reaction.emoji) ?? { count: 0, reactedByMe: false };
+    existing.count += 1;
+    existing.reactedByMe = existing.reactedByMe || reaction.userId === currentUserId;
+    map.set(reaction.emoji, existing);
+  }
+
+  return Array.from(map.entries()).map(([emoji, value]) => ({
+    emoji,
+    count: value.count,
+    reactedByMe: value.reactedByMe,
+  }));
 }
 
 function getMessageText(message: Message) {
