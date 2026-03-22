@@ -114,12 +114,12 @@ export function NavRail({
       <button
         type="button"
         onClick={onToggleSidebar}
-        className="absolute -right-4 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-sidebar bg-surface text-muted shadow-lg transition-colors hover:text-foreground md:flex"
+        className="absolute -right-4 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-sidebar bg-surface text-muted shadow-lg transition-colors hover:text-foreground md:flex"
         aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         <svg
-          className={`h-4 w-4 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`}
+          className={`h-4 w-4 transition-transform ${sidebarCollapsed ? "" : "rotate-180"}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
