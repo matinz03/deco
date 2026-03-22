@@ -53,8 +53,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             const privateKey = await loadPrivateKey(user.id);
             if (!privateKey) return msg;
 
-            const sharedSecret = await deriveSharedSecret(otherUser.publicKey, privateKey);
-            const decryptedContent = await decryptMessage(msg.encryptedContent, sharedSecret);
+            const sharedSecret = deriveSharedSecret(otherUser.publicKey, privateKey);
+            const decryptedContent = decryptMessage(msg.encryptedContent, sharedSecret);
             return { ...msg, decryptedContent };
           } catch {
             return msg; // Return as-is if decryption fails
@@ -103,8 +103,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           const privateKey = await loadPrivateKey(user.id);
           if (privateKey) {
             const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-            const sharedSecret = await derive(otherUser.publicKey, privateKey);
-            encryptedContent = await encryptMessage(text, sharedSecret);
+            const sharedSecret = derive(otherUser.publicKey, privateKey);
+            encryptedContent = encryptMessage(text, sharedSecret);
           }
         }
 

@@ -42,6 +42,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { token, user } = await api.auth.login({ email, phone, password });
     localStorage.setItem("deco_token", token);
     localStorage.setItem("deco_user", JSON.stringify(user));
+    document.cookie = `auth_token=${token}; path=/; SameSite=Lax; Max-Age=604800`;
     set({ token, user });
     wsClient.connect(process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080");
   },
@@ -64,6 +65,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     localStorage.setItem("deco_token", token);
     localStorage.setItem("deco_user", JSON.stringify(user));
+    document.cookie = `auth_token=${token}; path=/; SameSite=Lax; Max-Age=604800`;
     set({ token, user });
     wsClient.connect(process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080");
   },
@@ -72,6 +74,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     await api.auth.logout().catch(() => {});
     localStorage.removeItem("deco_token");
     localStorage.removeItem("deco_user");
+    document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
     wsClient.disconnect();
     set({ token: null, user: null });
   },

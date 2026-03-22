@@ -12,8 +12,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
 
     apply(mq.matches);
-    mq.addEventListener("change", (e) => apply(e.matches));
-    return () => mq.removeEventListener("change", (e) => apply(e.matches));
+    const handleChange = (e: MediaQueryListEvent) => apply(e.matches);
+    mq.addEventListener("change", handleChange);
+    return () => mq.removeEventListener("change", handleChange);
   }, []);
 
   return <>{children}</>;
