@@ -1,10 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
+import { useTheme } from "@/components/ui/ThemeProvider";
 
 export default function SettingsPage() {
+  const router = useRouter();
+  const { theme, setTheme } = useTheme();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const hasLocalPrivateKey = useAuthStore((s) => s.hasLocalPrivateKey);
@@ -72,6 +76,33 @@ export default function SettingsPage() {
       <h1 className="mb-8 text-xl font-semibold">Settings</h1>
 
       <section className="mb-8">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Appearance</h2>
+        <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Theme</p>
+              <p className="text-xs text-muted">Choose your preferred colour scheme</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-xl bg-muted p-1">
+              {(["light", "system", "dark"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTheme(t)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all ${
+                    theme === t
+                      ? "bg-surface text-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Profile</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
           <div className="flex items-center gap-4 border-b border-sidebar px-4 py-4">
@@ -103,8 +134,8 @@ export default function SettingsPage() {
               <span
                 className={`rounded-full px-2.5 py-1 text-xs font-medium ${
                   hasServerKeyBackup
-                    ? "bg-emerald-500/15 text-emerald-300"
-                    : "bg-amber-500/15 text-amber-300"
+                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
                 }`}
               >
                 {hasServerKeyBackup ? "Backed up" : "Not backed up"}
@@ -122,10 +153,10 @@ export default function SettingsPage() {
             {(backupWarning || backupError || localError) && (
               <div className="mt-4 space-y-2">
                 {backupWarning && (
-                  <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{backupWarning}</p>
+                  <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">{backupWarning}</p>
                 )}
                 {(backupError || localError) && (
-                  <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                     {localError || backupError}
                   </p>
                 )}
@@ -174,7 +205,7 @@ export default function SettingsPage() {
               <button
                 onClick={() => void handleDeleteBackup()}
                 disabled={backupBusy}
-                className="rounded-xl border border-red-500/30 px-4 py-3 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10"
+                className="rounded-xl border border-red-500/40 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/10"
               >
                 Delete backup
               </button>
@@ -253,8 +284,8 @@ export default function SettingsPage() {
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Account</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
           <button
-            onClick={() => void logout()}
-            className="w-full px-4 py-3 text-left text-sm text-red-400 transition-colors hover:bg-red-500/10"
+            onClick={async () => { await logout(); router.replace("/login"); }}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/10"
           >
             Sign out
           </button>

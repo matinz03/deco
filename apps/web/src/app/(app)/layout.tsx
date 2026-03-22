@@ -2,11 +2,17 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
+import dynamic from "next/dynamic";
 import { NavRail } from "@/components/layout/NavRail";
 import { ConversationList } from "@/components/layout/ConversationList";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
+
+const AuthBackground = dynamic(
+  () => import("@/components/auth/AuthBackground").then((m) => m.AuthBackground),
+  { ssr: false }
+);
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -18,7 +24,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const showMainMobile = !isInboxRoot;
 
   return (
-    <div className="h-app flex overflow-hidden bg-background">
+    <div className="h-app flex overflow-hidden bg-background relative">
+      <div className="absolute inset-0 pointer-events-none opacity-40">
+        <AuthBackground />
+      </div>
       {/* Panel 1 — Nav rail: hidden on mobile, visible md+ */}
       <div className="hidden md:relative md:block md:shrink-0">
         <NavRail />
