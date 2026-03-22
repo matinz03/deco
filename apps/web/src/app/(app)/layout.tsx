@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import { NavRail } from "@/components/layout/NavRail";
 import { ConversationList } from "@/components/layout/ConversationList";
+import { SearchPanel } from "@/components/layout/SearchPanel";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
@@ -20,8 +21,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isInboxRoot = pathname === "/inbox";
-  const showSidebarMobile = isInboxRoot;
-  const showMainMobile = !isInboxRoot;
+  const isSearchPage = pathname === "/search";
+  const showSidebarMobile = isInboxRoot || isSearchPage;
+  const showMainMobile = !isInboxRoot && !isSearchPage;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -68,7 +70,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       >
         <NoiseOverlay />
         <Suspense>
-          <ConversationList />
+          {isSearchPage ? <SearchPanel /> : <ConversationList />}
         </Suspense>
       </aside>
 
