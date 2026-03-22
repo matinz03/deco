@@ -1,4 +1,5 @@
 import type { User, Conversation, Message } from "@deco/types";
+import type { WSEvent } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -31,7 +32,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // ─── Response mappers (Go API returns snake_case, TS types are camelCase) ─────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapUser(r: any): User {
+export function mapUser(r: any): User {
   return {
     id: r.id,
     username: r.username ?? "",
@@ -45,7 +46,7 @@ function mapUser(r: any): User {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapMessage(r: any): Message {
+export function mapMessage(r: any): Message {
   return {
     id: r.id,
     conversationId: r.conversation_id ?? r.conversationId ?? "",
@@ -79,7 +80,7 @@ function mapReaction(r: any) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapConversation(r: any): Conversation {
+export function mapConversation(r: any): Conversation {
   return {
     id: r.id,
     type: r.type ?? "direct",
@@ -97,7 +98,7 @@ function mapConversation(r: any): Conversation {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapMember(r: any) {
+export function mapMember(r: any) {
   return {
     conversationId: r.conversation_id ?? r.conversationId ?? "",
     userId: r.user_id ?? r.userId ?? "",
@@ -106,6 +107,37 @@ function mapMember(r: any) {
     joinedAt: r.joined_at ?? r.joinedAt ?? "",
     lastReadAt: r.last_read_at ?? r.lastReadAt ?? "",
   };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapWSEvent(event: any): WSEvent {
+  switch (event?.type) {
+    case "message.new":
+    case "message.edited":
+      return { type: event.type, payload: mapMessage(event.payload) };
+    case "message.read":
+      return {
+        type: event.type,
+        payload: {
+          conversationId: event.payload?.conversation_id ?? event.payload?.conversationId ?? "",
+          userId: event.payload?.user_id ?? event.payload?.userId ?? "",
+          lastReadAt: event.payload?.last_read_at ?? event.payload?.lastReadAt ?? "",
+        },
+      };
+    case "message.deleted":
+      return {
+        type: event.type,
+        payload: {
+          id: event.payload?.id ?? "",
+          conversationId: event.payload?.conversation_id ?? event.payload?.conversationId ?? "",
+        },
+      };
+    case "message.reaction":
+    case "typing":
+    case "presence":
+    default:
+      return event as WSEvent;
+  }
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -197,6 +229,11 @@ export const api = {
       request(`/api/v1/conversations/${conversationId}/messages/${messageId}/reactions`, {
         method: "POST",
         body: JSON.stringify({ emoji }),
+      }),
+
+    markRead: (conversationId: string) =>
+      request(`/api/v1/conversations/${conversationId}/messages/read`, {
+        method: "POST",
       }),
   },
 

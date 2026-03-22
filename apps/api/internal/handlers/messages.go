@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/matinz03/deco/internal/config"
@@ -289,6 +290,11 @@ func (h *MessageHandler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	msgID := chi.URLParam(r, "messageID")
 	userID := middleware.GetUserID(r)
 
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
 	var req struct {
 		Emoji string `json:"emoji"`
 	}
@@ -327,6 +333,11 @@ func (h *MessageHandler) RemoveReaction(w http.ResponseWriter, r *http.Request) 
 	emoji := chi.URLParam(r, "emoji")
 	userID := middleware.GetUserID(r)
 
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
 	h.pool.Exec(r.Context(), `
 		DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3
 	`, msgID, userID, emoji)
@@ -351,15 +362,25 @@ func (h *MessageHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "conversationID")
 	userID := middleware.GetUserID(r)
 
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
+	now := time.Now().UTC()
 	h.pool.Exec(r.Context(), `
-		UPDATE members SET last_read_at = NOW()
+		UPDATE members SET last_read_at = $3
 		WHERE conversation_id = $1 AND user_id = $2
-	`, convID, userID)
+	`, convID, userID, now)
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
 			Type:    websocket.EventRead,
-			Payload: mustMarshal(map[string]string{"conversation_id": convID, "user_id": userID}),
+			Payload: mustMarshal(map[string]string{
+				"conversation_id": convID,
+				"user_id":         userID,
+				"last_read_at":    now.Format(time.RFC3339Nano),
+			}),
 		})
 	}
 
@@ -385,4 +406,14 @@ func (h *MessageHandler) broadcastToConversation(r *http.Request, convID string,
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func (h *MessageHandler) isConversationMember(r *http.Request, convID, userID string) bool {
+	var count int
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT COUNT(*) FROM members WHERE conversation_id = $1 AND user_id = $2
+	`, convID, userID).Scan(&count); err != nil {
+		return false
+	}
+	return count > 0
 }

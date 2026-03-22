@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -65,13 +66,13 @@ func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logge
 		pool.Exec(r.Context(), `UPDATE users SET last_seen_at = NOW() WHERE id = $1`, userID)
 
 		go client.writePump(conn, logger)
-		go client.readPump(conn, hub, logger)
+		go client.readPump(conn, hub, pool, logger)
 	}
 }
 
 // readPump pumps messages from the WebSocket connection to the hub.
 // Handles incoming client events (typing, read receipts).
-func (c *Client) readPump(conn *websocket.Conn, hub *Hub, logger *zap.Logger) {
+func (c *Client) readPump(conn *websocket.Conn, hub *Hub, pool *pgxpool.Pool, logger *zap.Logger) {
 	defer func() {
 		hub.unregister <- c
 		conn.Close()
@@ -114,8 +115,16 @@ func (c *Client) readPump(conn *websocket.Conn, hub *Hub, logger *zap.Logger) {
 						"conversation_id": p.ConversationID,
 					}),
 				}
-				// Broadcast back through Redis so all instances can deliver it
-				hub.SendToUser(c.UserID, outEvent) //nolint:errcheck — best-effort typing
+				rows, err := pool.Query(context.Background(), `SELECT user_id FROM members WHERE conversation_id = $1`, p.ConversationID)
+				if err == nil {
+					for rows.Next() {
+						var userID string
+						if rows.Scan(&userID) == nil && userID != c.UserID {
+							hub.SendToUser(userID, outEvent) //nolint:errcheck
+						}
+					}
+					rows.Close()
+				}
 			}
 
 		case EventRead:

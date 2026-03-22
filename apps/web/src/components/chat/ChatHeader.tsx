@@ -6,17 +6,19 @@ import type { Conversation } from "@deco/types";
 interface Props { conversation: Conversation; }
 
 export function ChatHeader({ conversation }: Props) {
+  const title = conversation.name || "Unknown conversation";
+
   return (
     <header className="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface shrink-0">
       <div className="relative">
-        <Avatar src={conversation.avatarUrl} name={conversation.name} size="sm" />
+        <Avatar src={conversation.avatarUrl} name={title} size="sm" />
         {conversation.type === "direct" && (
           <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-500 border-2 border-surface" />
         )}
       </div>
 
       <div className="flex-1 min-w-0">
-        <h3 className="text-sm font-semibold truncate">{conversation.name}</h3>
+        <h3 className="text-sm font-semibold truncate">{title}</h3>
         <p className="text-xs text-muted truncate">
           {conversation.type === "direct" ? "Online" : `${conversation.memberCount} members`}
         </p>

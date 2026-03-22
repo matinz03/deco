@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
+import { api } from "@/lib/api";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
@@ -19,9 +20,15 @@ export function ChatPanel({ conversationId }: Props) {
 
   useEffect(() => {
     setActiveConversation(conversationId);
-    fetchMessages(conversationId);
+    void fetchMessages(conversationId);
+    void api.messages.markRead(conversationId).catch(() => {});
     return () => setActiveConversation(null);
   }, [conversationId, setActiveConversation, fetchMessages]);
+
+  useEffect(() => {
+    if (convMessages.length === 0) return;
+    void api.messages.markRead(conversationId).catch(() => {});
+  }, [conversationId, convMessages.length]);
 
   // Scroll to bottom on new messages
   useEffect(() => {

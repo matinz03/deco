@@ -37,6 +37,7 @@ type Conversation struct {
 	LastMessage  *Message         `json:"last_message,omitempty"`
 	UnreadCount  int              `json:"unread_count"`
 	MemberCount  int              `json:"member_count"`
+	Members      []Member         `json:"members,omitempty"`
 	CreatedAt    time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at" db:"updated_at"`
 }

@@ -18,7 +18,7 @@ export function ConversationList() {
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
   const filtered = conversations.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase())
+    (c.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -71,7 +71,10 @@ export function ConversationList() {
 }
 
 function ConversationItem({ conversation: c, isActive }: { conversation: Conversation; isActive: boolean }) {
-  const lastMessageText = c.lastMessage?.decryptedContent ?? "…";
+  const title = c.name || "Unknown conversation";
+  const lastMessageText = c.lastMessage?.isDeleted
+    ? "Message deleted"
+    : c.lastMessage?.decryptedContent ?? c.lastMessage?.encryptedContent ?? "…";
   const timeStr = c.updatedAt ? formatDistanceToNowStrict(new Date(c.updatedAt), { addSuffix: false }) : "";
 
   return (
@@ -85,7 +88,7 @@ function ConversationItem({ conversation: c, isActive }: { conversation: Convers
         }`}
       >
         <div className="relative shrink-0">
-          <Avatar src={c.avatarUrl} name={c.name} size="md" />
+          <Avatar src={c.avatarUrl} name={title} size="md" />
           {c.type === "direct" && (
             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-sidebar" />
           )}
@@ -93,7 +96,7 @@ function ConversationItem({ conversation: c, isActive }: { conversation: Convers
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium truncate">{c.name}</span>
+            <span className="text-sm font-medium truncate">{title}</span>
             <span className="text-[11px] text-muted shrink-0">{timeStr}</span>
           </div>
           <div className="flex items-center justify-between gap-2 mt-0.5">

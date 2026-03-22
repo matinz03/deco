@@ -73,6 +73,7 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request) {
+	requesterID := middleware.GetUserID(r)
 	q := r.URL.Query().Get("q")
 	if len(q) < 2 {
 		respondError(w, http.StatusBadRequest, "query must be at least 2 characters")
@@ -82,9 +83,10 @@ func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT id, username, display_name, public_key, avatar_url, bio, last_seen_at, created_at
 		FROM users
-		WHERE username ILIKE $1 OR display_name ILIKE $1
+		WHERE id <> $2
+		  AND (username ILIKE $1 OR display_name ILIKE $1)
 		LIMIT 20
-	`, "%"+q+"%")
+	`, "%"+q+"%", requesterID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "search failed")
 		return

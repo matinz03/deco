@@ -1,4 +1,5 @@
 import type { WSEvent } from "@deco/types";
+import { mapWSEvent } from "./api";
 
 type Listener = (event: WSEvent) => void;
 
@@ -26,9 +27,16 @@ class WSClient {
 
     this.ws.onmessage = (e) => {
       try {
-        const event: WSEvent = JSON.parse(e.data);
-        this.listeners.get(event.type)?.forEach((fn) => fn(event));
-        this.listeners.get("*")?.forEach((fn) => fn(event));
+        const chunks = String(e.data)
+          .split("\n")
+          .map((chunk) => chunk.trim())
+          .filter(Boolean);
+
+        for (const chunk of chunks) {
+          const event: WSEvent = mapWSEvent(JSON.parse(chunk));
+          this.listeners.get(event.type)?.forEach((fn) => fn(event));
+          this.listeners.get("*")?.forEach((fn) => fn(event));
+        }
       } catch {}
     };
 

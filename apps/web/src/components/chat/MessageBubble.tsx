@@ -13,6 +13,7 @@ interface Props {
 export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const text = msg.decryptedContent ?? msg.encryptedContent;
   const time = format(new Date(msg.sentAt), "HH:mm");
+  const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
 
   return (
     <div className={`flex items-end gap-2 ${isSent ? "flex-row-reverse" : "flex-row"} animate-fade-in`}>
@@ -22,7 +23,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
           {showAvatar && (
             <Avatar
               src={msg.sender?.avatarUrl}
-              name={msg.sender?.displayName ?? "?"}
+              name={senderName}
               size="xs"
             />
           )}
@@ -33,7 +34,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
         {/* Sender name for groups (received only) */}
         {!isSent && showAvatar && msg.sender && (
           <span className="text-[11px] font-medium text-muted px-1">
-            {msg.sender.displayName}
+            {senderName}
           </span>
         )}
 

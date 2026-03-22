@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "@/lib/api";
+import { api, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
 import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
 import type { Conversation, Message, WSEvent } from "@deco/types";
@@ -34,36 +34,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async fetchConversations() {
-      const conversations = await api.conversations.list();
+      const rawConversations = await api.conversations.list();
+      const conversations = await hydrateConversationSummaries(rawConversations);
       set({ conversations });
     },
 
     async fetchMessages(conversationId) {
       const rawMessages = await api.messages.list(conversationId);
-      const user = useAuthStore.getState().user;
-      if (!user) return;
-
-      // Decrypt messages client-side
-      const decrypted = await Promise.all(
-        rawMessages.map(async (msg) => {
-          try {
-            const conversation = get().conversations.find((c) => c.id === conversationId);
-            const otherUser = conversation?.members?.find((m) => m.userId !== user.id)?.user;
-            if (!otherUser) return msg;
-
-            const privateKey = await loadPrivateKey(user.id);
-            if (!privateKey) return msg;
-
-            const sharedSecret = deriveSharedSecret(otherUser.publicKey, privateKey);
-            const decryptedContent = decryptMessage(msg.encryptedContent, sharedSecret);
-            return { ...msg, decryptedContent };
-          } catch {
-            return msg; // Return as-is if decryption fails
-          }
-        })
-      );
-
-      set((s) => ({ messages: { ...s.messages, [conversationId]: decrypted } }));
+      const conversation = get().conversations.find((c) => c.id === conversationId);
+      const decrypted = await hydrateMessages(rawMessages, conversation);
+      set((s) => ({ messages: { ...s.messages, [conversationId]: sortMessages(decrypted) } }));
     },
 
     async sendMessage(conversationId, text) {
@@ -111,12 +91,17 @@ export const useConversationStore = create<ConversationState>((set, get) => {
 
         const confirmed = await api.messages.send(conversationId, { encryptedContent });
 
-        // Replace optimistic message with confirmed one
+        const confirmedMessage = await hydrateMessage(confirmed, conversation);
+
+        // Replace optimistic message with confirmed one and dedupe if the websocket arrived first
         set((s) => ({
           messages: {
             ...s.messages,
-            [conversationId]: s.messages[conversationId]!.map((m) =>
-              m.id === tempId ? { ...confirmed, decryptedContent: text } : m
+            [conversationId]: upsertMessage(
+              (s.messages[conversationId] ?? []).map((m) =>
+                m.id === tempId ? { ...confirmedMessage, decryptedContent: text } : m
+              ).filter((m, index, all) => m.id !== tempId || all.findIndex((item) => item.id === confirmedMessage.id) === -1),
+              { ...confirmedMessage, decryptedContent: text }
             ),
           },
         }));
@@ -134,30 +119,56 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async createConversation(opts) {
-      const conv = await api.conversations.create(opts);
+      const [conv] = await hydrateConversationSummaries([await api.conversations.create(opts)]);
+      if (!conv) {
+        throw new Error("Failed to create conversation");
+      }
       set((s) => ({
         conversations: s.conversations.some((c) => c.id === conv.id)
           ? s.conversations
-          : [conv, ...s.conversations],
+          : [conv, ...s.conversations].sort(sortConversationList),
       }));
       return conv;
     },
 
     handleIncomingEvent(event) {
       if (event.type === "message.new") {
-        const msg = event.payload as Message;
-        set((s) => ({
-          messages: {
-            ...s.messages,
-            [msg.conversationId]: [...(s.messages[msg.conversationId] ?? []), msg],
-          },
-          // Update last message in conversation list
-          conversations: s.conversations.map((c) =>
-            c.id === msg.conversationId
-              ? { ...c, lastMessage: msg, updatedAt: msg.sentAt }
-              : c
-          ),
-        }));
+        void (async () => {
+          const rawMsg = mapMessage(event.payload);
+          const state = get();
+          const conversation = state.conversations.find((c) => c.id === rawMsg.conversationId);
+          const msg = await hydrateMessage(rawMsg, conversation);
+          const currentUserId = useAuthStore.getState().user?.id;
+          const shouldNotify =
+            msg.senderId !== currentUserId &&
+            (state.activeConversationId !== msg.conversationId || typeof document !== "undefined" && document.hidden);
+
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [msg.conversationId]: upsertMessage(s.messages[msg.conversationId] ?? [], msg),
+            },
+            conversations: s.conversations
+              .map((c) =>
+                c.id === msg.conversationId
+                  ? {
+                      ...c,
+                      lastMessage: msg,
+                      updatedAt: msg.sentAt,
+                      unreadCount:
+                        msg.senderId !== currentUserId && s.activeConversationId !== msg.conversationId
+                          ? c.unreadCount + 1
+                          : c.unreadCount,
+                    }
+                  : c
+              )
+              .sort(sortConversationList),
+          }));
+
+          if (shouldNotify) {
+            notifyAboutMessage(msg, conversation);
+          }
+        })();
       }
 
       if (event.type === "message.read") {
@@ -168,6 +179,118 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           ),
         }));
       }
+
+      if (event.type === "message.deleted") {
+        const { id, conversationId } = event.payload as { id: string; conversationId: string };
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: (s.messages[conversationId] ?? []).map((message) =>
+              message.id === id ? { ...message, isDeleted: true, decryptedContent: "" } : message
+            ),
+          },
+        }));
+      }
     },
   };
 });
+
+function sortConversationList(a: Conversation, b: Conversation) {
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+function sortMessages(messages: Message[]) {
+  return [...messages].sort((a, b) => {
+    const sentAtDiff = new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime();
+    if (sentAtDiff !== 0) return sentAtDiff;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function upsertMessage(messages: Message[], incoming: Message) {
+  const next = [...messages];
+  const existingIndex = next.findIndex((message) => message.id === incoming.id);
+
+  if (existingIndex >= 0) {
+    next[existingIndex] = { ...next[existingIndex], ...incoming };
+    return sortMessages(next);
+  }
+
+  const tempIndex = next.findIndex(
+    (message) =>
+      message.id.startsWith("temp_") &&
+      message.senderId === incoming.senderId &&
+      message.status === "sending" &&
+      message.conversationId === incoming.conversationId
+  );
+
+  if (tempIndex >= 0) {
+    const existingTemp = next[tempIndex];
+    next[tempIndex] = { ...incoming, decryptedContent: existingTemp?.decryptedContent ?? incoming.decryptedContent };
+    return sortMessages(next);
+  }
+
+  next.push(incoming);
+  return sortMessages(next);
+}
+
+async function hydrateConversationSummaries(conversations: Conversation[]) {
+  const hydrated = await Promise.all(
+    conversations.map(async (conversation) => ({
+      ...conversation,
+      lastMessage: conversation.lastMessage
+        ? await hydrateMessage(conversation.lastMessage, conversation)
+        : conversation.lastMessage,
+    }))
+  );
+
+  return hydrated.sort(sortConversationList);
+}
+
+async function hydrateMessages(messages: Message[], conversation?: Conversation) {
+  const hydrated = await Promise.all(messages.map((message) => hydrateMessage(message, conversation)));
+  return sortMessages(hydrated);
+}
+
+async function hydrateMessage(message: Message, conversation?: Conversation) {
+  const user = useAuthStore.getState().user;
+  if (!user) return message;
+
+  const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
+  if (!otherUser?.publicKey || !message.encryptedContent || message.isDeleted) {
+    return message;
+  }
+
+  try {
+    const privateKey = await loadPrivateKey(user.id);
+    if (!privateKey) return message;
+
+    const sharedSecret = deriveSharedSecret(otherUser.publicKey, privateKey);
+    return {
+      ...message,
+      decryptedContent: decryptMessage(message.encryptedContent, sharedSecret),
+    };
+  } catch {
+    return message;
+  }
+}
+
+function notifyAboutMessage(message: Message, conversation?: Conversation) {
+  if (typeof window === "undefined" || typeof Notification === "undefined") {
+    return;
+  }
+
+  if (Notification.permission !== "granted") {
+    return;
+  }
+
+  const title = conversation?.name || message.sender?.displayName || "New message";
+  const body = message.isDeleted
+    ? "Message deleted"
+    : (message.decryptedContent ?? "You received a new message");
+
+  new Notification(title, {
+    body,
+    tag: message.conversationId,
+  });
+}
