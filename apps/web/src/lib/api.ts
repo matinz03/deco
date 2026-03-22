@@ -33,7 +33,11 @@ export const api = {
     login: (body: { email?: string; phone?: string; password: string }) =>
       request<{ token: string; user: import("@deco/types").User }>("/api/v1/auth/login", {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          email: body.email,
+          phone_number: body.phone,
+          password: body.password,
+        }),
       }),
 
     register: (body: {
@@ -46,7 +50,14 @@ export const api = {
     }) =>
       request<{ token: string; user: import("@deco/types").User }>("/api/v1/auth/register", {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          username: body.username,
+          display_name: body.displayName,
+          email: body.email,
+          phone_number: body.phone,
+          password: body.password,
+          public_key: body.publicKey,
+        }),
       }),
 
     logout: () => request("/api/v1/auth/logout", { method: "POST" }),
