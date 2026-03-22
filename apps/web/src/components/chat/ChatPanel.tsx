@@ -11,7 +11,7 @@ interface Props { conversationId: string; }
 
 export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
-  const { messages, fetchMessages, activeConversation, setActiveConversation, conversations } = useConversationStore();
+  const { messages, fetchMessages, setActiveConversation, conversations } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const conversation = conversations.find((c) => c.id === conversationId);
