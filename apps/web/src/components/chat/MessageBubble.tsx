@@ -77,7 +77,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
         setShowReactions((v) => !v);
       }
       tapCount.current = 0;
-    }, 1500);
+    }, 500);
   }
 
   return (
