@@ -23,8 +23,8 @@ export default function SettingsPage() {
             <button className="ml-auto text-sm text-primary hover:underline shrink-0">Edit</button>
           </div>
           <div className="px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-muted">Email</span>
-            <span className="text-sm">{user?.email ?? "—"}</span>
+            <span className="text-sm text-muted">Username</span>
+            <span className="text-sm text-muted">@{user?.username}</span>
           </div>
         </div>
       </section>
