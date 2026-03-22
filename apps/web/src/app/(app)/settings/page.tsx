@@ -6,10 +6,18 @@ import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { useTheme } from "@/components/ui/ThemeProvider";
+import {
+  BACKGROUND_THEMES,
+  type BackgroundThemeId,
+  getBackgroundTheme,
+  setBackgroundTheme,
+} from "@/store/backgroundTheme";
 
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
+  const [bgTheme, setBgTheme] = useState<BackgroundThemeId>("geometric");
+  useEffect(() => { setBgTheme(getBackgroundTheme()); }, []);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const hasLocalPrivateKey = useAuthStore((s) => s.hasLocalPrivateKey);
@@ -111,6 +119,32 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Animated Background</h2>
+        <p className="mb-3 text-xs text-muted">Choose what floats around on the login screen.</p>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {BACKGROUND_THEMES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setBgTheme(t.id);
+                setBackgroundTheme(t.id);
+              }}
+              className={`flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition-all ${
+                bgTheme === t.id
+                  ? "border-primary bg-primary/8 shadow-sm"
+                  : "border-sidebar bg-muted/50 hover:bg-accent"
+              }`}
+            >
+              <span className="text-2xl leading-none">{t.preview}</span>
+              <span className="text-xs font-medium leading-tight">{t.name}</span>
+              <span className="text-[10px] text-muted leading-tight">{t.description}</span>
+            </button>
+          ))}
         </div>
       </section>
 
