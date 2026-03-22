@@ -373,6 +373,12 @@ func (h *MessageHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 		WHERE conversation_id = $1 AND user_id = $2
 	`, convID, userID, now)
 
+	// Mark all messages in this conversation not sent by this user as "read"
+	h.pool.Exec(r.Context(), `
+		UPDATE messages SET status = 'read'
+		WHERE conversation_id = $1 AND sender_id != $2 AND status != 'read'
+	`, convID, userID)
+
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
 			Type:    websocket.EventRead,

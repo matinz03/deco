@@ -291,11 +291,22 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }
 
       if (event.type === "message.read") {
-        const { conversationId } = event.payload as { conversationId: string; userId: string; lastReadAt: string };
+        const { conversationId, userId, lastReadAt } = event.payload as { conversationId: string; userId: string; lastReadAt: string };
+        const readAt = new Date(lastReadAt).getTime();
         set((s) => ({
           conversations: s.conversations.map((c) =>
             c.id === conversationId ? { ...c, unreadCount: 0 } : c
           ),
+          // Mark all messages sent by the current user (not the reader) as "read"
+          // if they were sent before or at the lastReadAt timestamp
+          messages: {
+            ...s.messages,
+            [conversationId]: (s.messages[conversationId] ?? []).map((msg) =>
+              msg.senderId !== userId && new Date(msg.sentAt).getTime() <= readAt
+                ? { ...msg, status: "read" as const }
+                : msg
+            ),
+          },
         }));
       }
 
