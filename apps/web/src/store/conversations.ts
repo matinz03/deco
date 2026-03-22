@@ -20,6 +20,8 @@ interface ConversationState {
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
   toggleReaction: (conversationId: string, messageId: string, emoji: string) => Promise<void>;
+  editMessage: (conversationId: string, messageId: string, text: string) => Promise<void>;
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   setActiveConversation: (id: string | null) => void;
   markConversationRead: (conversationId: string) => void;
   handleIncomingEvent: (event: WSEvent) => void;
@@ -209,6 +211,108 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             ])
           ),
         }));
+      }
+    },
+
+    async editMessage(conversationId, messageId, text) {
+      const user = useAuthStore.getState().user;
+      if (!user) return;
+
+      const trimmed = text.trim();
+      if (!trimmed) {
+        throw new Error("Message cannot be empty");
+      }
+
+      const conversation = get().conversations.find((item) => item.id === conversationId);
+      const message = get().messages[conversationId]?.find((item) => item.id === messageId);
+      if (!message) {
+        throw new Error("Message not found");
+      }
+
+      let encryptedContent = trimmed;
+      const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
+      if (otherUser) {
+        const privateKey = await loadPrivateKey(user.id);
+        if (privateKey) {
+          const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+          const sharedSecret = derive(otherUser.publicKey, privateKey);
+          encryptedContent = encryptMessage(trimmed, sharedSecret);
+        }
+      }
+
+      const previousMessage = message;
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: (s.messages[conversationId] ?? []).map((item) =>
+            item.id === messageId
+              ? { ...item, decryptedContent: trimmed, encryptedContent, isEdited: true }
+              : item
+          ),
+        },
+      }));
+
+      try {
+        const updated = await api.messages.edit(conversationId, messageId, { encryptedContent });
+        const hydrated = await hydrateMessage(updated, conversation);
+
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: upsertMessage(s.messages[conversationId] ?? [], {
+              ...hydrated,
+              decryptedContent: trimmed,
+            }),
+          },
+          conversations: s.conversations.map((item) =>
+            item.id === conversationId && item.lastMessage?.id === messageId
+              ? { ...item, lastMessage: { ...hydrated, decryptedContent: trimmed } }
+              : item
+          ),
+        }));
+      } catch (error) {
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: (s.messages[conversationId] ?? []).map((item) =>
+              item.id === messageId ? previousMessage : item
+            ),
+          },
+        }));
+        throw error;
+      }
+    },
+
+    async deleteMessage(conversationId, messageId) {
+      const previousMessage = get().messages[conversationId]?.find((item) => item.id === messageId);
+      if (!previousMessage) {
+        return;
+      }
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: (s.messages[conversationId] ?? []).map((item) =>
+            item.id === messageId
+              ? { ...item, isDeleted: true, decryptedContent: "", encryptedContent: "" }
+              : item
+          ),
+        },
+      }));
+
+      try {
+        await api.messages.delete(conversationId, messageId);
+      } catch (error) {
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: (s.messages[conversationId] ?? []).map((item) =>
+              item.id === messageId ? previousMessage : item
+            ),
+          },
+        }));
+        throw error;
       }
     },
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
@@ -22,12 +22,32 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
   const currentUserId = useAuthStore((s) => s.user?.id);
   const toggleReaction = useConversationStore((s) => s.toggleReaction);
+  const editMessage = useConversationStore((s) => s.editMessage);
+  const deleteMessage = useConversationStore((s) => s.deleteMessage);
   const [showReactions, setShowReactions] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+
+  useEffect(() => {
+    setDraft(text);
+  }, [text, msg.id]);
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  async function handleSaveEdit() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === text) {
+      setIsEditing(false);
+      setDraft(text);
+      return;
+    }
+
+    await editMessage(msg.conversationId, msg.id, trimmed);
+    setIsEditing(false);
   }
 
   return (
@@ -85,8 +105,48 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
               {/* Text */}
               {msg.isDeleted ? (
                 <span className="italic opacity-50">Message deleted</span>
+              ) : isEditing ? (
+                <div className="min-w-[220px]">
+                  <textarea
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void handleSaveEdit();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setIsEditing(false);
+                        setDraft(text);
+                      }
+                    }}
+                    className="min-h-[84px] w-full resize-none rounded-xl border border-border bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring/40"
+                    autoFocus
+                  />
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      onClick={() => {
+                        setIsEditing(false);
+                        setDraft(text);
+                      }}
+                      className="rounded-lg px-2.5 py-1 text-xs text-muted transition-colors hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void handleSaveEdit()}
+                      className="rounded-lg bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <span className="whitespace-pre-wrap break-words">{text}</span>
+                <span className="whitespace-pre-wrap break-words">
+                  {text}
+                  {msg.isEdited && <span className="ml-1 text-[11px] opacity-60">(edited)</span>}
+                </span>
               )}
 
               {/* Time + status */}
@@ -154,9 +214,10 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             y={contextMenu.y}
             isSent={isSent}
             text={text}
+            onEdit={isSent && !msg.isDeleted ? () => setIsEditing(true) : undefined}
             onReply={() => {/* reply state to be wired */}}
             onCopy={() => void navigator.clipboard.writeText(text)}
-            onDelete={isSent ? () => {/* wire to store delete */} : undefined}
+            onDelete={isSent && !msg.isDeleted ? () => void deleteMessage(msg.conversationId, msg.id) : undefined}
             onClose={() => setContextMenu(null)}
           />
         )}
