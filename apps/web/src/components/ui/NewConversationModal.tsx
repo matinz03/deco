@@ -124,7 +124,7 @@ export function NewConversationModal({ open, onClose, initialMode = "direct" }: 
       {open && (
           <motion.div
             key="overlay"
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-50 flex items-end sm:items-start justify-center p-0 sm:pt-20 sm:px-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
