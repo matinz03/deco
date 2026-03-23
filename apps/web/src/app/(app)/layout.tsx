@@ -21,11 +21,13 @@ const AuthBackground = dynamic(
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const isInboxRoute = pathname.startsWith("/inbox");
   const isInboxRoot = pathname === "/inbox";
+  const hasActiveConversation = isInboxRoute && !isInboxRoot;
   const isSearchPage = pathname === "/search";
   const isSettingsPage = pathname === "/settings";
-  const showSidebarMobile = isInboxRoot || isSearchPage;
-  const showMainMobile = !isInboxRoot && !isSearchPage;
+  const showSidebarMobile = isSearchPage || (isInboxRoute && !hasActiveConversation);
+  const showMainMobile = hasActiveConversation || (!isInboxRoute && !isSearchPage);
 
   useEffect(() => {
     if (typeof window === "undefined") {
