@@ -44,6 +44,8 @@ export function ChatHeader({ conversation }: Props) {
       : `${liveConversation.memberCount} members`;
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileUser, setProfileUser] = useState<User | null>(null);
+  const [copiedId, setCopiedId] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchMsg, setSearchMsg] = useState("");
   const [groupName, setGroupName] = useState(liveConversation.name || "");
@@ -166,22 +168,23 @@ export function ChatHeader({ conversation }: Props) {
         </button>
 
         <button
-          className={`relative shrink-0 rounded-full ${isGroup ? "cursor-pointer" : "cursor-default"}`}
+          className="relative shrink-0 rounded-full cursor-pointer"
           onClick={() => {
             if (isGroup) setSettingsOpen(true);
+            else if (otherMember) setProfileUser(otherMember);
           }}
-          aria-label={isGroup ? "Group settings" : undefined}
+          aria-label={isGroup ? "Group settings" : "View profile"}
         >
           <Avatar src={liveConversation.avatarUrl} name={title} size="sm" />
           {!isGroup && <OnlineDot isOnline={isOnline} borderClass="border-surface" />}
         </button>
 
         <button
-          className={`chat-header-info min-w-0 text-left ${isGroup ? "cursor-pointer" : "cursor-default"}`}
+          className="chat-header-info min-w-0 text-left cursor-pointer"
           onClick={() => {
             if (isGroup) setSettingsOpen(true);
+            else if (otherMember) setProfileUser(otherMember);
           }}
-          disabled={!isGroup}
         >
           <h3 className="chat-header-name">{title}</h3>
           <p className="chat-header-status">{subtitle}</p>
@@ -381,19 +384,32 @@ export function ChatHeader({ conversation }: Props) {
                                   key={member.userId}
                                   className="flex items-center gap-3 rounded-xl border border-sidebar/70 px-3 py-2.5"
                                 >
-                                  <Avatar
-                                    src={member.user?.avatarUrl}
-                                    name={member.user?.displayName || member.user?.username || member.userId}
-                                    size="sm"
-                                  />
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded-full"
+                                    onClick={() => { if (member.user) setProfileUser(member.user); }}
+                                    aria-label="View profile"
+                                  >
+                                    <Avatar
+                                      src={member.user?.avatarUrl}
+                                      name={member.user?.displayName || member.user?.username || member.userId}
+                                      size="sm"
+                                    />
+                                  </button>
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-medium">
-                                      {member.user?.displayName || member.user?.username || "Unknown user"}
-                                      {member.userId === currentUserId ? " (You)" : ""}
-                                    </p>
-                                    <p className="truncate text-xs capitalize text-muted">
-                                      @{member.user?.username || "unknown"} · {member.role}
-                                    </p>
+                                    <button
+                                      type="button"
+                                      className="w-full text-left"
+                                      onClick={() => { if (member.user) setProfileUser(member.user); }}
+                                    >
+                                      <p className="truncate text-sm font-medium">
+                                        {member.user?.displayName || member.user?.username || "Unknown user"}
+                                        {member.userId === currentUserId ? " (You)" : ""}
+                                      </p>
+                                      <p className="truncate text-xs capitalize text-muted">
+                                        @{member.user?.username || "unknown"} · {member.role}
+                                      </p>
+                                    </button>
                                   </div>
                                   <div className="flex shrink-0 items-center gap-1.5">
                                     {canManageRoles && member.role !== "owner" && member.userId !== currentUserId && (
@@ -483,6 +499,87 @@ export function ChatHeader({ conversation }: Props) {
                         )}
                       </div>
                     </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+
+      {portalMounted &&
+        createPortal(
+          <AnimatePresence>
+            {profileUser && (
+              <motion.div
+                className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                onClick={() => setProfileUser(null)}
+              >
+                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+                <motion.div
+                  className="relative z-10 w-full max-w-sm overflow-hidden rounded-t-3xl border border-sidebar bg-surface shadow-2xl sm:rounded-3xl"
+                  initial={{ y: 40, opacity: 0, scale: 0.98 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: 40, opacity: 0, scale: 0.98 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex justify-center pb-1 pt-3 sm:hidden">
+                    <div className="h-1 w-10 rounded-full bg-border" />
+                  </div>
+
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-sidebar">
+                    <h4 className="text-base font-semibold">Profile</h4>
+                    <button
+                      className="icon-btn"
+                      onClick={() => setProfileUser(null)}
+                      aria-label="Close"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-3 px-6 py-6">
+                    <Avatar src={profileUser.avatarUrl} name={profileUser.displayName || profileUser.username} size="lg" />
+                    <div className="text-center">
+                      <p className="text-lg font-semibold">{profileUser.displayName || profileUser.username}</p>
+                      <p className="text-sm text-muted">@{profileUser.username}</p>
+                    </div>
+                    {profileUser.bio && (
+                      <p className="text-center text-sm text-muted-foreground max-w-[260px]">{profileUser.bio}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 border-t border-sidebar px-6 pb-6 pt-4">
+                    <div className="flex items-center justify-between rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">User ID</p>
+                        <p className="mt-0.5 truncate font-mono text-xs text-foreground/80">{profileUser.id}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="ml-3 shrink-0 rounded-lg border border-sidebar px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(profileUser.id);
+                          setCopiedId(true);
+                          setTimeout(() => setCopiedId(false), 2000);
+                        }}
+                      >
+                        {copiedId ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    {profileUser.createdAt && (
+                      <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">Member since</p>
+                        <p className="mt-0.5 text-sm">{new Date(profileUser.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</p>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               </motion.div>
