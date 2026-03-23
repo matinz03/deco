@@ -52,6 +52,7 @@ const (
 	MessageTypeVideo    MessageType = "video"
 	MessageTypeAudio    MessageType = "audio"
 	MessageTypeFile     MessageType = "file"
+	MessageTypePoll     MessageType = "poll"
 	MessageTypeSystem   MessageType = "system"
 )
 
@@ -76,6 +77,7 @@ type Message struct {
 	MediaName      *string       `json:"media_name,omitempty" db:"media_name"`
 	MediaMimeType  *string       `json:"media_mime_type,omitempty" db:"media_mime_type"`
 	MediaSize      *int64        `json:"media_size,omitempty" db:"media_size"`
+	Poll           *Poll         `json:"poll,omitempty"`
 	ReplyToID      *string       `json:"reply_to_id,omitempty" db:"reply_to_id"`
 	Reactions      []Reaction    `json:"reactions,omitempty"`
 	Status         MessageStatus `json:"status" db:"status"`
@@ -92,6 +94,23 @@ type Reaction struct {
 	UserID    string    `json:"user_id" db:"user_id"`
 	Emoji     string    `json:"emoji" db:"emoji"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+type Poll struct {
+	MessageID      string       `json:"message_id" db:"message_id"`
+	Question       string       `json:"question" db:"question"`
+	AllowsMultiple bool         `json:"allows_multiple" db:"allows_multiple"`
+	TotalVotes     int          `json:"total_votes"`
+	Options        []PollOption `json:"options,omitempty"`
+}
+
+type PollOption struct {
+	ID        string `json:"id" db:"id"`
+	MessageID string `json:"message_id" db:"message_id"`
+	Text      string `json:"text" db:"text"`
+	Position  int    `json:"position" db:"position"`
+	VoteCount int    `json:"vote_count"`
+	VotedByMe bool   `json:"voted_by_me"`
 }
 
 // ─── Member ───────────────────────────────────────────────────────────────────

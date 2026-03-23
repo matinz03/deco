@@ -55,7 +55,7 @@ CREATE TABLE members (
 CREATE INDEX idx_members_user_id ON members(user_id);
 
 -- ─── Messages ─────────────────────────────────────────────────────────────────
-CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'audio', 'file', 'system');
+CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'audio', 'file', 'poll', 'system');
 CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read');
 
 CREATE TABLE messages (
@@ -88,6 +88,32 @@ CREATE TABLE reactions (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (message_id, user_id, emoji)
 );
+
+CREATE TABLE polls (
+  message_id       UUID PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  question         TEXT NOT NULL,
+  allows_multiple  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE poll_options (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id UUID NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+  text       TEXT NOT NULL,
+  position   INTEGER NOT NULL
+);
+
+CREATE INDEX idx_poll_options_message_id ON poll_options(message_id, position);
+
+CREATE TABLE poll_votes (
+  message_id UUID NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+  option_id  UUID NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (message_id, user_id)
+);
+
+CREATE INDEX idx_poll_votes_option_id ON poll_votes(option_id);
 
 -- Encrypted private-key backups for cross-device restore
 CREATE TABLE user_key_backups (

@@ -30,6 +30,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
     s.conversations.find((item) => item.id === msg.conversationId)
   );
   const toggleReaction = useConversationStore((s) => s.toggleReaction);
+  const votePoll = useConversationStore((s) => s.votePoll);
   const editMessage = useConversationStore((s) => s.editMessage);
   const deleteMessage = useConversationStore((s) => s.deleteMessage);
   const [showReactions, setShowReactions] = useState(false);
@@ -195,6 +196,46 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
                     <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
                   </div>
                 </a>
+              )}
+              {msg.type === "poll" && msg.poll && (
+                <div className="mb-2 min-w-[260px] rounded-2xl border border-border/70 bg-background/55 p-3">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold">{msg.poll.question}</p>
+                    <p className="mt-1 text-xs text-muted">
+                      {msg.poll.totalVotes} {msg.poll.totalVotes === 1 ? "vote" : "votes"}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {msg.poll.options.map((option) => {
+                      const percentage = msg.poll?.totalVotes ? Math.round((option.voteCount / msg.poll.totalVotes) * 100) : 0;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => void votePoll(msg.conversationId, msg.id, option.id)}
+                          className={`relative block w-full overflow-hidden rounded-xl border px-3 py-2 text-left transition-colors ${
+                            option.votedByMe
+                              ? "border-primary/60 bg-primary/10"
+                              : "border-sidebar bg-surface hover:bg-accent"
+                          }`}
+                        >
+                          <span
+                            className={`absolute inset-y-0 left-0 rounded-xl transition-all ${
+                              option.votedByMe ? "bg-primary/15" : "bg-muted/70"
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                          <span className="relative flex items-center justify-between gap-3">
+                            <span className="truncate text-sm font-medium">{option.text}</span>
+                            <span className="shrink-0 text-xs text-muted">
+                              {option.voteCount} • {percentage}%
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
 
               {isEditing ? (
@@ -405,6 +446,7 @@ function groupReactions(reactions: Message["reactions"], currentUserId?: string 
 
 function getMessageText(message: Message) {
   if (message.decryptedContent) return message.decryptedContent;
+  if (message.type === "poll" && message.poll) return message.poll.question;
   if (message.type !== "text" && message.mediaUrl) return "";
   if (message.encryptedContent) return "Encrypted message unavailable on this device";
   return "";

@@ -38,7 +38,22 @@ export interface Conversation {
 
 // ─── Message ──────────────────────────────────────────────────────────────────
 
-export type MessageType = "text" | "image" | "video" | "audio" | "file" | "system";
+export interface PollOption {
+  id: string;
+  text: string;
+  voteCount: number;
+  votedByMe: boolean;
+}
+
+export interface Poll {
+  messageId: string;
+  question: string;
+  allowsMultiple: boolean;
+  totalVotes: number;
+  options: PollOption[];
+}
+
+export type MessageType = "text" | "image" | "video" | "audio" | "file" | "poll" | "system";
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
 export type UploadKind = "avatar" | "image" | "video" | "audio" | "file";
 
@@ -56,6 +71,7 @@ export interface Message {
   mediaName?: string;
   mediaMimeType?: string;
   mediaSize?: number;
+  poll?: Poll;
   replyToId?: string;
   replyTo?: Message;
   reactions: Reaction[];
@@ -162,4 +178,9 @@ export interface UploadResponse {
   size: number;
   name: string;
   kind: UploadKind;
+}
+
+export interface CreatePollInput {
+  question: string;
+  options: string[];
 }

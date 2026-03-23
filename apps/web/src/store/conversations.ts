@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
 import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
-import type { Conversation, Member, Message, MessageType, WSEvent } from "@deco/types";
+import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput } from "@deco/types";
 import { useAuthStore } from "./auth";
 import { usePreferencesStore } from "./preferences";
 
@@ -63,6 +63,8 @@ interface ConversationState {
       replyToId?: string;
     }
   ) => Promise<void>;
+  sendPoll: (conversationId: string, input: CreatePollInput, options?: { replyToId?: string }) => Promise<void>;
+  votePoll: (conversationId: string, messageId: string, optionId: string) => Promise<void>;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
   toggleReaction: (conversationId: string, messageId: string, emoji: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, text: string) => Promise<void>;
@@ -287,6 +289,155 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             )),
           },
         }));
+      }
+    },
+
+    async sendPoll(conversationId, input, options) {
+      const user = useAuthStore.getState().user;
+      if (!user) return;
+
+      const normalizedQuestion = input.question.trim();
+      const normalizedOptions = input.options.map((option) => option.trim()).filter(Boolean);
+      if (!normalizedQuestion || normalizedOptions.length < 2) {
+        throw new Error("Poll requires a question and at least two options");
+      }
+
+      const tempId = `temp_${Date.now()}`;
+      const replyTo = options?.replyToId
+        ? get().messages[conversationId]?.find((message) => message.id === options.replyToId)
+        : undefined;
+
+      const optimisticMsg: Message = {
+        id: tempId,
+        conversationId,
+        senderId: user.id,
+        sender: user,
+        type: "poll",
+        encryptedContent: "",
+        poll: {
+          messageId: tempId,
+          question: normalizedQuestion,
+          allowsMultiple: false,
+          totalVotes: 0,
+          options: normalizedOptions.map((option, index) => ({
+            id: `temp-option-${index}`,
+            text: option,
+            voteCount: 0,
+            votedByMe: false,
+          })),
+        },
+        replyToId: options?.replyToId,
+        replyTo,
+        reactions: [],
+        status: "sending",
+        isEdited: false,
+        isDeleted: false,
+        sentAt: new Date().toISOString(),
+      };
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: withReplyLinks([...(s.messages[conversationId] ?? []), optimisticMsg]),
+        },
+      }));
+
+      try {
+        const confirmed = await api.messages.send(conversationId, {
+          type: "poll",
+          poll: {
+            question: normalizedQuestion,
+            options: normalizedOptions,
+          },
+          replyToId: options?.replyToId,
+        });
+
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks(upsertMessage(
+              (s.messages[conversationId] ?? []).map((message) =>
+                message.id === tempId ? confirmed : message
+              ),
+              confirmed
+            )),
+          },
+          conversations: s.conversations
+            .map((conversation) =>
+              conversation.id === conversationId
+                ? { ...conversation, lastMessage: confirmed, updatedAt: confirmed.sentAt }
+                : conversation
+            )
+            .sort(sortConversationList),
+        }));
+      } catch (error) {
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+              message.id === tempId ? { ...message, status: "failed" as const } : message
+            )),
+          },
+        }));
+        throw error;
+      }
+    },
+
+    async votePoll(conversationId, messageId, optionId) {
+      const existing = get().messages[conversationId]?.find((message) => message.id === messageId);
+      if (!existing?.poll) {
+        return;
+      }
+
+      const optimisticPoll = {
+        ...existing.poll,
+        options: existing.poll.options.map((option) => ({
+          ...option,
+          voteCount: option.id === optionId
+            ? option.voteCount + (option.votedByMe ? 0 : 1)
+            : option.voteCount + (option.votedByMe ? -1 : 0),
+          votedByMe: option.id === optionId,
+        })),
+      };
+      optimisticPoll.totalVotes = optimisticPoll.options.reduce((sum, option) => sum + option.voteCount, 0);
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+            message.id === messageId ? { ...message, poll: optimisticPoll } : message
+          )),
+        },
+        conversations: s.conversations.map((conversation) =>
+          conversation.id === conversationId && conversation.lastMessage?.id === messageId
+            ? { ...conversation, lastMessage: { ...conversation.lastMessage, poll: optimisticPoll } }
+            : conversation
+        ),
+      }));
+
+      try {
+        const updated = await api.messages.votePoll(conversationId, messageId, optionId);
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks(upsertMessage(s.messages[conversationId] ?? [], updated)),
+          },
+          conversations: s.conversations.map((conversation) =>
+            conversation.id === conversationId && conversation.lastMessage?.id === messageId
+              ? { ...conversation, lastMessage: updated }
+              : conversation
+          ),
+        }));
+      } catch (error) {
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+              message.id === messageId ? existing : message
+            )),
+          },
+        }));
+        throw error;
       }
     },
 

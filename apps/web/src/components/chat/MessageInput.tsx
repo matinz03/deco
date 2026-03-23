@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
-import type { Message, MessageType } from "@deco/types";
+import type { CreatePollInput, Message, MessageType } from "@deco/types";
 import { useConversationStore } from "@/store/conversations";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
 
@@ -83,7 +83,7 @@ const attachmentActions: AttachmentAction[] = [
   },
   {
     label: "Poll",
-    enabled: false,
+    enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25h16.5M3.75 12h10.5M3.75 18.75h6.75" />
@@ -97,6 +97,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   const [sending, setSending] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [showPollComposer, setShowPollComposer] = useState(false);
   const [videoMode, setVideoMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -117,6 +118,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
 
   const sendMessage = useConversationStore((s) => s.sendMessage);
   const sendMediaMessage = useConversationStore((s) => s.sendMediaMessage);
+  const sendPoll = useConversationStore((s) => s.sendPoll);
   const sendTyping = useConversationStore((s) => s.sendTyping);
 
   const hint = useMemo(() => {
@@ -258,6 +260,19 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     const file = files?.[0];
     if (!file) return;
     await handleAttachmentSelected(file, type);
+  }
+
+  async function handleCreatePoll(input: CreatePollInput) {
+    setShowAttachmentMenu(false);
+    setShowPollComposer(false);
+    setSending(true);
+    clearTypingState(typingTimeoutRef, sendTyping, conversationId);
+    try {
+      await sendPoll(conversationId, input, { replyToId: replyTo?.id });
+      onCancelReply?.();
+    } finally {
+      setSending(false);
+    }
   }
 
   async function startRecording() {
@@ -421,6 +436,12 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         className="hidden"
         onChange={(event) => void handleFileInput("audio", event.target.files)}
       />
+      <PollComposerModal
+        open={showPollComposer}
+        onClose={() => setShowPollComposer(false)}
+        onSubmit={(input) => void handleCreatePoll(input)}
+        busy={sending}
+      />
 
       <div className="input-field-wrap">
         <div className="relative" ref={attachmentMenuRef}>
@@ -459,6 +480,11 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
                       type="button"
                       disabled={!action.enabled || sending}
                       onClick={() => {
+                        if (action.label === "Poll") {
+                          setShowAttachmentMenu(false);
+                          setShowPollComposer(true);
+                          return;
+                        }
                         if (!action.enabled || !action.kind) return;
                         if (action.kind === "image") imageInputRef.current?.click();
                         if (action.kind === "video") videoInputRef.current?.click();
@@ -629,7 +655,138 @@ function getReplyLabel(type: MessageType) {
       return "Audio attachment";
     case "file":
       return "File attachment";
+    case "poll":
+      return "Poll";
     default:
       return "Message";
   }
+}
+
+function PollComposerModal({
+  open,
+  onClose,
+  onSubmit,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (input: CreatePollInput) => void;
+  busy: boolean;
+}) {
+  const [question, setQuestion] = useState("");
+  const [options, setOptions] = useState(["", ""]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuestion("");
+      setOptions(["", ""]);
+    }
+  }, [open]);
+
+  const normalizedOptions = options.map((option) => option.trim()).filter(Boolean);
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 backdrop-blur-sm md:items-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="w-full max-w-md rounded-3xl border border-sidebar bg-surface p-5 shadow-2xl"
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 24, scale: 0.96 }}
+            transition={{ type: "spring", stiffness: 360, damping: 28 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold">Create poll</h3>
+                <p className="text-xs text-muted">Ask one question and give people a few choices.</p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-1 text-muted transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Close poll composer"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">Question</span>
+                <input
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  className="input"
+                  placeholder="What should we order?"
+                  autoFocus
+                />
+              </label>
+
+              <div className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">Options</span>
+                {options.map((option, index) => (
+                  <input
+                    key={index}
+                    value={option}
+                    onChange={(event) =>
+                      setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)))
+                    }
+                    className="input"
+                    placeholder={`Option ${index + 1}`}
+                  />
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setOptions((current) => [...current, ""])}
+                  className="rounded-xl border border-sidebar px-3 py-2 text-sm text-muted transition-colors hover:text-foreground"
+                >
+                  Add option
+                </button>
+                {options.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setOptions((current) => current.slice(0, -1))}
+                    className="rounded-xl border border-sidebar px-3 py-2 text-sm text-muted transition-colors hover:text-foreground"
+                  >
+                    Remove last
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-xl border border-sidebar px-4 py-2 text-sm text-muted transition-colors hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy || question.trim().length === 0 || normalizedOptions.length < 2}
+                onClick={() => onSubmit({ question: question.trim(), options: normalizedOptions })}
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
+              >
+                {busy ? "Sending..." : "Send poll"}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 }

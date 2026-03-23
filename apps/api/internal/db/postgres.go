@@ -39,6 +39,23 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	defer cancel()
 
 	_, err := pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_enum
+				WHERE enumlabel = 'poll'
+				  AND enumtypid = 'message_type'::regtype
+			) THEN
+				ALTER TYPE message_type ADD VALUE 'poll';
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS user_key_backups (
 			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 			version INTEGER NOT NULL,
@@ -86,6 +103,57 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		)
 	`)
 
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS polls (
+			message_id UUID PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+			question TEXT NOT NULL,
+			allows_multiple BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS poll_options (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			message_id UUID NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+			text TEXT NOT NULL,
+			position INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_poll_options_message_id ON poll_options(message_id, position)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS poll_votes (
+			message_id UUID NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+			option_id UUID NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (message_id, user_id)
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_poll_votes_option_id ON poll_votes(option_id)
+	`)
 	if err != nil {
 		return err
 	}

@@ -10,6 +10,8 @@ import type {
   MemberRole,
   UploadKind,
   UploadResponse,
+  Poll,
+  CreatePollInput,
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -73,6 +75,7 @@ export function mapMessage(r: any): Message {
     mediaName: r.media_name ?? r.mediaName,
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
+    poll: r.poll ? mapPoll(r.poll) : undefined,
     replyToId: r.reply_to_id ?? r.replyToId,
     reactions: (r.reactions ?? []).map(mapReaction),
     status: r.status ?? "sent",
@@ -143,6 +146,22 @@ function mapUploadResponse(r: any): UploadResponse {
     size: r.size ?? 0,
     name: r.name ?? "",
     kind: r.kind ?? "file",
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapPoll(r: any): Poll {
+  return {
+    messageId: r.message_id ?? r.messageId ?? "",
+    question: r.question ?? "",
+    allowsMultiple: Boolean(r.allows_multiple ?? r.allowsMultiple ?? false),
+    totalVotes: r.total_votes ?? r.totalVotes ?? 0,
+    options: (r.options ?? []).map((option: any) => ({
+      id: option.id ?? "",
+      text: option.text ?? "",
+      voteCount: option.vote_count ?? option.voteCount ?? 0,
+      votedByMe: Boolean(option.voted_by_me ?? option.votedByMe ?? false),
+    })),
   };
 }
 
@@ -396,6 +415,7 @@ export const api = {
         mediaName?: string;
         mediaMimeType?: string;
         mediaSize?: number;
+        poll?: CreatePollInput;
       }
     ) => {
       const raw = await request<unknown>(
@@ -408,6 +428,11 @@ export const api = {
           media_name: body.mediaName,
           media_mime_type: body.mediaMimeType,
           media_size: body.mediaSize,
+          poll: body.poll ? {
+            question: body.poll.question,
+            options: body.poll.options,
+            allows_multiple: false,
+          } : undefined,
         }) }
       );
       return mapMessage(raw);
@@ -446,6 +471,17 @@ export const api = {
       request(`/api/v1/conversations/${conversationId}/messages/read`, {
         method: "POST",
       }),
+
+    votePoll: async (conversationId: string, messageId: string, optionId: string) => {
+      const raw = await request<unknown>(
+        `/api/v1/conversations/${conversationId}/messages/${messageId}/poll/vote`,
+        {
+          method: "POST",
+          body: JSON.stringify({ option_id: optionId }),
+        }
+      );
+      return mapMessage(raw);
+    },
   },
 
   users: {

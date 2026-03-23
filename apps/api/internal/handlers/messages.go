@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,6 +109,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 			ids[i] = m.ID
 		}
 		h.attachReactions(r, messages, ids)
+		h.attachPolls(r, messages, ids, userID)
 	}
 
 	respondJSON(w, http.StatusOK, messages)
@@ -161,6 +165,11 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		MediaMimeType    string  `json:"media_mime_type"`
 		MediaSize        *int64  `json:"media_size"`
 		ReplyToID        *string `json:"reply_to_id,omitempty"`
+		Poll             *struct {
+			Question       string   `json:"question"`
+			Options        []string `json:"options"`
+			AllowsMultiple bool     `json:"allows_multiple"`
+		} `json:"poll,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -170,9 +179,25 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		req.Type = "text"
 	}
 	isMediaMessage := req.Type == "image" || req.Type == "video" || req.Type == "audio" || req.Type == "file"
+	isPollMessage := req.Type == "poll"
 	if !isMediaMessage && req.EncryptedContent == "" {
-		respondError(w, http.StatusBadRequest, "encrypted_content is required")
-		return
+		if !isPollMessage {
+			respondError(w, http.StatusBadRequest, "encrypted_content is required")
+			return
+		}
+	}
+	if isPollMessage {
+		if req.Poll == nil {
+			respondError(w, http.StatusBadRequest, "poll is required")
+			return
+		}
+		normalizedOptions := normalizePollOptions(req.Poll.Options)
+		if strings.TrimSpace(req.Poll.Question) == "" || len(normalizedOptions) < 2 {
+			respondError(w, http.StatusBadRequest, "poll requires a question and at least two options")
+			return
+		}
+		req.Poll.Question = strings.TrimSpace(req.Poll.Question)
+		req.Poll.Options = normalizedOptions
 	}
 	if isMediaMessage && req.MediaURL == "" {
 		respondError(w, http.StatusBadRequest, "media_url is required for media messages")
@@ -180,7 +205,14 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var msg models.Message
-	err := h.pool.QueryRow(r.Context(), `
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start message transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	err = tx.QueryRow(r.Context(), `
 		INSERT INTO messages (
 			conversation_id, sender_id, type, encrypted_content,
 			media_url, media_name, media_mime_type, media_size, reply_to_id
@@ -200,11 +232,27 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isPollMessage {
+		if err := h.insertPoll(r, tx, msg.ID, req.Poll.Question, req.Poll.Options, req.Poll.AllowsMultiple); err != nil {
+			h.logger.Error("failed to create poll", zap.Error(err))
+			respondError(w, http.StatusInternalServerError, "failed to create poll")
+			return
+		}
+	}
+
 	var sender models.User
-	h.pool.QueryRow(r.Context(), `
+	tx.QueryRow(r.Context(), `
 		SELECT id, username, display_name, avatar_url, public_key FROM users WHERE id = $1
 	`, userID).Scan(&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey)
 	msg.Sender = &sender
+	if isPollMessage {
+		msg.Poll = h.loadPoll(r, tx, msg.ID, userID)
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize message")
+		return
+	}
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
@@ -216,6 +264,107 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	h.pool.Exec(r.Context(), `UPDATE conversations SET updated_at = NOW() WHERE id = $1`, convID)
 
 	respondJSON(w, http.StatusCreated, msg)
+}
+
+func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	msgID := chi.URLParam(r, "messageID")
+	userID := middleware.GetUserID(r)
+
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
+	var req struct {
+		OptionID string `json:"option_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.OptionID) == "" {
+		respondError(w, http.StatusBadRequest, "option_id is required")
+		return
+	}
+	req.OptionID = strings.TrimSpace(req.OptionID)
+
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start vote transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var messageType string
+	err = tx.QueryRow(r.Context(), `
+		SELECT type FROM messages WHERE id = $1 AND conversation_id = $2 AND is_deleted = false
+	`, msgID, convID).Scan(&messageType)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusNotFound, "poll message not found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to load poll")
+		return
+	}
+	if messageType != string(models.MessageTypePoll) {
+		respondError(w, http.StatusBadRequest, "message is not a poll")
+		return
+	}
+
+	var optionExists bool
+	if err := tx.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM poll_options WHERE id = $1 AND message_id = $2
+		)
+	`, req.OptionID, msgID).Scan(&optionExists); err != nil || !optionExists {
+		respondError(w, http.StatusBadRequest, "invalid poll option")
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO poll_votes (message_id, option_id, user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (message_id, user_id) DO UPDATE
+		SET option_id = EXCLUDED.option_id, created_at = NOW()
+	`, msgID, req.OptionID, userID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save vote")
+		return
+	}
+
+	var msg models.Message
+	var sender models.User
+	err = tx.QueryRow(r.Context(), `
+		SELECT
+			m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
+			m.media_url, m.media_name, m.media_mime_type, m.media_size,
+			m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
+			u.id, u.username, u.display_name, u.avatar_url, u.public_key
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.id = $1
+	`, msgID).Scan(
+		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
+		&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+		&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
+	)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reload poll message")
+		return
+	}
+	msg.Sender = &sender
+	msg.Poll = h.loadPoll(r, tx, msg.ID, userID)
+	if err := tx.Commit(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize vote")
+		return
+	}
+
+	if h.hub != nil {
+		h.broadcastToConversation(r, convID, websocket.Event{
+			Type:    websocket.EventMessageEdited,
+			Payload: mustMarshal(msg),
+		})
+	}
+
+	respondJSON(w, http.StatusOK, msg)
 }
 
 // Edit updates the encrypted content of a message the caller owns.
@@ -433,6 +582,140 @@ func nullableString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func normalizePollOptions(options []string) []string {
+	result := make([]string, 0, len(options))
+	for _, option := range options {
+		trimmed := strings.TrimSpace(option)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return slices.Compact(result)
+}
+
+func (h *MessageHandler) insertPoll(r *http.Request, tx pgx.Tx, messageID, question string, options []string, allowsMultiple bool) error {
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO polls (message_id, question, allows_multiple)
+		VALUES ($1, $2, $3)
+	`, messageID, question, allowsMultiple); err != nil {
+		return err
+	}
+
+	for index, option := range options {
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO poll_options (message_id, text, position)
+			VALUES ($1, $2, $3)
+		`, messageID, option, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *MessageHandler) attachPolls(r *http.Request, messages []models.Message, ids []string, userID string) {
+	if len(ids) == 0 {
+		return
+	}
+
+	byMessageID := make(map[string]*models.Poll)
+	rows, err := h.pool.Query(r.Context(), `
+		SELECT message_id, question, allows_multiple
+		FROM polls
+		WHERE message_id = ANY($1)
+	`, ids)
+	if err != nil {
+		return
+	}
+	for rows.Next() {
+		var poll models.Poll
+		if err := rows.Scan(&poll.MessageID, &poll.Question, &poll.AllowsMultiple); err == nil {
+			byMessageID[poll.MessageID] = &poll
+		}
+	}
+	rows.Close()
+	if len(byMessageID) == 0 {
+		return
+	}
+
+	optionRows, err := h.pool.Query(r.Context(), `
+		SELECT
+			o.id,
+			o.message_id,
+			o.text,
+			o.position,
+			COUNT(v.user_id)::int AS vote_count,
+			COALESCE(BOOL_OR(v.user_id = $2), false) AS voted_by_me
+		FROM poll_options o
+		LEFT JOIN poll_votes v ON v.option_id = o.id
+		WHERE o.message_id = ANY($1)
+		GROUP BY o.id, o.message_id, o.text, o.position
+		ORDER BY o.message_id, o.position
+	`, ids, userID)
+	if err != nil {
+		return
+	}
+	defer optionRows.Close()
+
+	for optionRows.Next() {
+		var option models.PollOption
+		if err := optionRows.Scan(&option.ID, &option.MessageID, &option.Text, &option.Position, &option.VoteCount, &option.VotedByMe); err == nil {
+			if poll := byMessageID[option.MessageID]; poll != nil {
+				poll.Options = append(poll.Options, option)
+				poll.TotalVotes += option.VoteCount
+			}
+		}
+	}
+
+	for index := range messages {
+		if poll := byMessageID[messages[index].ID]; poll != nil {
+			messages[index].Poll = poll
+		}
+	}
+}
+
+func (h *MessageHandler) loadPoll(r *http.Request, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, messageID, userID string) *models.Poll {
+	var poll models.Poll
+	if err := q.QueryRow(r.Context(), `
+		SELECT message_id, question, allows_multiple
+		FROM polls
+		WHERE message_id = $1
+	`, messageID).Scan(&poll.MessageID, &poll.Question, &poll.AllowsMultiple); err != nil {
+		return nil
+	}
+
+	rows, err := q.Query(r.Context(), `
+		SELECT
+			o.id,
+			o.message_id,
+			o.text,
+			o.position,
+			COUNT(v.user_id)::int AS vote_count,
+			COALESCE(BOOL_OR(v.user_id = $2), false) AS voted_by_me
+		FROM poll_options o
+		LEFT JOIN poll_votes v ON v.option_id = o.id
+		WHERE o.message_id = $1
+		GROUP BY o.id, o.message_id, o.text, o.position
+		ORDER BY o.position
+	`, messageID, userID)
+	if err != nil {
+		return &poll
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var option models.PollOption
+		if err := rows.Scan(&option.ID, &option.MessageID, &option.Text, &option.Position, &option.VoteCount, &option.VotedByMe); err == nil {
+			poll.Options = append(poll.Options, option)
+			poll.TotalVotes += option.VoteCount
+		}
+	}
+
+	return &poll
 }
 
 func (h *MessageHandler) isConversationMember(r *http.Request, convID, userID string) bool {

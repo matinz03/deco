@@ -242,6 +242,9 @@ function getConversationPreview(conversation: Conversation) {
   if (!conversation.lastMessage) return "...";
   if (conversation.lastMessage.isDeleted) return "Message deleted";
   if (conversation.lastMessage.decryptedContent) return conversation.lastMessage.decryptedContent;
+  if (conversation.lastMessage.type === "poll") {
+    return conversation.lastMessage.poll?.question || "Poll";
+  }
   if (conversation.lastMessage.type !== "text") return "Media message";
   return "Encrypted message";
 }
