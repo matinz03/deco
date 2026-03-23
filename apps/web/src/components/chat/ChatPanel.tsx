@@ -271,7 +271,7 @@ export function ChatPanel({ conversationId }: Props) {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 chat-scroll px-4 py-4 flex flex-col"
+        className="glass-shell flex-1 chat-scroll px-4 py-4 flex flex-col"
       >
         {loading ? (
           <ChatSkeleton />

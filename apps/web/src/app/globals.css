@@ -136,9 +136,9 @@
 
   .nav-rail {
     @apply w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-sidebar;
-    background-color: hsl(var(--nav) / 0.30);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background-color: hsl(var(--sidebar) / 0.35);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
 
   .nav-logo {
@@ -316,9 +316,9 @@
   .mobile-nav {
     @apply md:hidden fixed bottom-0 left-0 right-0 z-50
            border-t border-sidebar safe-area-bottom;
-    background-color: hsl(var(--nav) / 0.30);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background-color: hsl(var(--sidebar) / 0.35);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
 
   .mobile-nav-items {
@@ -373,6 +373,12 @@
     -webkit-backdrop-filter: blur(20px);
   }
   .glass-sidebar {
+    background-color: hsl(var(--sidebar) / 0.35);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .glass-shell {
     background-color: hsl(var(--sidebar) / 0.35);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
