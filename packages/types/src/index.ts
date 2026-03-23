@@ -103,6 +103,8 @@ export interface Message {
   status: MessageStatus;
   isEdited: boolean;
   isDeleted: boolean;
+  uploadProgress?: number;
+  uploadError?: string;
   sentAt: string;
   editedAt?: string;
 }

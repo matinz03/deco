@@ -576,11 +576,49 @@ export const api = {
   },
 
   uploads: {
-    create: async (file: File | Blob, kind: UploadKind, name?: string) => {
+    create: async (
+      file: File | Blob,
+      kind: UploadKind,
+      name?: string,
+      options?: { onProgress?: (progress: number) => void }
+    ) => {
       const form = new FormData();
       const filename = name ?? (file instanceof File ? file.name : `${kind}-${Date.now()}`);
       form.append("file", file, filename);
       form.append("kind", kind);
+
+      if (typeof window !== "undefined" && options?.onProgress) {
+        const token = localStorage.getItem("deco_token");
+        const xhrResult = await new Promise<unknown>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", `${BASE}/api/v1/uploads`);
+          xhr.setRequestHeader("Authorization", token ? `Bearer ${token}` : "");
+          xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) return;
+            options.onProgress?.(Math.round((event.loaded / event.total) * 100));
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch {
+                reject(new ApiError(xhr.status, "Invalid upload response"));
+              }
+              return;
+            }
+
+            try {
+              const body = JSON.parse(xhr.responseText) as { error?: string };
+              reject(new ApiError(xhr.status, body.error ?? xhr.statusText));
+            } catch {
+              reject(new ApiError(xhr.status, xhr.statusText));
+            }
+          };
+          xhr.onerror = () => reject(new ApiError(0, "Upload failed"));
+          xhr.send(form);
+        });
+        return mapUploadResponse(xhrResult);
+      }
 
       const raw = await request<unknown>("/api/v1/uploads", {
         method: "POST",

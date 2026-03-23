@@ -36,6 +36,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const votePoll = useConversationStore((s) => s.votePoll);
   const editMessage = useConversationStore((s) => s.editMessage);
   const deleteMessage = useConversationStore((s) => s.deleteMessage);
+  const retryMediaMessage = useConversationStore((s) => s.retryMediaMessage);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [pickerAbove, setPickerAbove] = useState(true);
@@ -201,15 +202,55 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                     open={lightboxOpen}
                     onClose={() => setLightboxOpen(false)}
                   />
+                  <div className="mt-2 flex items-center gap-2">
+                    <a
+                      href={msg.mediaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Open
+                    </a>
+                    <a
+                      href={msg.mediaUrl}
+                      download={msg.mediaName || "image"}
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Download
+                    </a>
+                  </div>
                 </>
               )}
               {msg.type === "video" && msg.mediaUrl && (
-                <video
-                  src={msg.mediaUrl}
-                  controls
-                  playsInline
-                  className="mb-2 max-h-72 w-full rounded-xl bg-black"
-                />
+                <>
+                  <video
+                    src={msg.mediaUrl}
+                    controls
+                    playsInline
+                    className="mb-2 max-h-72 w-full rounded-xl bg-black"
+                  />
+                  <div className="mb-2 flex items-center gap-2">
+                    <a
+                      href={msg.mediaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Open
+                    </a>
+                    <a
+                      href={msg.mediaUrl}
+                      download={msg.mediaName || "video"}
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Download
+                    </a>
+                  </div>
+                </>
               )}
               {msg.type === "audio" && msg.mediaUrl && (
                 <div className="mb-2 min-w-[240px] rounded-xl bg-black/5 p-2">
@@ -217,26 +258,63 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                     {msg.mediaName || "Audio message"}
                   </div>
                   <audio src={msg.mediaUrl} controls className="w-full" preload="metadata" />
+                  <div className="mt-2 flex items-center gap-2">
+                    <a
+                      href={msg.mediaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Open
+                    </a>
+                    <a
+                      href={msg.mediaUrl}
+                      download={msg.mediaName || "audio"}
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Download
+                    </a>
+                  </div>
                 </div>
               )}
-              {msg.type === "file" && msg.mediaUrl && (
-                <a
-                  href={msg.mediaUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mb-2 flex min-w-[220px] items-center gap-3 rounded-xl border border-border/70 bg-background/50 px-3 py-3 transition-colors hover:bg-accent"
-                >
-                  <div className="rounded-xl bg-muted p-2">
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15A2.25 2.25 0 0 0 6.75 21.75h10.5A2.25 2.25 0 0 0 19.5 19.5v-5.25Z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2.25v4.5A1.5 1.5 0 0 0 15 8.25h4.5" />
-                    </svg>
+              {msg.type === "file" && (msg.mediaUrl || msg.mediaName) && (
+                <div className="mb-2 min-w-[240px] rounded-xl border border-border/70 bg-background/50 px-3 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl bg-muted p-2">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15A2.25 2.25 0 0 0 6.75 21.75h10.5A2.25 2.25 0 0 0 19.5 19.5v-5.25Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2.25v4.5A1.5 1.5 0 0 0 15 8.25h4.5" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{msg.mediaName || "File attachment"}</div>
+                      <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{msg.mediaName || "File attachment"}</div>
-                    <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
-                  </div>
-                </a>
+                  {msg.mediaUrl && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <a
+                        href={msg.mediaUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Open
+                      </a>
+                      <a
+                        href={msg.mediaUrl}
+                        download={msg.mediaName || "attachment"}
+                        className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Download
+                      </a>
+                    </div>
+                  )}
+                </div>
               )}
               {msg.type === "poll" && msg.poll && (
                 <div className="mb-2 min-w-[260px] rounded-2xl border border-border/70 bg-background/55 p-3">
@@ -327,6 +405,34 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                 {time}
                 {isSent && <DeliveryIcon status={msg.status} />}
               </span>
+
+              {typeof msg.uploadProgress === "number" && msg.status === "sending" && (
+                <div className="mt-2 min-w-[180px]">
+                  <div className="mb-1 flex items-center justify-between text-[11px] text-muted">
+                    <span>Uploading...</span>
+                    <span>{msg.uploadProgress}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-black/10">
+                    <div
+                      className="h-full rounded-full bg-current transition-[width] duration-200"
+                      style={{ width: `${Math.max(6, msg.uploadProgress)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {msg.uploadError && (
+                <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px]">
+                  <span className="text-destructive">{msg.uploadError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void retryMediaMessage(msg.conversationId, msg.id)}
+                    className="shrink-0 rounded-full border border-destructive/30 px-2.5 py-1 font-medium text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
             </motion.div>
 
             <button

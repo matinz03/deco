@@ -41,6 +41,22 @@ type PresenceState = {
   lastSeenAt?: string;
 };
 
+type PendingMediaUpload = {
+  conversationId: string;
+  tempId: string;
+  input: {
+    type: Extract<MessageType, "image" | "video" | "audio" | "file">;
+    file: File | Blob;
+    fileName: string;
+    mimeType: string;
+    caption?: string;
+    previewUrl?: string;
+    replyToId?: string;
+  };
+};
+
+const pendingMediaUploads = new Map<string, PendingMediaUpload>();
+
 interface ConversationState {
   conversations: Conversation[];
   messages: Record<string, Message[]>;
@@ -68,6 +84,7 @@ interface ConversationState {
   ) => Promise<void>;
   sendPoll: (conversationId: string, input: CreatePollInput, options?: { replyToId?: string }) => Promise<void>;
   votePoll: (conversationId: string, messageId: string, optionId: string) => Promise<void>;
+  retryMediaMessage: (conversationId: string, messageId: string) => Promise<void>;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
   toggleReaction: (conversationId: string, messageId: string, emoji: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, text: string) => Promise<void>;
@@ -261,8 +278,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         status: "sending",
         isEdited: false,
         isDeleted: false,
+        uploadProgress: 0,
         sentAt: new Date().toISOString(),
       };
+
+      pendingMediaUploads.set(tempId, {
+        conversationId,
+        tempId,
+        input,
+      });
 
       set((s) => ({
         messages: {
@@ -271,51 +295,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         },
       }));
 
-      try {
-        const conversation = get().conversations.find((c) => c.id === conversationId);
-        const encryptedContent = await encryptOutgoingContent(conversation, user.id, caption);
-        const uploadKind = input.type === "image" ? "image" : input.type === "video" ? "video" : input.type === "audio" ? "audio" : "file";
-        const upload = await api.uploads.create(input.file, uploadKind, input.fileName);
-        const confirmed = await api.messages.send(conversationId, {
-          type: input.type,
-          encryptedContent,
-          replyToId: input.replyToId,
-          mediaUrl: upload.url,
-          mediaName: upload.name,
-          mediaMimeType: upload.mimeType,
-          mediaSize: upload.size,
-        });
-        const confirmedMessage = await hydrateMessage(confirmed, conversation);
-
-        set((s) => ({
-          messages: {
-            ...s.messages,
-            [conversationId]: withReplyLinks(upsertMessage(
-              (s.messages[conversationId] ?? []).map((m) =>
-                m.id === tempId
-                  ? {
-                      ...confirmedMessage,
-                      decryptedContent: caption || confirmedMessage.decryptedContent,
-                    }
-                  : m
-              ),
-              {
-                ...confirmedMessage,
-                decryptedContent: caption || confirmedMessage.decryptedContent,
-              }
-            )),
-          },
-        }));
-      } catch {
-        set((s) => ({
-          messages: {
-            ...s.messages,
-            [conversationId]: withReplyLinks(s.messages[conversationId]!.map((m) =>
-              m.id === tempId ? { ...m, status: "failed" as const } : m
-            )),
-          },
-        }));
-      }
+      await uploadAndSendMediaMessage({ conversationId, tempId, input, userId: user.id });
     },
 
     async sendPoll(conversationId, input, options) {
@@ -465,6 +445,31 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }));
         throw error;
       }
+    },
+
+    async retryMediaMessage(conversationId, messageId) {
+      const user = useAuthStore.getState().user;
+      if (!user) return;
+      const pending = pendingMediaUploads.get(messageId);
+      if (!pending) return;
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  status: "sending",
+                  uploadProgress: 0,
+                  uploadError: undefined,
+                }
+              : message
+          )),
+        },
+      }));
+
+      await uploadAndSendMediaMessage({ conversationId, tempId: messageId, input: pending.input, userId: user.id });
     },
 
     sendTyping(conversationId, isTyping) {
@@ -1095,6 +1100,90 @@ function applyReactionEvent(
   }
 
   return message;
+}
+
+async function uploadAndSendMediaMessage({
+  conversationId,
+  tempId,
+  input,
+  userId,
+}: {
+  conversationId: string;
+  tempId: string;
+  input: PendingMediaUpload["input"];
+  userId: string;
+}) {
+  const caption = input.caption?.trim() ?? "";
+
+  try {
+    const conversation = useConversationStore.getState().conversations.find((c) => c.id === conversationId);
+    const encryptedContent = await encryptOutgoingContent(conversation, userId, caption);
+    const uploadKind = input.type === "image" ? "image" : input.type === "video" ? "video" : input.type === "audio" ? "audio" : "file";
+    const upload = await api.uploads.create(input.file, uploadKind, input.fileName, {
+      onProgress: (progress) => {
+        useConversationStore.setState((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+              message.id === tempId
+                ? {
+                    ...message,
+                    uploadProgress: progress,
+                  }
+                : message
+            )),
+          },
+        }));
+      },
+    });
+    const confirmed = await api.messages.send(conversationId, {
+      type: input.type,
+      encryptedContent,
+      replyToId: input.replyToId,
+      mediaUrl: upload.url,
+      mediaName: upload.name,
+      mediaMimeType: upload.mimeType,
+      mediaSize: upload.size,
+    });
+    const confirmedMessage = await hydrateMessage(confirmed, conversation);
+    pendingMediaUploads.delete(tempId);
+
+    useConversationStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: withReplyLinks(upsertMessage(
+          (s.messages[conversationId] ?? []).map((m) =>
+            m.id === tempId
+              ? {
+                  ...confirmedMessage,
+                  decryptedContent: caption || confirmedMessage.decryptedContent,
+                }
+              : m
+          ),
+          {
+            ...confirmedMessage,
+            decryptedContent: caption || confirmedMessage.decryptedContent,
+          }
+        )),
+      },
+    }));
+  } catch {
+    useConversationStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((m) =>
+          m.id === tempId
+            ? {
+                ...m,
+                status: "failed" as const,
+                uploadError: "Upload failed. Tap retry to try again.",
+                uploadProgress: undefined,
+              }
+            : m
+        )),
+      },
+    }));
+  }
 }
 
 async function hydrateConversationSummaries(conversations: Conversation[]) {
