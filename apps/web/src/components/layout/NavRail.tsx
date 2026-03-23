@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -7,6 +8,7 @@ import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
+import { OwnProfileModal } from "@/components/ui/OwnProfileModal";
 
 const NAV_ITEMS = [
   {
@@ -55,6 +57,7 @@ export function NavRail({
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 }) {
+  const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
@@ -139,10 +142,12 @@ export function NavRail({
         </svg>
       </button>
 
-      <button className="relative group" aria-label="Your profile">
+      <button className="relative group" aria-label="Your profile" onClick={() => setProfileOpen(true)}>
         <Avatar src={user?.avatarUrl} name={user?.displayName ?? "?"} size="sm" />
         <OnlineDot isOnline borderClass="border-nav" />
       </button>
+
+      <OwnProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
     </nav>
   );
 }

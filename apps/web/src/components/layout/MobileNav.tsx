@@ -1,9 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
+import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
+import { Avatar } from "@/components/ui/Avatar";
+import { OwnProfileModal } from "@/components/ui/OwnProfileModal";
 
 const NAV_ITEMS = [
   {
@@ -46,8 +50,10 @@ const NAV_ITEMS = [
 ];
 
 export function MobileNav() {
+  const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const user = useAuthStore((s) => s.user);
   const conversations = useConversationStore((s) => s.conversations);
   const hasUnreadMessages = conversations.some((conversation) => conversation.type !== "group" && conversation.unreadCount > 0);
   const hasUnreadGroups = conversations.some((conversation) => conversation.type === "group" && conversation.unreadCount > 0);
@@ -96,7 +102,22 @@ export function MobileNav() {
             </Link>
           );
         })}
+        <button
+          aria-label="My profile"
+          className="mobile-nav-item"
+          onClick={() => setProfileOpen(true)}
+        >
+          <motion.span
+            whileTap={{ scale: 0.88 }}
+            transition={{ type: "spring", stiffness: 500, damping: 28 }}
+            className="mobile-nav-icon relative"
+          >
+            <Avatar src={user?.avatarUrl} name={user?.displayName ?? "?"} size="xs" />
+          </motion.span>
+        </button>
       </div>
+
+      <OwnProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
     </nav>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, useEffect, useState } from "react";
+import { useRef, useMemo, useEffect, useState, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -83,40 +83,93 @@ function GeometricScene() {
   );
 }
 
-// ─── Emoji particles ─────────────────────────────────────────────────────────
+// ─── Emoji bouncing particles ─────────────────────────────────────────────────
+
+interface Particle {
+  id: number;
+  emoji: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  rotation: number;
+  rotationSpeed: number;
+}
 
 function EmojiBackground({ emojis }: { emojis: string[] }) {
-  const particles = useMemo(
+  const containerRef = useRef<HTMLDivElement>(null);
+  const particlesRef = useRef<Particle[]>([]);
+  const rafRef = useRef<number>(0);
+  const spansRef = useRef<(HTMLSpanElement | null)[]>([]);
+
+  const initialParticles = useMemo(
     () =>
-      Array.from({ length: 28 }, (_, i) => {
-        const duration = 14 + Math.random() * 12;
-        return {
-          id: i,
-          emoji: emojis[i % emojis.length]!,
-          left: Math.random() * 95,
-          // Negative delay puts each particle at a random point in its cycle immediately
-          delay: -(Math.random() * duration),
-          duration,
-          size: 20 + Math.random() * 24,
-        };
-      }),
+      Array.from({ length: 18 }, (_, i) => ({
+        id: i,
+        emoji: emojis[i % emojis.length]!,
+        x: 10 + Math.random() * 80,
+        y: 10 + Math.random() * 80,
+        vx: (Math.random() - 0.5) * 0.06,
+        vy: (Math.random() - 0.5) * 0.06,
+        size: 22 + Math.random() * 20,
+        rotation: Math.random() * 360,
+        rotationSpeed: (Math.random() - 0.5) * 0.4,
+      })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [emojis.join()]
   );
 
+  const animate = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const particles = particlesRef.current;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i]!;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rotation += p.rotationSpeed;
+
+      // Bounce off edges (percentage-based, accounting for emoji size in %)
+      const sizePercX = (p.size / container.clientWidth) * 100;
+      const sizePercY = (p.size / container.clientHeight) * 100;
+
+      if (p.x <= 0) { p.x = 0; p.vx = Math.abs(p.vx); }
+      if (p.x >= 100 - sizePercX) { p.x = 100 - sizePercX; p.vx = -Math.abs(p.vx); }
+      if (p.y <= 0) { p.y = 0; p.vy = Math.abs(p.vy); }
+      if (p.y >= 100 - sizePercY) { p.y = 100 - sizePercY; p.vy = -Math.abs(p.vy); }
+
+      const el = spansRef.current[i];
+      if (el) {
+        el.style.left = `${p.x}%`;
+        el.style.top = `${p.y}%`;
+        el.style.transform = `rotate(${p.rotation}deg)`;
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(animate);
+  }, []);
+
+  useEffect(() => {
+    particlesRef.current = initialParticles.map((p) => ({ ...p }));
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [initialParticles, animate]);
+
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-      {particles.map((p) => (
+    <div ref={containerRef} className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+      {initialParticles.map((p, i) => (
         <span
           key={p.id}
-          className="absolute animate-emoji-float select-none"
+          ref={(el) => { spansRef.current[i] = el; }}
+          className="absolute select-none"
           style={{
-            left: `${p.left}%`,
-            bottom: 0,
+            left: `${p.x}%`,
+            top: `${p.y}%`,
             fontSize: `${p.size}px`,
-            animationDelay: `${p.delay}s`,
-            animationDuration: `${p.duration}s`,
             lineHeight: 1,
+            willChange: "transform, left, top",
           }}
         >
           {p.emoji}
