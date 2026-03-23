@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/matinz03/deco/internal/config"
@@ -55,7 +56,7 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 	reader := bufio.NewReader(file)
 	headerBytes, _ := reader.Peek(512)
 	mimeType := storage.DetectMimeType(headerBytes, header.Header.Get("Content-Type"))
-	if !isAllowedMime(kind, mimeType) {
+	if !isAllowedUpload(kind, mimeType, header.Filename) {
 		respondError(w, http.StatusBadRequest, "file type is not allowed")
 		return
 	}
@@ -100,17 +101,54 @@ func maxBytesForKind(kind storage.Kind) int64 {
 	}
 }
 
+func isAllowedUpload(kind storage.Kind, mimeType, filename string) bool {
+	if isAllowedMime(kind, mimeType) {
+		return true
+	}
+	return isAllowedExtension(kind, filename)
+}
+
 func isAllowedMime(kind storage.Kind, mimeType string) bool {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
 	switch kind {
 	case storage.KindAvatar, storage.KindImage:
 		return strings.HasPrefix(mimeType, "image/")
 	case storage.KindVideo:
-		return strings.HasPrefix(mimeType, "video/")
+		return strings.HasPrefix(mimeType, "video/") || mimeType == "application/mp4"
 	case storage.KindAudio:
-		return strings.HasPrefix(mimeType, "audio/") || mimeType == "video/webm"
+		return strings.HasPrefix(mimeType, "audio/") || mimeType == "video/webm" || mimeType == "application/mp4"
 	case storage.KindFile:
 		return true
 	default:
 		return false
 	}
+}
+
+func isAllowedExtension(kind storage.Kind, filename string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
+	if ext == "" {
+		return false
+	}
+
+	switch kind {
+	case storage.KindAvatar, storage.KindImage:
+		return matchesExtension(ext, ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
+	case storage.KindVideo:
+		return matchesExtension(ext, ".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv")
+	case storage.KindAudio:
+		return matchesExtension(ext, ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".flac", ".webm", ".mp4")
+	case storage.KindFile:
+		return true
+	default:
+		return false
+	}
+}
+
+func matchesExtension(ext string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if ext == candidate {
+			return true
+		}
+	}
+	return false
 }
