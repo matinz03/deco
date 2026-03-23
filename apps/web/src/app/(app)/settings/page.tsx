@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { usePreferencesStore } from "@/store/preferences";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { useTheme } from "@/components/ui/ThemeProvider";
@@ -41,6 +42,10 @@ export default function SettingsPage() {
   const [avatarProcessing, setAvatarProcessing] = useState(false);
   const [profileError, setProfileError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { pushNotifications, messagePreviews, readReceipts, showOnlineStatus, hydrate, setPref } =
+    usePreferencesStore();
+  useEffect(() => { hydrate(); }, [hydrate]);
 
   const [mode, setMode] = useState<"create" | "change" | null>(null);
   const [passphrase, setPassphrase] = useState("");
@@ -437,16 +442,52 @@ export default function SettingsPage() {
       <section id="notifications" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Notifications</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50 divide-y divide-sidebar">
-          <SettingRow label="Push notifications" description="Get notified about new messages" />
-          <SettingRow label="Message previews" description="Show message content in notifications" />
+          <SettingRow
+            label="Push notifications"
+            description="Get notified about new messages when the app is in the background"
+            checked={pushNotifications}
+            onChange={async (value) => {
+              if (value) {
+                if (typeof Notification === "undefined") return;
+                const permission = await Notification.requestPermission();
+                if (permission === "granted") {
+                  setPref("pushNotifications", true);
+                }
+              } else {
+                setPref("pushNotifications", false);
+              }
+            }}
+          />
+          <SettingRow
+            label="Message previews"
+            description="Show message content in notifications"
+            checked={messagePreviews}
+            onChange={(value) => setPref("messagePreviews", value)}
+            disabled={!pushNotifications}
+          />
         </div>
+        {typeof Notification !== "undefined" && Notification.permission === "denied" && (
+          <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+            Notifications are blocked by your browser. Update your browser site settings to allow them.
+          </p>
+        )}
       </section>
 
       <section id="privacy" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Privacy</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50 divide-y divide-sidebar">
-          <SettingRow label="Read receipts" description="Let others see when you've read messages" />
-          <SettingRow label="Online status" description="Show when you're active" />
+          <SettingRow
+            label="Read receipts"
+            description="Let others see when you've read their messages"
+            checked={readReceipts}
+            onChange={(value) => setPref("readReceipts", value)}
+          />
+          <SettingRow
+            label="Online status"
+            description="Show when you're active to other users"
+            checked={showOnlineStatus}
+            onChange={(value) => setPref("showOnlineStatus", value)}
+          />
         </div>
       </section>
 
@@ -465,23 +506,56 @@ export default function SettingsPage() {
   );
 }
 
-function SettingRow({ label, description }: { label: string; description: string }) {
+function SettingRow({
+  label,
+  description,
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (value: boolean) => void | Promise<void>;
+  disabled?: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between px-4 py-3">
-      <div>
+    <div className={`flex items-center justify-between px-4 py-3 ${disabled ? "opacity-50" : ""}`}>
+      <div className="mr-4 min-w-0">
         <p className="text-sm font-medium">{label}</p>
         <p className="text-xs text-muted">{description}</p>
       </div>
-      <Toggle />
+      <Toggle checked={checked} onChange={onChange} disabled={disabled} />
     </div>
   );
 }
 
-function Toggle() {
+function Toggle({
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void | Promise<void>;
+  disabled?: boolean;
+}) {
   return (
-    <div className="relative h-5.5 w-10 cursor-pointer rounded-full border border-sidebar bg-muted">
-      <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-muted-foreground/40 transition-all" />
-    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => void onChange(!checked)}
+      className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed ${
+        checked ? "border-primary bg-primary" : "border-sidebar bg-muted"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
+          checked ? "translate-x-[22px]" : "translate-x-0.5"
+        }`}
+      />
+    </button>
   );
 }
 

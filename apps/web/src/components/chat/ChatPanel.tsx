@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
+import { usePreferencesStore } from "@/store/preferences";
 import { api } from "@/lib/api";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
@@ -19,6 +20,7 @@ interface Props { conversationId: string; }
 
 export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
+  const readReceipts = usePreferencesStore((s) => s.readReceipts);
   const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations, typing } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -59,15 +61,15 @@ export function ChatPanel({ conversationId }: Props) {
     markConversationRead(conversationId);
     setLoading(true);
     void fetchMessages(conversationId).finally(() => setLoading(false));
-    void api.messages.markRead(conversationId).catch(() => {});
+    if (readReceipts) void api.messages.markRead(conversationId).catch(() => {});
     return () => setActiveConversation(null);
-  }, [conversationId, setActiveConversation, markConversationRead, fetchMessages]);
+  }, [conversationId, setActiveConversation, markConversationRead, fetchMessages, readReceipts]);
 
   useEffect(() => {
     if (convMessages.length === 0) return;
     markConversationRead(conversationId);
-    void api.messages.markRead(conversationId).catch(() => {});
-  }, [conversationId, convMessages.length, markConversationRead]);
+    if (readReceipts) void api.messages.markRead(conversationId).catch(() => {});
+  }, [conversationId, convMessages.length, markConversationRead, readReceipts]);
 
   // Reset initial scroll flag when conversation changes
   useEffect(() => {

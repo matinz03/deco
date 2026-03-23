@@ -4,6 +4,7 @@ import { wsClient } from "@/lib/websocket";
 import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
 import type { Conversation, Member, Message, MessageType, WSEvent } from "@deco/types";
 import { useAuthStore } from "./auth";
+import { usePreferencesStore } from "./preferences";
 
 // In-memory cache of decrypted group keys: conversationId → plaintext group key (base64)
 const groupKeyCache = new Map<string, string>();
@@ -1001,21 +1002,19 @@ async function encryptOutgoingContent(conversation: Conversation | undefined, us
 }
 
 function notifyAboutMessage(message: Message, conversation?: Conversation) {
-  if (typeof window === "undefined" || typeof Notification === "undefined") {
-    return;
-  }
+  if (typeof window === "undefined" || typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
 
-  if (Notification.permission !== "granted") {
-    return;
-  }
+  const { pushNotifications, messagePreviews } = usePreferencesStore.getState();
+
+  if (!pushNotifications) return;
 
   const title = conversation?.name || message.sender?.displayName || "New message";
-  const body = message.isDeleted
-    ? "Message deleted"
-    : (message.decryptedContent ?? "You received a new message");
+  const body = messagePreviews
+    ? message.isDeleted
+      ? "Message deleted"
+      : (message.decryptedContent ?? "New message")
+    : "New message";
 
-  new Notification(title, {
-    body,
-    tag: message.conversationId,
-  });
+  new Notification(title, { body, tag: message.conversationId });
 }
