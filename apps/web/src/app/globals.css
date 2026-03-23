@@ -135,7 +135,10 @@
   /* ─── Nav Rail ────────────────────────────────────────────────────────── */
 
   .nav-rail {
-    @apply w-16 shrink-0 flex flex-col items-center py-4 gap-1 bg-nav border-r border-sidebar;
+    @apply w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-sidebar;
+    background-color: hsl(var(--nav) / 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
   }
 
   .nav-logo {
@@ -246,7 +249,10 @@
 
   .chat-header {
     @apply flex items-center gap-2 px-3 md:px-4 py-3
-           border-b border-border bg-surface shrink-0;
+           border-b border-border shrink-0;
+    background-color: hsl(var(--surface) / 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
 
   .chat-header-info {
@@ -275,7 +281,10 @@
   /* ─── Message Input ───────────────────────────────────────────────────── */
 
   .input-bar {
-    @apply px-3 md:px-4 py-3 border-t border-border bg-surface shrink-0 safe-area-bottom;
+    @apply px-3 md:px-4 py-3 border-t border-border shrink-0 safe-area-bottom;
+    background-color: hsl(var(--surface) / 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
 
   .input-field-wrap {
@@ -305,7 +314,10 @@
 
   .mobile-nav {
     @apply md:hidden fixed bottom-0 left-0 right-0 z-50
-           bg-nav border-t border-sidebar safe-area-bottom;
+           border-t border-sidebar safe-area-bottom;
+    background-color: hsl(var(--nav) / 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
   }
 
   .mobile-nav-items {
