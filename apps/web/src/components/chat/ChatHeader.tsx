@@ -11,6 +11,7 @@ import { OnlineDot } from "@/components/ui/OnlineDot";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
+import { SharedMediaPortal } from "./SharedMediaPortal";
 
 interface Props {
   conversation: Conversation;
@@ -28,6 +29,7 @@ export function ChatHeader({ conversation }: Props) {
   const updateMemberRole = useConversationStore((s) => s.updateMemberRole);
   const removeMember = useConversationStore((s) => s.removeMember);
   const deleteConversation = useConversationStore((s) => s.deleteConversation);
+  const conversationMessages = useConversationStore((s) => s.messages[liveConversation.id] ?? []);
 
   const title = liveConversation.name || "Unknown conversation";
   const currentMember = liveConversation.members?.find((member) => member.userId === currentUserId);
@@ -51,6 +53,7 @@ export function ChatHeader({ conversation }: Props) {
   const [copiedId, setCopiedId] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchMsg, setSearchMsg] = useState("");
+  const [sharedMediaOpen, setSharedMediaOpen] = useState(false);
   const [groupName, setGroupName] = useState(liveConversation.name || "");
   const [description, setDescription] = useState(liveConversation.description || "");
   const [saving, setSaving] = useState(false);
@@ -252,6 +255,17 @@ export function ChatHeader({ conversation }: Props) {
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+          </button>
+
+          <button
+            className={`chat-action-btn hidden sm:flex ${sharedMediaOpen ? "!text-primary bg-primary/10" : ""}`}
+            title="Shared media"
+            aria-label="Shared media"
+            onClick={() => setSharedMediaOpen(true)}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75V6A2.25 2.25 0 0 1 4.5 3.75h15A2.25 2.25 0 0 1 21.75 6v12a2.25 2.25 0 0 1-2.25 2.25h-15A2.25 2.25 0 0 1 2.25 18v-2.25Zm0 0 4.72-4.72a.75.75 0 0 1 1.06 0l4.72 4.72m0 0 1.78-1.78a.75.75 0 0 1 1.06 0l4.72 4.72M15 8.25h.008v.008H15V8.25Z" />
             </svg>
           </button>
 
@@ -746,6 +760,13 @@ export function ChatHeader({ conversation }: Props) {
           </AnimatePresence>,
           document.body
         )}
+
+      <SharedMediaPortal
+        open={sharedMediaOpen}
+        title={title}
+        messages={conversationMessages}
+        onClose={() => setSharedMediaOpen(false)}
+      />
     </>
   );
 }
