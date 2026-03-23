@@ -29,17 +29,6 @@ export function MobileNav() {
         </svg>
       ),
     },
-    ...(savedConversation
-      ? [{
-          href: `/inbox/${savedConversation.id}`,
-          label: "Saved",
-          icon: (
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 3.75H6.75A2.25 2.25 0 0 0 4.5 6v14.25l7.5-4.5 7.5 4.5V6a2.25 2.25 0 0 0-2.25-2.25Z" />
-            </svg>
-          ),
-        }]
-      : []),
     {
       href: "/inbox?tab=groups",
       label: "Groups",
@@ -58,6 +47,17 @@ export function MobileNav() {
         </svg>
       ),
     },
+    ...(savedConversation
+      ? [{
+          href: `/inbox/${savedConversation.id}`,
+          label: "Saved",
+          icon: (
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 3.75H6.75A2.25 2.25 0 0 0 4.5 6v14.25l7.5-4.5 7.5 4.5V6a2.25 2.25 0 0 0-2.25-2.25Z" />
+            </svg>
+          ),
+        }]
+      : []),
     {
       href: "/settings",
       label: "Settings",
