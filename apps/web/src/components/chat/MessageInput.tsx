@@ -132,12 +132,13 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     videoModeRef.current = videoMode;
   }, [videoMode]);
 
-  // Refocus after send completes (textarea is disabled while sending, so focus
-  // must wait until the re-render that re-enables it).
+  // Refocus after send completes — desktop only; on mobile refocusing the
+  // textarea after send would reopen the soft keyboard which feels wrong.
   const wasSendingRef = useRef(false);
   useEffect(() => {
     if (wasSendingRef.current && !sending) {
-      textareaRef.current?.focus();
+      const isTouchDevice = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+      if (!isTouchDevice) textareaRef.current?.focus();
     }
     wasSendingRef.current = sending;
   }, [sending]);

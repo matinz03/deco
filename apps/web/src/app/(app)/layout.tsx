@@ -84,14 +84,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ${showMainMobile ? "flex flex-1" : "hidden"} md:flex md:flex-1
         `}
       >
-        <AnimatePresence mode="wait">
+        <AnimatePresence initial={false}>
           <motion.div
             key={pathname}
             className="flex h-full flex-1 flex-col"
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -8 }}
-            transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
           >
             {children}
           </motion.div>
