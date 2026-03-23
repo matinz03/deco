@@ -106,16 +106,16 @@ export default function StickersPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="border-b border-sidebar px-6 py-5">
+      <header className="border-b border-sidebar px-4 py-4 sm:px-6 sm:py-5">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">Sticker Studio</p>
-        <h1 className="mt-2 text-2xl font-semibold">Create packs and import them from Telegram</h1>
+        <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Create packs and import them from Telegram</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
           Build Deco-native packs, then bring in regular Telegram sticker sets with a shortname or pack link.
         </p>
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-6 overflow-hidden px-6 py-6 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <aside className="space-y-5 overflow-y-auto">
+      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden px-4 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:grid-cols-[380px_minmax(0,1fr)]">
+        <aside className="space-y-4 overflow-y-auto pr-1 sm:space-y-5">
           <form onSubmit={handleCreatePack} className="rounded-3xl border border-sidebar bg-surface p-5">
             <h2 className="text-base font-semibold">New Deco pack</h2>
             <div className="mt-4 space-y-3">
@@ -165,6 +165,11 @@ export default function StickersPage() {
                 onChange={(event) => setStickerFile(event.target.files?.[0] ?? null)}
                 className="input cursor-pointer"
               />
+              {stickerFile && (
+                <p className="text-xs text-muted">
+                  Selected: <span className="font-medium text-foreground">{stickerFile.name}</span>
+                </p>
+              )}
             </div>
             <button
               type="submit"
@@ -179,8 +184,8 @@ export default function StickersPage() {
         </aside>
 
         <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-sidebar bg-surface">
-          <div className="border-b border-sidebar px-5 py-4">
-            <div className="flex gap-2 overflow-x-auto">
+          <div className="border-b border-sidebar px-3 py-3 sm:px-5 sm:py-4">
+            <div className="flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {packs.map((pack) => (
                 <button
                   key={pack.id}
@@ -196,26 +201,26 @@ export default function StickersPage() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
             {loading ? (
               <p className="text-sm text-muted">Loading packs...</p>
             ) : !activePack ? (
               <p className="text-sm text-muted">No sticker packs yet. Create one or import from Telegram.</p>
             ) : (
               <>
-                <div className="mb-5">
-                  <div className="flex items-center gap-3">
+                <div className="mb-4 sm:mb-5">
+                  <div className="flex items-start gap-3">
                     {activePack.coverSticker ? (
                       activePack.coverSticker.format === "video" ? (
-                        <video src={activePack.coverSticker.assetUrl} muted loop autoPlay playsInline className="h-16 w-16 rounded-2xl object-contain bg-background/60 p-2" />
+                        <video src={activePack.coverSticker.assetUrl} muted loop autoPlay playsInline className="h-14 w-14 shrink-0 rounded-2xl object-contain bg-background/60 p-2 sm:h-16 sm:w-16" />
                       ) : (
-                        <img src={activePack.coverSticker.assetUrl} alt={activePack.title} className="h-16 w-16 rounded-2xl object-contain bg-background/60 p-2" />
+                        <img src={activePack.coverSticker.assetUrl} alt={activePack.title} className="h-14 w-14 shrink-0 rounded-2xl object-contain bg-background/60 p-2 sm:h-16 sm:w-16" />
                       )
                     ) : (
-                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-background/60 text-2xl">S</div>
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-background/60 text-2xl sm:h-16 sm:w-16">S</div>
                     )}
-                    <div>
-                      <h2 className="text-lg font-semibold">{activePack.title}</h2>
+                    <div className="min-w-0">
+                      <h2 className="text-base font-semibold sm:text-lg">{activePack.title}</h2>
                       <p className="text-sm text-muted">{activePack.description || "No description yet."}</p>
                       <p className="mt-1 text-xs uppercase tracking-[0.18em] text-primary">
                         {activePack.source === "telegram" ? "Imported from Telegram" : "Deco pack"} • {activePack.stickerCount} stickers
@@ -224,9 +229,9 @@ export default function StickersPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                   {activePack.stickers?.map((sticker) => (
-                    <div key={sticker.id} className="rounded-2xl border border-sidebar bg-background/40 p-3">
+                    <div key={sticker.id} className="rounded-2xl border border-sidebar bg-background/40 p-2 sm:p-3">
                       <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface">
                         {sticker.format === "video" ? (
                           <video src={sticker.assetUrl} muted loop autoPlay playsInline className="max-h-full max-w-full rounded-xl object-contain" />
@@ -234,7 +239,7 @@ export default function StickersPage() {
                           <img src={sticker.assetUrl} alt={sticker.name} className="max-h-full max-w-full rounded-xl object-contain" loading="lazy" />
                         )}
                       </div>
-                      <p className="mt-2 truncate text-sm font-medium">{sticker.emoji} {sticker.name}</p>
+                      <p className="mt-2 truncate text-xs font-medium sm:text-sm">{sticker.emoji} {sticker.name}</p>
                     </div>
                   ))}
                 </div>

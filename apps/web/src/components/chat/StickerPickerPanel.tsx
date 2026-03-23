@@ -46,7 +46,7 @@ export function StickerPickerPanel({
 
   if (loading) {
     return (
-      <div className="w-[320px] rounded-3xl border border-sidebar bg-surface p-4 shadow-2xl">
+      <div className="w-full rounded-3xl border border-sidebar bg-surface p-4 shadow-2xl">
         <p className="text-sm text-muted">Loading sticker packs...</p>
       </div>
     );
@@ -54,7 +54,7 @@ export function StickerPickerPanel({
 
   if (error) {
     return (
-      <div className="w-[320px] rounded-3xl border border-sidebar bg-surface p-4 shadow-2xl">
+      <div className="w-full rounded-3xl border border-sidebar bg-surface p-4 shadow-2xl">
         <p className="text-sm text-red-400">{error}</p>
         <Link href="/stickers" className="mt-3 inline-flex text-sm font-medium text-primary">
           Open sticker studio
@@ -65,7 +65,7 @@ export function StickerPickerPanel({
 
   if (!packs.length || !activePack) {
     return (
-      <div className="w-[320px] rounded-3xl border border-sidebar bg-surface p-4 shadow-2xl">
+      <div className="w-full rounded-3xl border border-sidebar bg-surface p-4 shadow-2xl">
         <p className="text-sm text-muted">No sticker packs yet.</p>
         <Link href="/stickers" className="mt-3 inline-flex text-sm font-medium text-primary">
           Create or import a pack
@@ -75,18 +75,18 @@ export function StickerPickerPanel({
   }
 
   return (
-    <div className="w-[360px] overflow-hidden rounded-3xl border border-sidebar bg-surface shadow-2xl">
-      <div className="border-b border-sidebar/80 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
+    <div className="w-full overflow-hidden rounded-3xl border border-sidebar bg-surface shadow-2xl">
+      <div className="border-b border-sidebar/80 px-3 py-3 sm:px-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold">Stickers</h3>
             <p className="text-xs text-muted">Pick from your Deco and Telegram-imported packs.</p>
           </div>
-          <Link href="/stickers" className="rounded-full border border-sidebar px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground">
+          <Link href="/stickers" className="shrink-0 rounded-full border border-sidebar px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground">
             Manage
           </Link>
         </div>
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {packs.map((pack) => (
             <button
               key={pack.id}
@@ -102,13 +102,13 @@ export function StickerPickerPanel({
         </div>
       </div>
 
-      <div className="grid max-h-[320px] grid-cols-4 gap-2 overflow-y-auto p-3">
+      <div className="grid max-h-[min(50vh,22rem)] grid-cols-3 gap-2 overflow-y-auto p-2 sm:grid-cols-4 sm:p-3">
         {activePack.stickers?.map((sticker) => (
           <button
             key={sticker.id}
             type="button"
             onClick={() => onSelect(sticker)}
-            className="group flex aspect-square items-center justify-center rounded-2xl bg-background/40 p-2 transition-colors hover:bg-accent"
+            className="group flex aspect-square items-center justify-center rounded-2xl bg-background/40 p-1.5 transition-colors hover:bg-accent sm:p-2"
             title={`${sticker.emoji} ${sticker.name}`}
           >
             {sticker.format === "video" ? (
