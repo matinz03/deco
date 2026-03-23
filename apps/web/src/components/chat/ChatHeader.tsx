@@ -549,24 +549,20 @@ export function ChatHeader({ conversation }: Props) {
                     <Avatar src={profileUser.avatarUrl} name={profileUser.displayName || profileUser.username} size="lg" />
                     <div className="text-center">
                       <p className="text-lg font-semibold">{profileUser.displayName || profileUser.username}</p>
-                      <p className="text-sm text-muted">@{profileUser.username}</p>
                     </div>
-                    {profileUser.bio && (
-                      <p className="text-center text-sm text-muted-foreground max-w-[260px]">{profileUser.bio}</p>
-                    )}
                   </div>
 
                   <div className="space-y-2 border-t border-sidebar px-6 pb-6 pt-4">
                     <div className="flex items-center justify-between rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">User ID</p>
-                        <p className="mt-0.5 truncate font-mono text-xs text-foreground/80">{profileUser.id}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">Username</p>
+                        <p className="mt-0.5 text-sm text-foreground/80">@{profileUser.username}</p>
                       </div>
                       <button
                         type="button"
                         className="ml-3 shrink-0 rounded-lg border border-sidebar px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground"
                         onClick={() => {
-                          void navigator.clipboard.writeText(profileUser.id);
+                          void navigator.clipboard.writeText(profileUser.username);
                           setCopiedId(true);
                           setTimeout(() => setCopiedId(false), 2000);
                         }}
@@ -574,6 +570,12 @@ export function ChatHeader({ conversation }: Props) {
                         {copiedId ? "Copied!" : "Copy"}
                       </button>
                     </div>
+                    {profileUser.bio && (
+                      <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">Bio</p>
+                        <p className="mt-1 text-sm">{profileUser.bio}</p>
+                      </div>
+                    )}
                     {profileUser.createdAt && (
                       <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted">Member since</p>

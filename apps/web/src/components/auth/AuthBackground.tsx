@@ -88,15 +88,18 @@ function GeometricScene() {
 function EmojiBackground({ emojis }: { emojis: string[] }) {
   const particles = useMemo(
     () =>
-      Array.from({ length: 22 }, (_, i) => ({
-        id: i,
-        emoji: emojis[i % emojis.length]!,
-        left: Math.random() * 98,
-        delay: Math.random() * 14,
-        duration: 12 + Math.random() * 10,
-        size: 18 + Math.random() * 22,
-        drift: (Math.random() - 0.5) * 40,
-      })),
+      Array.from({ length: 28 }, (_, i) => {
+        const duration = 14 + Math.random() * 12;
+        return {
+          id: i,
+          emoji: emojis[i % emojis.length]!,
+          left: Math.random() * 95,
+          // Negative delay puts each particle at a random point in its cycle immediately
+          delay: -(Math.random() * duration),
+          duration,
+          size: 20 + Math.random() * 24,
+        };
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [emojis.join()]
   );
@@ -109,11 +112,10 @@ function EmojiBackground({ emojis }: { emojis: string[] }) {
           className="absolute animate-emoji-float select-none"
           style={{
             left: `${p.left}%`,
+            bottom: 0,
             fontSize: `${p.size}px`,
             animationDelay: `${p.delay}s`,
             animationDuration: `${p.duration}s`,
-            marginLeft: `${p.drift}px`,
-            bottom: "-10%",
             lineHeight: 1,
           }}
         >
