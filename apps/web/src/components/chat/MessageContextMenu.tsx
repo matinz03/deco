@@ -9,6 +9,8 @@ interface MessageContextMenuProps {
   y: number;
   isSent: boolean;
   text: string;
+  seenLabel?: string;
+  seenTitle?: string;
   onEdit?: () => void;
   onReply: () => void;
   onCopy: () => void;
@@ -43,7 +45,7 @@ function MenuItem({
 }
 
 export function MessageContextMenu({
-  x, y, isSent, text, onEdit, onReply, onCopy, onDelete, onClose,
+  x, y, isSent, text, seenLabel, seenTitle, onEdit, onReply, onCopy, onDelete, onClose,
 }: MessageContextMenuProps) {
   // Clamp to viewport
   const clampedX = Math.min(x, window.innerWidth - 176);
@@ -112,6 +114,20 @@ export function MessageContextMenu({
           onClick={() => { onDelete(); onClose(); }}
           destructive
         />
+      )}
+      {isSent && seenLabel && (
+        <div
+          className="flex items-center gap-2.5 px-3 py-2 mt-0.5 border-t border-border"
+          title={seenTitle}
+        >
+          <span className="w-4 h-4 shrink-0 text-muted">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            </svg>
+          </span>
+          <span className="text-xs text-muted">{seenLabel}</span>
+        </div>
       )}
     </motion.div>,
     document.body
