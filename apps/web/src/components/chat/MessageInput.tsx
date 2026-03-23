@@ -132,6 +132,16 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     videoModeRef.current = videoMode;
   }, [videoMode]);
 
+  // Refocus after send completes (textarea is disabled while sending, so focus
+  // must wait until the re-render that re-enables it).
+  const wasSendingRef = useRef(false);
+  useEffect(() => {
+    if (wasSendingRef.current && !sending) {
+      textareaRef.current?.focus();
+    }
+    wasSendingRef.current = sending;
+  }, [sending]);
+
   useEffect(() => {
     if (replyTo) {
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -185,16 +195,13 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     clearTypingState(typingTimeoutRef, sendTyping, conversationId);
     setText("");
     setShowEmojiPicker(false);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.focus();
-    }
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
       await sendMessage(conversationId, trimmed, { replyToId: replyTo?.id });
       onCancelReply?.();
     } finally {
       setSending(false);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      // Focus is restored by the wasSendingRef useEffect once the textarea re-enables
     }
   }, [conversationId, onCancelReply, replyTo?.id, sendMessage, sendTyping, sending, text]);
 
