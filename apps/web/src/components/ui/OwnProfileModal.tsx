@@ -24,6 +24,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
+  const switchAccount = useAuthStore((s) => s.switchAccount);
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
@@ -269,10 +270,11 @@ export function OwnProfileModal({ open, onClose }: Props) {
                         <button
                           key={account.id}
                           type="button"
-                          onClick={() => {
+                          onClick={() => void (async () => {
+                            const switched = await switchAccount(account.id);
                             onClose();
-                            router.push("/login");
-                          }}
+                            router.push(switched ? "/inbox" : "/login");
+                          })()}
                           className="flex w-full items-center gap-3 rounded-xl border border-sidebar/70 px-3 py-2 text-left transition-colors hover:bg-accent"
                         >
                           <Avatar

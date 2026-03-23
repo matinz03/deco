@@ -12,6 +12,12 @@ import type { User } from "@deco/types";
 
 type BackupPrompt = "setup" | "restore" | null;
 const KNOWN_ACCOUNTS_KEY = "deco_known_accounts";
+const SAVED_SESSIONS_KEY = "deco_saved_sessions";
+
+type SavedSession = {
+  token: string;
+  user: User;
+};
 
 interface AuthState {
   user: User | null;
@@ -42,10 +48,19 @@ interface AuthState {
   dismissBackupPrompt: () => void;
   clearBackupError: () => void;
   updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<void>;
+  switchAccount: (userId: string) => Promise<boolean>;
 }
 
 async function refreshConversationState() {
   const { useConversationStore } = await import("./conversations");
+  useConversationStore.setState((state) => ({
+    conversations: [],
+    messages: {},
+    activeConversationId: null,
+    presence: {},
+    typing: {},
+    mutedIds: state.mutedIds,
+  }));
   const store = useConversationStore.getState();
   await store.fetchConversations();
   if (store.activeConversationId) {
@@ -110,6 +125,7 @@ function persistAuth(token: string, user: User) {
   localStorage.setItem("deco_token", token);
   localStorage.setItem("deco_user", JSON.stringify(user));
   rememberKnownAccount(user);
+  rememberSavedSession(token, user);
   document.cookie = `auth_token=${token}; path=/; SameSite=Lax; Max-Age=604800`;
 }
 
@@ -141,6 +157,24 @@ function readKnownAccounts(): Array<{
   } catch {
     return [];
   }
+}
+
+function rememberSavedSession(token: string, user: User) {
+  const existing = readSavedSessions().filter((session) => session.user.id !== user.id);
+  localStorage.setItem(SAVED_SESSIONS_KEY, JSON.stringify([{ token, user }, ...existing]));
+}
+
+function readSavedSessions(): SavedSession[] {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_SESSIONS_KEY) ?? "[]") as SavedSession[];
+  } catch {
+    return [];
+  }
+}
+
+function removeSavedSession(userId: string) {
+  const filtered = readSavedSessions().filter((session) => session.user.id !== userId);
+  localStorage.setItem(SAVED_SESSIONS_KEY, JSON.stringify(filtered));
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -198,9 +232,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async logout() {
+    const currentUserId = get().user?.id;
     await api.auth.logout().catch(() => {});
     localStorage.removeItem("deco_token");
     localStorage.removeItem("deco_user");
+    if (currentUserId) {
+      removeSavedSession(currentUserId);
+    }
     document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
     wsClient.disconnect();
     set({
@@ -342,5 +380,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: updated });
     localStorage.setItem("deco_user", JSON.stringify(updated));
     rememberKnownAccount(updated);
+    if (get().token) {
+      rememberSavedSession(get().token!, updated);
+    }
+  },
+
+  async switchAccount(userId) {
+    const session = readSavedSessions().find((entry) => entry.user.id === userId);
+    if (!session) {
+      return false;
+    }
+
+    wsClient.disconnect();
+    persistAuth(session.token, session.user);
+    set({ token: session.token, user: session.user });
+    wsClient.connect(resolveWebSocketURL());
+    await syncKeyBackupState(session.user, "login", set);
+    await refreshConversationState();
+    return true;
   },
 }));
