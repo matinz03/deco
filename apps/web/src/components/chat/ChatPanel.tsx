@@ -11,6 +11,7 @@ import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ChatSkeleton } from "./ChatSkeleton";
 import { TypingIndicator } from "./TypingIndicator";
+import { ThreadPortal } from "./ThreadPortal";
 
 const VIRTUAL_THRESHOLD = 80;
 
@@ -23,6 +24,8 @@ export function ChatPanel({ conversationId }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [replyTo, setReplyTo] = useState<(typeof convMessages)[number] | null>(null);
+  const [threadMessageId, setThreadMessageId] = useState<string | null>(null);
   const initialScrollDone = useRef(false);
   const lastScrollTop = useRef(0);
 
@@ -37,6 +40,12 @@ export function ChatPanel({ conversationId }: Props) {
     typingNames.length <= 1
       ? typingNames[0]
       : `${typingNames[0]} and ${typingNames.length - 1} ${typingNames.length - 1 === 1 ? "other" : "others"}`;
+  const replyCounts = convMessages.reduce<Record<string, number>>((acc, message) => {
+    if (message.replyToId) {
+      acc[message.replyToId] = (acc[message.replyToId] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
 
   const virtualizer = useVirtualizer({
     count: useVirtual ? convMessages.length : 0,
@@ -64,6 +73,8 @@ export function ChatPanel({ conversationId }: Props) {
   useEffect(() => {
     initialScrollDone.current = false;
     setShowScrollBtn(false);
+    setReplyTo(null);
+    setThreadMessageId(null);
   }, [conversationId]);
 
   // Scroll logic: instant jump on first load, smooth scroll on new messages
@@ -98,6 +109,12 @@ export function ChatPanel({ conversationId }: Props) {
     } else {
       setShowScrollBtn(false);
     }
+  }
+
+  function jumpToMessage(messageId: string) {
+    const element = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   if (!conversation) {
@@ -153,7 +170,14 @@ export function ChatPanel({ conversationId }: Props) {
                       ref={virtualizer.measureElement}
                       data-index={virtualItem.index}
                     >
-                      <MessageBubble message={msg} isSent={isSent} showAvatar={showAvatar} />
+                      <MessageBubble
+                        message={msg}
+                        isSent={isSent}
+                        showAvatar={showAvatar}
+                        replyCount={replyCounts[msg.id] ?? 0}
+                        onReply={setReplyTo}
+                        onOpenThread={(message) => setThreadMessageId(message.id)}
+                      />
                     </div>
                   );
                 })}
@@ -164,7 +188,15 @@ export function ChatPanel({ conversationId }: Props) {
                 const prevMsg = convMessages[i - 1];
                 const showAvatar = !isSent && prevMsg?.senderId !== msg.senderId;
                 return (
-                  <MessageBubble key={msg.id} message={msg} isSent={isSent} showAvatar={showAvatar} />
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    isSent={isSent}
+                    showAvatar={showAvatar}
+                    replyCount={replyCounts[msg.id] ?? 0}
+                    onReply={setReplyTo}
+                    onOpenThread={(message) => setThreadMessageId(message.id)}
+                  />
                 );
               })
             )}
@@ -192,7 +224,14 @@ export function ChatPanel({ conversationId }: Props) {
       </div>
 
       <TypingIndicator isTyping={typingNames.length > 0} name={typingLabel} />
-      <MessageInput conversationId={conversationId} />
+      <MessageInput conversationId={conversationId} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} />
+      <ThreadPortal
+        open={Boolean(threadMessageId)}
+        messages={convMessages}
+        focusMessageId={threadMessageId}
+        onClose={() => setThreadMessageId(null)}
+        onJumpToMessage={jumpToMessage}
+      />
     </div>
   );
 }

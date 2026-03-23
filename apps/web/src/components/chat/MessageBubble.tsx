@@ -2,21 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { format } from "date-fns";
+import type { Message } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
 import { ReactionPicker } from "./ReactionPicker";
 import { MessageContextMenu } from "./MessageContextMenu";
-import { format } from "date-fns";
-import type { Message } from "@deco/types";
 
 interface Props {
   message: Message;
   isSent: boolean;
   showAvatar: boolean;
+  replyCount?: number;
+  onReply?: (message: Message) => void;
+  onOpenThread?: (message: Message) => void;
 }
 
-export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
+export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0, onReply, onOpenThread }: Props) {
   if (msg.isDeleted) return null;
 
   const text = getMessageText(msg);
@@ -37,23 +40,23 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   const reactionContainerRef = useRef<HTMLDivElement>(null);
 
   function openReactions() {
-    // Check if there's enough room above the bubble to show the picker (≥180px)
     const rect = reactionContainerRef.current?.getBoundingClientRect();
     setPickerAbove(!rect || rect.top >= 180);
-    setShowReactions((v) => !v);
+    setShowReactions((value) => !value);
   }
 
   useEffect(() => {
     setDraft(text);
   }, [text, msg.id]);
 
-  useEffect(() => () => { if (tapTimer.current) clearTimeout(tapTimer.current); }, []);
+  useEffect(() => () => {
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+  }, []);
 
-  // Close emoji bar on outside click
   useEffect(() => {
     if (!showReactions) return;
-    function handleOutsideClick(e: MouseEvent) {
-      if (reactionContainerRef.current && !reactionContainerRef.current.contains(e.target as Node)) {
+    function handleOutsideClick(event: MouseEvent) {
+      if (reactionContainerRef.current && !reactionContainerRef.current.contains(event.target as Node)) {
         setShowReactions(false);
       }
     }
@@ -61,9 +64,9 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [showReactions]);
 
-  function handleContextMenu(e: React.MouseEvent) {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
+  function handleContextMenu(event: React.MouseEvent) {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY });
   }
 
   async function handleSaveEdit() {
@@ -78,8 +81,8 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
     setIsEditing(false);
   }
 
-  function handleBubbleClick(e: React.MouseEvent) {
-    lastPos.current = { x: e.clientX, y: e.clientY };
+  function handleBubbleClick(event: React.MouseEvent) {
+    lastPos.current = { x: event.clientX, y: event.clientY };
     tapCount.current += 1;
 
     if (tapTimer.current) {
@@ -87,14 +90,12 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
       tapTimer.current = null;
     }
 
-    // Double tap — open context menu immediately
     if (tapCount.current >= 2) {
       tapCount.current = 0;
       setContextMenu(lastPos.current);
       return;
     }
 
-    // Single tap — wait 1.5s, then open emoji bar if no second tap
     tapTimer.current = setTimeout(() => {
       if (tapCount.current === 1) {
         openReactions();
@@ -106,52 +107,51 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
   return (
     <>
       <motion.div
+        data-message-id={msg.id}
         className={`flex items-end gap-2 ${isSent ? "flex-row-reverse" : "flex-row"}`}
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
         onContextMenu={handleContextMenu}
       >
-        {/* Avatar for received messages */}
         {!isSent && (
           <div className="w-7 shrink-0">
-            {showAvatar && (
-              <Avatar src={msg.sender?.avatarUrl} name={senderName} size="xs" />
-            )}
+            {showAvatar && <Avatar src={msg.sender?.avatarUrl} name={senderName} size="xs" />}
           </div>
         )}
 
-        <div className={`group flex flex-col gap-1 max-w-[65%] ${isSent ? "items-end" : "items-start"}`}>
-          {/* Sender name for groups (received only) */}
+        <div className={`group flex max-w-[65%] flex-col gap-1 ${isSent ? "items-end" : "items-start"}`}>
           {!isSent && showAvatar && msg.sender && (
-            <span className="text-[11px] font-medium text-muted px-1">{senderName}</span>
+            <span className="px-1 text-[11px] font-medium text-muted">{senderName}</span>
           )}
 
-          {/* Reply preview */}
           {msg.replyTo && (
-            <div className={`text-xs px-3 py-1.5 rounded-lg border-l-2 border-primary opacity-70 max-w-full truncate
-              ${isSent ? "bg-primary/10" : "bg-muted"}`}>
-              {msg.replyTo.decryptedContent ?? "…"}
-            </div>
+            <button
+              type="button"
+              onClick={() => onOpenThread?.(msg)}
+              className={`max-w-full truncate rounded-lg border-l-2 border-primary px-3 py-1.5 text-left text-xs opacity-70 transition-colors hover:opacity-100 ${
+                isSent ? "bg-primary/10" : "bg-muted"
+              }`}
+            >
+              {getReplyPreviewText(msg.replyTo)}
+            </button>
           )}
 
-          {/* Bubble + reaction trigger */}
           <div className="relative" ref={reactionContainerRef}>
             <motion.div
-              className={`relative px-3.5 py-2 rounded-2xl text-sm leading-relaxed cursor-pointer select-none
-                ${isSent ? "bubble-sent rounded-br-sm" : "bubble-received rounded-bl-sm shadow-sm"}
-              `}
+              className={`relative cursor-pointer select-none rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
+                isSent ? "bubble-sent rounded-br-sm" : "bubble-received rounded-bl-sm shadow-sm"
+              }`}
               initial={{ scale: 0.92, opacity: 0, x: isSent ? 8 : -8 }}
               animate={{ scale: 1, opacity: 1, x: 0 }}
               transition={{ type: "spring", stiffness: 420, damping: 28 }}
               onClick={handleBubbleClick}
             >
-              {/* Media */}
               {msg.type === "image" && msg.mediaUrl && (
                 <img
                   src={msg.mediaUrl}
                   alt="Image"
-                  className="rounded-xl max-w-full max-h-64 object-cover mb-1.5"
+                  className="mb-1.5 max-h-64 max-w-full rounded-xl object-cover"
                   loading="lazy"
                 />
               )}
@@ -191,7 +191,6 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
                 </a>
               )}
 
-              {/* Text */}
               {isEditing ? (
                 <div className="min-w-[220px]">
                   <textarea
@@ -236,25 +235,40 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
                 </span>
               )}
 
-              {/* Time + status */}
-              <span className={`flex items-center gap-1 text-[10px] mt-1 opacity-55 ${isSent ? "justify-end" : "justify-start"}`}>
+              <span className={`mt-1 flex items-center gap-1 text-[10px] opacity-55 ${isSent ? "justify-end" : "justify-start"}`}>
                 {time}
                 {isSent && <DeliveryIcon status={msg.status} />}
               </span>
             </motion.div>
 
-            {/* Reaction picker trigger — shows on hover (desktop) */}
             <button
-              onClick={(e) => { e.stopPropagation(); openReactions(); }}
-              className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity
-                w-6 h-6 rounded-full bg-surface border border-border shadow-sm flex items-center justify-center text-xs
-                ${isSent ? "-left-8" : "-right-8"}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                openReactions();
+              }}
+              className={`absolute top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-xs opacity-0 shadow-sm transition-opacity group-hover:opacity-100 ${
+                isSent ? "-left-8" : "-right-8"
+              }`}
               aria-label="Add reaction"
             >
               <span>😊</span>
             </button>
 
-            {/* Reaction picker popover */}
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                onReply?.(msg);
+              }}
+              className={`absolute top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-xs opacity-0 shadow-sm transition-opacity group-hover:opacity-100 ${
+                isSent ? "-left-16" : "-right-16"
+              }`}
+              aria-label="Reply to message"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+              </svg>
+            </button>
+
             <AnimatePresence>
               {showReactions && (
                 <div className={`absolute z-50 ${pickerAbove ? "bottom-full mb-1" : "top-full mt-1"} ${isSent ? "right-0" : "left-0"} w-max`}>
@@ -269,17 +283,14 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             </AnimatePresence>
           </div>
 
-          {/* Reactions */}
           {msg.reactions.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {groupReactions(msg.reactions, currentUserId).map(({ emoji, count, reactedByMe }) => (
                 <button
                   key={emoji}
                   onClick={() => void toggleReaction(msg.conversationId, msg.id, emoji)}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-colors ${
-                    reactedByMe
-                      ? "bg-primary/15 text-primary hover:bg-primary/20"
-                      : "bg-muted hover:bg-accent"
+                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors ${
+                    reactedByMe ? "bg-primary/15 text-primary hover:bg-primary/20" : "bg-muted hover:bg-accent"
                   }`}
                 >
                   <span>{emoji}</span>
@@ -288,10 +299,19 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
               ))}
             </div>
           )}
+
+          {(replyCount > 0 || msg.replyToId) && (
+            <button
+              type="button"
+              onClick={() => onOpenThread?.(msg)}
+              className="rounded-full border border-sidebar/80 bg-surface px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {replyCount > 0 ? `View thread (${replyCount + (msg.replyToId ? 1 : 0)})` : "View thread"}
+            </button>
+          )}
         </div>
       </motion.div>
 
-      {/* Context menu (portal) */}
       <AnimatePresence>
         {contextMenu && (
           <MessageContextMenu
@@ -300,7 +320,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
             isSent={isSent}
             text={text}
             onEdit={isSent && !msg.isDeleted ? () => setIsEditing(true) : undefined}
-            onReply={() => {/* reply state to be wired */}}
+            onReply={() => onReply?.(msg)}
             onCopy={() => void navigator.clipboard.writeText(text)}
             onDelete={isSent && !msg.isDeleted ? () => void deleteMessage(msg.conversationId, msg.id) : undefined}
             onClose={() => setContextMenu(null)}
@@ -313,32 +333,32 @@ export function MessageBubble({ message: msg, isSent, showAvatar }: Props) {
 
 function DeliveryIcon({ status }: { status: Message["status"] }) {
   if (status === "sending") {
-    return <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60" />;
+    return <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent opacity-60" />;
   }
   if (status === "failed") {
     return (
-      <svg className="w-3.5 h-3.5 text-destructive" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+      <svg className="h-3.5 w-3.5 text-destructive" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
       </svg>
     );
   }
   if (status === "read") {
     return (
-      <svg className="w-3.5 h-3.5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
+      <svg className="h-3.5 w-3.5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
       </svg>
     );
   }
   if (status === "delivered") {
     return (
-      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
+      <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
       </svg>
     );
   }
   return (
-    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
     </svg>
   );
 }
@@ -378,4 +398,8 @@ function formatBytes(value?: number) {
   }
   const decimals = unit === 0 ? 0 : 1;
   return `${size.toFixed(decimals)} ${units[unit]}`;
+}
+
+function getReplyPreviewText(message: Message) {
+  return message.decryptedContent || message.mediaName || getMessageText(message) || "Reply";
 }

@@ -3,12 +3,14 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
-import type { MessageType } from "@deco/types";
+import type { Message, MessageType } from "@deco/types";
 import { useConversationStore } from "@/store/conversations";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
 
 interface Props {
   conversationId: string;
+  replyTo?: Message | null;
+  onCancelReply?: () => void;
 }
 
 type AttachmentAction = {
@@ -90,7 +92,7 @@ const attachmentActions: AttachmentAction[] = [
   },
 ];
 
-export function MessageInput({ conversationId }: Props) {
+export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -177,11 +179,12 @@ export function MessageInput({ conversationId }: Props) {
     setShowEmojiPicker(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
-      await sendMessage(conversationId, trimmed);
+      await sendMessage(conversationId, trimmed, { replyToId: replyTo?.id });
+      onCancelReply?.();
     } finally {
       setSending(false);
     }
-  }, [conversationId, sendMessage, sendTyping, sending, text]);
+  }, [conversationId, onCancelReply, replyTo?.id, sendMessage, sendTyping, sending, text]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -238,8 +241,10 @@ export function MessageInput({ conversationId }: Props) {
         mimeType: file.type || fallbackMimeForType(type),
         caption: text.trim(),
         previewUrl,
+        replyToId: replyTo?.id,
       });
       setText("");
+      onCancelReply?.();
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
         textareaRef.current.focus();
@@ -305,8 +310,10 @@ export function MessageInput({ conversationId }: Props) {
         mimeType: blob.type || fallbackMimeForType(type),
         caption: text.trim(),
         previewUrl,
+        replyToId: replyTo?.id,
       });
       setText("");
+      onCancelReply?.();
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
         textareaRef.current.focus();
@@ -364,6 +371,29 @@ export function MessageInput({ conversationId }: Props) {
 
   return (
     <div className="input-bar">
+      {replyTo && (
+        <div className="mb-2 flex items-start justify-between gap-3 rounded-2xl border border-sidebar bg-surface px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Replying to</p>
+            <p className="truncate text-sm text-foreground">
+              {replyTo.sender?.displayName || replyTo.sender?.username || "Unknown"}
+            </p>
+            <p className="truncate text-xs text-muted">
+              {replyTo.decryptedContent || replyTo.mediaName || getReplyLabel(replyTo.type)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelReply}
+            className="rounded-lg p-1 text-muted transition-colors hover:bg-accent hover:text-foreground"
+            aria-label="Cancel reply"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       <input
         ref={imageInputRef}
         type="file"
@@ -586,5 +616,20 @@ function fallbackMimeForType(type: Extract<MessageType, "image" | "video" | "aud
       return "audio/webm";
     default:
       return "application/octet-stream";
+  }
+}
+
+function getReplyLabel(type: MessageType) {
+  switch (type) {
+    case "image":
+      return "Image attachment";
+    case "video":
+      return "Video attachment";
+    case "audio":
+      return "Audio attachment";
+    case "file":
+      return "File attachment";
+    default:
+      return "Message";
   }
 }

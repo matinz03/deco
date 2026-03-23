@@ -50,7 +50,7 @@ export function mapUser(r: any): User {
     id: r.id,
     username: r.username ?? "",
     displayName: r.display_name ?? r.displayName ?? "",
-    avatarUrl: r.avatar_url ?? r.avatarUrl ?? "",
+    avatarUrl: resolveAssetUrl(r.avatar_url ?? r.avatarUrl ?? ""),
     publicKey: r.public_key ?? r.publicKey ?? "",
     bio: r.bio ?? "",
     lastSeenAt: r.last_seen_at ?? r.lastSeenAt ?? "",
@@ -68,7 +68,7 @@ export function mapMessage(r: any): Message {
     type: r.type ?? "text",
     encryptedContent: r.encrypted_content ?? r.encryptedContent ?? "",
     decryptedContent: r.decrypted_content ?? r.decryptedContent,
-    mediaUrl: r.media_url ?? r.mediaUrl,
+    mediaUrl: resolveAssetUrl(r.media_url ?? r.mediaUrl),
     mediaName: r.media_name ?? r.mediaName,
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
@@ -99,7 +99,7 @@ export function mapConversation(r: any): Conversation {
     id: r.id,
     type: r.type ?? "direct",
     name: r.name ?? "",
-    avatarUrl: r.avatar_url ?? r.avatarUrl ?? "",
+    avatarUrl: resolveAssetUrl(r.avatar_url ?? r.avatarUrl ?? ""),
     description: r.description ?? "",
     createdById: r.created_by_id ?? r.createdById ?? "",
     lastMessage: r.last_message ? mapMessage(r.last_message) : undefined,
@@ -137,12 +137,25 @@ function mapKeyBackupResponse(r: any): KeyBackupResponse {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapUploadResponse(r: any): UploadResponse {
   return {
-    url: r.url ?? "",
+    url: resolveAssetUrl(r.url ?? ""),
     mimeType: r.mime_type ?? r.mimeType ?? "",
     size: r.size ?? 0,
     name: r.name ?? "",
     kind: r.kind ?? "file",
   };
+}
+
+function resolveAssetUrl(value?: string) {
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:") || value.startsWith("blob:")) {
+    return value;
+  }
+
+  if (value.startsWith("/")) {
+    return `${BASE.replace(/\/$/, "")}${value}`;
+  }
+
+  return `${BASE.replace(/\/$/, "")}/${value.replace(/^\//, "")}`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

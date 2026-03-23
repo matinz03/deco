@@ -49,7 +49,7 @@ interface ConversationState {
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
-  sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendMessage: (conversationId: string, text: string, options?: { replyToId?: string }) => Promise<void>;
   sendMediaMessage: (
     conversationId: string,
     input: {
@@ -59,6 +59,7 @@ interface ConversationState {
       mimeType: string;
       caption?: string;
       previewUrl?: string;
+      replyToId?: string;
     }
   ) => Promise<void>;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
@@ -116,12 +117,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       const rawMessages = await api.messages.list(conversationId);
       const conversation = get().conversations.find((c) => c.id === conversationId);
       const decrypted = await hydrateMessages(rawMessages, conversation);
-      set((s) => ({ messages: { ...s.messages, [conversationId]: sortMessages(decrypted) } }));
+      set((s) => ({ messages: { ...s.messages, [conversationId]: withReplyLinks(decrypted) } }));
     },
 
-    async sendMessage(conversationId, text) {
+    async sendMessage(conversationId, text, options) {
       const user = useAuthStore.getState().user;
       if (!user) return;
+      const replyTo = options?.replyToId
+        ? get().messages[conversationId]?.find((message) => message.id === options.replyToId)
+        : undefined;
 
       // Optimistic update — show message immediately before server confirms
       const tempId = `temp_${Date.now()}`;
@@ -133,6 +137,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         type: "text",
         encryptedContent: "",
         decryptedContent: text,
+        replyToId: options?.replyToId,
+        replyTo,
         reactions: [],
         status: "sending",
         isEdited: false,
@@ -143,7 +149,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       set((s) => ({
         messages: {
           ...s.messages,
-          [conversationId]: [...(s.messages[conversationId] ?? []), optimisticMsg],
+          [conversationId]: withReplyLinks([...(s.messages[conversationId] ?? []), optimisticMsg]),
         },
       }));
 
@@ -151,7 +157,10 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const conversation = get().conversations.find((c) => c.id === conversationId);
         const encryptedContent = await encryptOutgoingContent(conversation, user.id, text);
 
-        const confirmed = await api.messages.send(conversationId, { encryptedContent });
+        const confirmed = await api.messages.send(conversationId, {
+          encryptedContent,
+          replyToId: options?.replyToId,
+        });
 
         const confirmedMessage = await hydrateMessage(confirmed, conversation);
 
@@ -159,12 +168,12 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         set((s) => ({
           messages: {
             ...s.messages,
-            [conversationId]: upsertMessage(
+            [conversationId]: withReplyLinks(upsertMessage(
               (s.messages[conversationId] ?? []).map((m) =>
                 m.id === tempId ? { ...confirmedMessage, decryptedContent: text } : m
               ).filter((m, index, all) => m.id !== tempId || all.findIndex((item) => item.id === confirmedMessage.id) === -1),
               { ...confirmedMessage, decryptedContent: text }
-            ),
+            )),
           },
         }));
       } catch {
@@ -172,9 +181,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         set((s) => ({
           messages: {
             ...s.messages,
-            [conversationId]: s.messages[conversationId]!.map((m) =>
+            [conversationId]: withReplyLinks(s.messages[conversationId]!.map((m) =>
               m.id === tempId ? { ...m, status: "failed" as const } : m
-            ),
+            )),
           },
         }));
       }
@@ -186,6 +195,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
 
       const caption = input.caption?.trim() ?? "";
       const tempId = `temp_${Date.now()}`;
+      const replyTo = input.replyToId
+        ? get().messages[conversationId]?.find((message) => message.id === input.replyToId)
+        : undefined;
       const optimisticMsg: Message = {
         id: tempId,
         conversationId,
@@ -198,6 +210,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         mediaName: input.fileName,
         mediaMimeType: input.mimeType,
         mediaSize: input.file.size,
+        replyToId: input.replyToId,
+        replyTo,
         reactions: [],
         status: "sending",
         isEdited: false,
@@ -208,7 +222,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       set((s) => ({
         messages: {
           ...s.messages,
-          [conversationId]: [...(s.messages[conversationId] ?? []), optimisticMsg],
+          [conversationId]: withReplyLinks([...(s.messages[conversationId] ?? []), optimisticMsg]),
         },
       }));
 
@@ -220,6 +234,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const confirmed = await api.messages.send(conversationId, {
           type: input.type,
           encryptedContent,
+          replyToId: input.replyToId,
           mediaUrl: upload.url,
           mediaName: upload.name,
           mediaMimeType: upload.mimeType,
@@ -230,7 +245,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         set((s) => ({
           messages: {
             ...s.messages,
-            [conversationId]: upsertMessage(
+            [conversationId]: withReplyLinks(upsertMessage(
               (s.messages[conversationId] ?? []).map((m) =>
                 m.id === tempId
                   ? {
@@ -243,16 +258,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
                 ...confirmedMessage,
                 decryptedContent: caption || confirmedMessage.decryptedContent,
               }
-            ),
+            )),
           },
         }));
       } catch {
         set((s) => ({
           messages: {
             ...s.messages,
-            [conversationId]: s.messages[conversationId]!.map((m) =>
+            [conversationId]: withReplyLinks(s.messages[conversationId]!.map((m) =>
               m.id === tempId ? { ...m, status: "failed" as const } : m
-            ),
+            )),
           },
         }));
       }
@@ -611,7 +626,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           set((s) => ({
             messages: {
               ...s.messages,
-              [msg.conversationId]: upsertMessage(s.messages[msg.conversationId] ?? [], msg),
+              [msg.conversationId]: withReplyLinks(upsertMessage(s.messages[msg.conversationId] ?? [], msg)),
             },
             typing: {
               ...s.typing,
@@ -651,10 +666,10 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           set((s) => ({
             messages: {
               ...s.messages,
-              [editedMessage.conversationId]: upsertMessage(
+              [editedMessage.conversationId]: withReplyLinks(upsertMessage(
                 s.messages[editedMessage.conversationId] ?? [],
                 editedMessage
-              ),
+              )),
             },
             conversations: s.conversations.map((item) =>
               item.id === editedMessage.conversationId && item.lastMessage?.id === editedMessage.id
@@ -709,9 +724,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         set((s) => ({
           messages: {
             ...s.messages,
-            [conversationId]: (s.messages[conversationId] ?? []).map((message) =>
+            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
               message.id === id ? { ...message, isDeleted: true, decryptedContent: "" } : message
-            ),
+            )),
           },
         }));
       }
@@ -819,6 +834,16 @@ function upsertMessage(messages: Message[], incoming: Message) {
   return sortMessages(next);
 }
 
+function withReplyLinks(messages: Message[]) {
+  const sorted = sortMessages(messages);
+  const byId = new Map(sorted.map((message) => [message.id, message]));
+
+  return sorted.map((message) => ({
+    ...message,
+    replyTo: message.replyToId ? byId.get(message.replyToId) : undefined,
+  }));
+}
+
 function applyReactionEvent(
   message: Message,
   payload: {
@@ -875,7 +900,7 @@ async function hydrateConversationSummaries(conversations: Conversation[]) {
 
 async function hydrateMessages(messages: Message[], conversation?: Conversation) {
   const hydrated = await Promise.all(messages.map((message) => hydrateMessage(message, conversation)));
-  return sortMessages(hydrated);
+  return withReplyLinks(hydrated);
 }
 
 async function rehydrateConversationMessages(
