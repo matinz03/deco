@@ -546,12 +546,12 @@ function Toggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => void onChange(!checked)}
-      className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed ${
-        checked ? "border-primary bg-primary" : "border-sidebar bg-muted"
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed ${
+        checked ? "bg-foreground" : "bg-foreground/20"
       }`}
     >
       <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
+        className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
           checked ? "translate-x-[22px]" : "translate-x-0.5"
         }`}
       />
