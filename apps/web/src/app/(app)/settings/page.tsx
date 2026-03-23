@@ -100,67 +100,17 @@ export default function SettingsPage() {
     <div className="overflow-y-auto h-full w-full"><div className="max-w-xl flex flex-col px-4 pt-10 pb-24 md:pb-10 mx-auto">
       <h1 className="mb-8 text-xl font-semibold">Settings</h1>
 
-      <section id="appearance" className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Appearance</h2>
-        <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
-          <div className="flex items-center justify-between px-4 py-3">
-            <div>
-              <p className="text-sm font-medium">Theme</p>
-              <p className="text-xs text-muted">Choose your preferred colour scheme</p>
-            </div>
-            <div className="flex items-center gap-1 rounded-xl bg-muted p-1">
-              {(["light", "system", "dark"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTheme(t)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all ${
-                    theme === t
-                      ? "bg-surface text-foreground shadow-sm"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="background" className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Animated Background</h2>
-        <p className="mb-3 text-xs text-muted">Choose what floats around on the login screen.</p>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-          {BACKGROUND_THEMES.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => {
-                setBgTheme(t.id);
-                setBackgroundTheme(t.id);
-              }}
-              className={`flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition-all ${
-                bgTheme === t.id
-                  ? "border-primary bg-primary/8 shadow-sm"
-                  : "border-sidebar bg-muted/50 hover:bg-accent"
-              }`}
-            >
-              <span className="text-2xl leading-none">{t.preview}</span>
-              <span className="text-xs font-medium leading-tight">{t.name}</span>
-              <span className="text-[10px] text-muted leading-tight">{t.description}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
       <section id="profile" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Profile</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
-          <div className="flex items-center gap-4 border-b border-sidebar px-4 py-4">
+          <div className="flex items-start gap-4 border-b border-sidebar px-4 py-4">
             <Avatar src={user?.avatarUrl} name={user?.displayName ?? "?"} size="lg" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate font-semibold">{user?.displayName}</p>
               <p className="truncate text-sm text-muted">@{user?.username}</p>
+              {user?.bio && (
+                <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{user.bio}</p>
+              )}
             </div>
             {!editingProfile && (
               <button
@@ -292,6 +242,59 @@ export default function SettingsPage() {
             <span className="text-sm text-muted">Username</span>
             <span className="text-sm text-muted">@{user?.username}</span>
           </div>
+        </div>
+      </section>
+
+      <section id="appearance" className="mb-8">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Appearance</h2>
+        <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Theme</p>
+              <p className="text-xs text-muted">Choose your preferred colour scheme</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-xl bg-muted p-1">
+              {(["light", "system", "dark"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTheme(t)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all ${
+                    theme === t
+                      ? "bg-surface text-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="background" className="mb-8">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Animated Background</h2>
+        <p className="mb-3 text-xs text-muted">Choose what floats around on the login screen.</p>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {BACKGROUND_THEMES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setBgTheme(t.id);
+                setBackgroundTheme(t.id);
+              }}
+              className={`flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition-all ${
+                bgTheme === t.id
+                  ? "border-primary bg-primary/8 shadow-sm"
+                  : "border-sidebar bg-muted/50 hover:bg-accent"
+              }`}
+            >
+              <span className="text-2xl leading-none">{t.preview}</span>
+              <span className="text-xs font-medium leading-tight">{t.name}</span>
+              <span className="text-[10px] text-muted leading-tight">{t.description}</span>
+            </button>
+          ))}
         </div>
       </section>
 
