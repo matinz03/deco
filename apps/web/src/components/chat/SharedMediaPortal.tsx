@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { formatDistanceToNowStrict } from "date-fns";
+import { formatDistanceToNowStrict, format, isToday, isYesterday } from "date-fns";
 import type { ContactAttachment, LocationAttachment, Message } from "@deco/types";
 
 interface Props {
@@ -123,9 +123,16 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
             <div className="flex-1 overflow-y-auto px-5 py-5">
               {tab === "media" ? (
                 mediaMessages.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {mediaMessages.map((message) => (
-                      <MediaCard key={message.id} message={message} />
+                  <div className="space-y-5">
+                    {groupMessagesByDay(mediaMessages).map(([label, dayMessages]) => (
+                      <section key={label} className="space-y-3">
+                        <SectionLabel label={label} />
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {dayMessages.map((message) => (
+                            <MediaCard key={message.id} message={message} />
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 ) : (
@@ -136,9 +143,16 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
                 )
               ) : tab === "files" ? (
                 fileMessages.length > 0 ? (
-                  <div className="space-y-3">
-                    {fileMessages.map((message) => (
-                      <FileRow key={message.id} message={message} />
+                  <div className="space-y-5">
+                    {groupMessagesByDay(fileMessages).map(([label, dayMessages]) => (
+                      <section key={label} className="space-y-3">
+                        <SectionLabel label={label} />
+                        <div className="space-y-3">
+                          {dayMessages.map((message) => (
+                            <FileRow key={message.id} message={message} />
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 ) : (
@@ -149,9 +163,16 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
                 )
               ) : tab === "places" ? (
                 locationMessages.length > 0 ? (
-                  <div className="space-y-3">
-                    {locationMessages.map((message) => (
-                      <LocationRow key={message.id} message={message} />
+                  <div className="space-y-5">
+                    {groupMessagesByDay(locationMessages).map(([label, dayMessages]) => (
+                      <section key={label} className="space-y-3">
+                        <SectionLabel label={label} />
+                        <div className="space-y-3">
+                          {dayMessages.map((message) => (
+                            <LocationRow key={message.id} message={message} />
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 ) : (
@@ -162,9 +183,16 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
                 )
               ) : (
                 contactMessages.length > 0 ? (
-                  <div className="space-y-3">
-                    {contactMessages.map((message) => (
-                      <ContactRow key={message.id} message={message} />
+                  <div className="space-y-5">
+                    {groupMessagesByDay(contactMessages).map(([label, dayMessages]) => (
+                      <section key={label} className="space-y-3">
+                        <SectionLabel label={label} />
+                        <div className="space-y-3">
+                          {dayMessages.map((message) => (
+                            <ContactRow key={message.id} message={message} />
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 ) : (
@@ -369,6 +397,37 @@ function EmptyState({ title, description }: { title: string; description: string
       <p className="mt-2 max-w-sm text-sm text-muted">{description}</p>
     </div>
   );
+}
+
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-px flex-1 bg-border/60" />
+      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">{label}</span>
+      <div className="h-px flex-1 bg-border/60" />
+    </div>
+  );
+}
+
+function groupMessagesByDay(messages: Message[]) {
+  const groups = new Map<string, Message[]>();
+  for (const message of messages) {
+    const label = formatDayLabel(message.sentAt);
+    const bucket = groups.get(label);
+    if (bucket) {
+      bucket.push(message);
+    } else {
+      groups.set(label, [message]);
+    }
+  }
+  return Array.from(groups.entries());
+}
+
+function formatDayLabel(value: string) {
+  const date = new Date(value);
+  if (isToday(date)) return "Today";
+  if (isYesterday(date)) return "Yesterday";
+  return format(date, "MMM d");
 }
 
 function formatMeta(message: Message) {
