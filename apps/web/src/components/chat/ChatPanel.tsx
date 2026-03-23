@@ -318,7 +318,9 @@ export function ChatPanel({ conversationId }: Props) {
                 })}
               </div>
             ) : (
-              items.map((item) => renderItem(item))
+              <div className="mt-auto flex flex-col">
+                {items.map((item) => renderItem(item))}
+              </div>
             )}
 
             <AnimatePresence>
