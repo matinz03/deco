@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { Conversation, LeadershipStatus, Member, User } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
@@ -11,7 +12,11 @@ import { OnlineDot } from "@/components/ui/OnlineDot";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
-import { SharedMediaPortal } from "./SharedMediaPortal";
+
+const SharedMediaPortal = dynamic(
+  () => import("./SharedMediaPortal").then((mod) => mod.SharedMediaPortal),
+  { ssr: false }
+);
 
 interface Props {
   conversation: Conversation;
