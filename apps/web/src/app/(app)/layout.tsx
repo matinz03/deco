@@ -83,7 +83,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           relative min-w-0 overflow-hidden
           ${showMainMobile ? "flex flex-1" : "hidden"} md:flex md:flex-1
         `}
-        style={{ backgroundColor: "hsl(var(--surface) / 0.82)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
+        style={{ backgroundColor: "hsl(var(--surface) / 0.30)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
       >
         <AnimatePresence initial={false}>
           <motion.div
