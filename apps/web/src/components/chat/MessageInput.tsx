@@ -16,14 +16,28 @@ interface Props {
 type AttachmentAction = {
   label: string;
   kind?: "image" | "video" | "file" | "audio";
+  trigger?: "gallery" | "camera-image" | "camera-video";
   icon: ReactNode;
   enabled: boolean;
 };
 
 const attachmentActions: AttachmentAction[] = [
   {
+    label: "Camera",
+    kind: "image",
+    trigger: "camera-image",
+    enabled: true,
+    icon: (
+      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5h2.1c.296 0 .57-.156.72-.41l.96-1.63a.84.84 0 0 1 .72-.41h1.5c.296 0 .57.156.72.41l.96 1.63c.15.254.424.41.72.41h2.1A2.25 2.25 0 0 1 19.5 9.75v7.5a2.25 2.25 0 0 1-2.25 2.25h-10.5A2.25 2.25 0 0 1 4.5 17.25v-7.5A2.25 2.25 0 0 1 6.75 7.5Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 13.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      </svg>
+    ),
+  },
+  {
     label: "Pictures",
     kind: "image",
+    trigger: "gallery",
     enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -34,6 +48,7 @@ const attachmentActions: AttachmentAction[] = [
   {
     label: "Videos",
     kind: "video",
+    trigger: "gallery",
     enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -44,6 +59,7 @@ const attachmentActions: AttachmentAction[] = [
   {
     label: "Files",
     kind: "file",
+    trigger: "gallery",
     enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -55,10 +71,22 @@ const attachmentActions: AttachmentAction[] = [
   {
     label: "Music",
     kind: "audio",
+    trigger: "gallery",
     enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 18V5.25l10.5-2.25V15M9 18a2.25 2.25 0 1 1-4.5 0A2.25 2.25 0 0 1 9 18Zm10.5-3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+      </svg>
+    ),
+  },
+  {
+    label: "Video camera",
+    kind: "video",
+    trigger: "camera-video",
+    enabled: true,
+    icon: (
+      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9A2.25 2.25 0 0 0 13.5 5.25h-9A2.25 2.25 0 0 0 2.25 7.5v9A2.25 2.25 0 0 0 4.5 18.75Z" />
       </svg>
     ),
   },
@@ -109,6 +137,8 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const cameraImageInputRef = useRef<HTMLInputElement>(null);
+  const cameraVideoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -476,6 +506,22 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         onChange={(event) => void handleFileInput("video", event.target.files)}
       />
       <input
+        ref={cameraImageInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(event) => void handleFileInput("image", event.target.files)}
+      />
+      <input
+        ref={cameraVideoInputRef}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        className="hidden"
+        onChange={(event) => void handleFileInput("video", event.target.files)}
+      />
+      <input
         ref={fileInputRef}
         type="file"
         className="hidden"
@@ -560,6 +606,14 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
                           return;
                         }
                         if (!action.enabled || !action.kind) return;
+                        if (action.trigger === "camera-image") {
+                          cameraImageInputRef.current?.click();
+                          return;
+                        }
+                        if (action.trigger === "camera-video") {
+                          cameraVideoInputRef.current?.click();
+                          return;
+                        }
                         if (action.kind === "image") imageInputRef.current?.click();
                         if (action.kind === "video") videoInputRef.current?.click();
                         if (action.kind === "file") fileInputRef.current?.click();
