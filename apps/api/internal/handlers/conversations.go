@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,8 +12,14 @@ import (
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+)
+
+const (
+	leadershipObjectionCooldown = 30 * 24 * time.Hour
+	leadershipElectionWindow    = 24 * time.Hour
 )
 
 type ConversationHandler struct {
@@ -635,4 +643,472 @@ func (h *ConversationHandler) GetGroupKey(w http.ResponseWriter, r *http.Request
 	}
 
 	respondJSON(w, http.StatusOK, gk)
+}
+
+func (h *ConversationHandler) GetLeadershipStatus(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	userID := middleware.GetUserID(r)
+
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+	if ok, err := h.ensureGroupConversation(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load leadership status")
+		return
+	} else if !ok {
+		respondError(w, http.StatusBadRequest, "leadership elections are only available in groups")
+		return
+	}
+
+	if err := h.finalizeLeadershipElection(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize leadership election")
+		return
+	}
+
+	status, err := h.buildLeadershipStatus(r.Context(), convID, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to build leadership status")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, status)
+}
+
+func (h *ConversationHandler) ObjectToLeadership(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	userID := middleware.GetUserID(r)
+
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+	if ok, err := h.ensureGroupConversation(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update objections")
+		return
+	} else if !ok {
+		respondError(w, http.StatusBadRequest, "leadership objections are only available in groups")
+		return
+	}
+
+	if err := h.finalizeLeadershipElection(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize leadership election")
+		return
+	}
+
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start objection transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	now := time.Now().UTC()
+	var cooldownUntil *time.Time
+	var electionEndsAt *time.Time
+	if err := tx.QueryRow(r.Context(), `
+		SELECT objection_cooldown_until, election_ends_at
+		FROM group_leadership_cycles
+		WHERE conversation_id = $1
+	`, convID).Scan(&cooldownUntil, &electionEndsAt); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		respondError(w, http.StatusInternalServerError, "failed to load objection cycle")
+		return
+	}
+
+	if electionEndsAt != nil && electionEndsAt.After(now) {
+		respondError(w, http.StatusBadRequest, "an owner election is already active")
+		return
+	}
+	if cooldownUntil != nil && cooldownUntil.After(now) {
+		respondError(w, http.StatusBadRequest, "leadership objections are on cooldown")
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO group_leadership_objections (conversation_id, user_id)
+		VALUES ($1, $2)
+		ON CONFLICT DO NOTHING
+	`, convID, userID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to record objection")
+		return
+	}
+
+	memberCount, err := h.groupMemberCountTx(r.Context(), tx, convID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to count members")
+		return
+	}
+
+	var objectionCount int
+	if err := tx.QueryRow(r.Context(), `
+		SELECT COUNT(*) FROM group_leadership_objections WHERE conversation_id = $1
+	`, convID).Scan(&objectionCount); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to count objections")
+		return
+	}
+
+	threshold := leadershipThreshold(memberCount)
+	if objectionCount >= threshold {
+		cooldown := now.Add(leadershipObjectionCooldown)
+		electionEnds := now.Add(leadershipElectionWindow)
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO group_leadership_cycles (conversation_id, objection_cooldown_until, election_started_at, election_ends_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (conversation_id) DO UPDATE
+			SET objection_cooldown_until = EXCLUDED.objection_cooldown_until,
+			    election_started_at = EXCLUDED.election_started_at,
+			    election_ends_at = EXCLUDED.election_ends_at,
+			    updated_at = NOW()
+		`, convID, cooldown, now, electionEnds); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to start leadership election")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `DELETE FROM group_leadership_objections WHERE conversation_id = $1`, convID); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to reset objections")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `DELETE FROM group_leadership_votes WHERE conversation_id = $1`, convID); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to reset leadership votes")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize objection")
+		return
+	}
+
+	status, err := h.buildLeadershipStatus(r.Context(), convID, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to build leadership status")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, status)
+}
+
+func (h *ConversationHandler) VoteLeadership(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	userID := middleware.GetUserID(r)
+
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+	if ok, err := h.ensureGroupConversation(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save vote")
+		return
+	} else if !ok {
+		respondError(w, http.StatusBadRequest, "leadership voting is only available in groups")
+		return
+	}
+
+	if err := h.finalizeLeadershipElection(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize leadership election")
+		return
+	}
+
+	var req struct {
+		CandidateUserID string `json:"candidate_user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.CandidateUserID) == "" {
+		respondError(w, http.StatusBadRequest, "candidate_user_id is required")
+		return
+	}
+	req.CandidateUserID = strings.TrimSpace(req.CandidateUserID)
+
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start election vote transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var electionEndsAt *time.Time
+	if err := tx.QueryRow(r.Context(), `
+		SELECT election_ends_at
+		FROM group_leadership_cycles
+		WHERE conversation_id = $1
+	`, convID).Scan(&electionEndsAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusBadRequest, "there is no active leadership election")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to load election state")
+		return
+	}
+	if electionEndsAt == nil || !electionEndsAt.After(time.Now().UTC()) {
+		respondError(w, http.StatusBadRequest, "there is no active leadership election")
+		return
+	}
+
+	var candidateExists bool
+	if err := tx.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM members
+			WHERE conversation_id = $1 AND user_id = $2
+		)
+	`, convID, req.CandidateUserID).Scan(&candidateExists); err != nil || !candidateExists {
+		respondError(w, http.StatusBadRequest, "candidate must be a group member")
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO group_leadership_votes (conversation_id, voter_user_id, candidate_user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (conversation_id, voter_user_id) DO UPDATE
+		SET candidate_user_id = EXCLUDED.candidate_user_id,
+		    created_at = NOW()
+	`, convID, userID, req.CandidateUserID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save leadership vote")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize leadership vote")
+		return
+	}
+
+	if err := h.finalizeLeadershipElection(r.Context(), convID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to finalize leadership election")
+		return
+	}
+
+	status, err := h.buildLeadershipStatus(r.Context(), convID, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to build leadership status")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, status)
+}
+
+func (h *ConversationHandler) ensureGroupConversation(ctx context.Context, convID string) (bool, error) {
+	var conversationType string
+	if err := h.pool.QueryRow(ctx, `
+		SELECT type FROM conversations WHERE id = $1
+	`, convID).Scan(&conversationType); err != nil {
+		return false, err
+	}
+	return conversationType == string(models.ConversationTypeGroup), nil
+}
+
+func (h *ConversationHandler) groupMemberCountTx(ctx context.Context, tx pgx.Tx, convID string) (int, error) {
+	var count int
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM members WHERE conversation_id = $1
+	`, convID).Scan(&count)
+	return count, err
+}
+
+func (h *ConversationHandler) currentOwnerIDTx(ctx context.Context, tx pgx.Tx, convID string) (string, error) {
+	var ownerID string
+	err := tx.QueryRow(ctx, `
+		SELECT user_id FROM members
+		WHERE conversation_id = $1 AND role = 'owner'
+		LIMIT 1
+	`, convID).Scan(&ownerID)
+	return ownerID, err
+}
+
+func (h *ConversationHandler) finalizeLeadershipElection(ctx context.Context, convID string) error {
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var electionEndsAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT election_ends_at
+		FROM group_leadership_cycles
+		WHERE conversation_id = $1
+	`, convID).Scan(&electionEndsAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	now := time.Now().UTC()
+	if electionEndsAt == nil || electionEndsAt.After(now) {
+		return nil
+	}
+
+	memberCount, err := h.groupMemberCountTx(ctx, tx, convID)
+	if err != nil {
+		return err
+	}
+	turnoutThreshold := leadershipThreshold(memberCount)
+	currentOwnerID, err := h.currentOwnerIDTx(ctx, tx, convID)
+	if err != nil {
+		return err
+	}
+
+	var turnoutCount int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM group_leadership_votes WHERE conversation_id = $1
+	`, convID).Scan(&turnoutCount); err != nil {
+		return err
+	}
+
+	nextOwnerID := currentOwnerID
+	if turnoutCount >= turnoutThreshold {
+		var candidateID string
+		err := tx.QueryRow(ctx, `
+			SELECT
+				v.candidate_user_id
+			FROM group_leadership_votes v
+			JOIN users u ON u.id = v.voter_user_id
+			WHERE v.conversation_id = $1
+			GROUP BY v.candidate_user_id
+			ORDER BY COUNT(*) DESC, MIN(u.created_at) ASC, v.candidate_user_id ASC
+			LIMIT 1
+		`, convID).Scan(&candidateID)
+		if err == nil && candidateID != "" {
+			nextOwnerID = candidateID
+		}
+	}
+
+	if nextOwnerID != currentOwnerID {
+		if _, err := tx.Exec(ctx, `
+			UPDATE members
+			SET role = CASE WHEN role = 'owner' THEN 'admin' ELSE role END
+			WHERE conversation_id = $1
+		`, convID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE members SET role = 'owner'
+			WHERE conversation_id = $1 AND user_id = $2
+		`, convID, nextOwnerID); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM group_leadership_votes WHERE conversation_id = $1`, convID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM group_leadership_objections WHERE conversation_id = $1`, convID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE group_leadership_cycles
+		SET election_started_at = NULL,
+		    election_ends_at = NULL,
+		    updated_at = NOW()
+		WHERE conversation_id = $1
+	`, convID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (h *ConversationHandler) buildLeadershipStatus(ctx context.Context, convID, userID string) (*models.LeadershipStatus, error) {
+	status := &models.LeadershipStatus{
+		ConversationID: convID,
+	}
+
+	var memberCount int
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM members WHERE conversation_id = $1
+	`, convID).Scan(&memberCount); err != nil {
+		return nil, err
+	}
+	status.ObjectionThreshold = leadershipThreshold(memberCount)
+	status.TurnoutThreshold = leadershipThreshold(memberCount)
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT user_id FROM members
+		WHERE conversation_id = $1 AND role = 'owner'
+		LIMIT 1
+	`, convID).Scan(&status.CurrentOwnerID); err != nil {
+		return nil, err
+	}
+
+	var cooldownUntil *time.Time
+	var electionEndsAt *time.Time
+	var electionStartedAt *time.Time
+	if err := h.pool.QueryRow(ctx, `
+		SELECT objection_cooldown_until, election_started_at, election_ends_at
+		FROM group_leadership_cycles
+		WHERE conversation_id = $1
+	`, convID).Scan(&cooldownUntil, &electionStartedAt, &electionEndsAt); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	status.ObjectionCooldownEndsAt = cooldownUntil
+	status.ElectionEndsAt = electionEndsAt
+	status.ElectionActive = electionEndsAt != nil && electionEndsAt.After(now) && electionStartedAt != nil
+	status.CanObject = !status.ElectionActive && (cooldownUntil == nil || !cooldownUntil.After(now))
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM group_leadership_objections WHERE conversation_id = $1
+	`, convID).Scan(&status.ObjectionCount); err != nil {
+		return nil, err
+	}
+	if err := h.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM group_leadership_objections WHERE conversation_id = $1 AND user_id = $2
+		)
+	`, convID, userID).Scan(&status.HasObjected); err != nil {
+		return nil, err
+	}
+
+	var votedForUserID *string
+	if err := h.pool.QueryRow(ctx, `
+		SELECT candidate_user_id
+		FROM group_leadership_votes
+		WHERE conversation_id = $1 AND voter_user_id = $2
+	`, convID, userID).Scan(&votedForUserID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	status.VotedForUserID = votedForUserID
+	status.HasVoted = votedForUserID != nil
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM group_leadership_votes WHERE conversation_id = $1
+	`, convID).Scan(&status.TurnoutCount); err != nil {
+		return nil, err
+	}
+
+	if status.ElectionActive {
+		rows, err := h.pool.Query(ctx, `
+			SELECT
+				m.user_id,
+				u.display_name,
+				u.username,
+				u.avatar_url,
+				COUNT(v.voter_user_id)::int AS vote_count
+			FROM members m
+			JOIN users u ON u.id = m.user_id
+			LEFT JOIN group_leadership_votes v
+			  ON v.conversation_id = m.conversation_id AND v.candidate_user_id = m.user_id
+			WHERE m.conversation_id = $1
+			GROUP BY m.user_id, u.display_name, u.username, u.avatar_url
+			ORDER BY vote_count DESC, u.created_at ASC
+		`, convID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var candidate models.LeadershipCandidate
+			if err := rows.Scan(&candidate.UserID, &candidate.DisplayName, &candidate.Username, &candidate.AvatarURL, &candidate.VoteCount); err == nil {
+				status.Candidates = append(status.Candidates, candidate)
+			}
+		}
+	}
+
+	return status, nil
+}
+
+func leadershipThreshold(memberCount int) int {
+	if memberCount <= 0 {
+		return 0
+	}
+	return (2*memberCount + 2) / 3
 }

@@ -115,6 +115,30 @@ CREATE TABLE poll_votes (
 
 CREATE INDEX idx_poll_votes_option_id ON poll_votes(option_id);
 
+CREATE TABLE group_leadership_cycles (
+  conversation_id            UUID PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  objection_cooldown_until   TIMESTAMPTZ,
+  election_started_at        TIMESTAMPTZ,
+  election_ends_at           TIMESTAMPTZ,
+  created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE group_leadership_objections (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE TABLE group_leadership_votes (
+  conversation_id      UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  voter_user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  candidate_user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, voter_user_id)
+);
+
 -- Encrypted private-key backups for cross-device restore
 CREATE TABLE user_key_backups (
   user_id      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

@@ -152,3 +152,28 @@ type GroupKey struct {
 	EncryptedKey   string    `json:"encrypted_key" db:"encrypted_key"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 }
+
+type LeadershipCandidate struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	Username    string `json:"username"`
+	AvatarURL   string `json:"avatar_url"`
+	VoteCount   int    `json:"vote_count"`
+}
+
+type LeadershipStatus struct {
+	ConversationID         string                `json:"conversation_id"`
+	CurrentOwnerID         string                `json:"current_owner_id"`
+	ObjectionCount         int                   `json:"objection_count"`
+	ObjectionThreshold     int                   `json:"objection_threshold"`
+	HasObjected            bool                  `json:"has_objected"`
+	CanObject              bool                  `json:"can_object"`
+	ObjectionCooldownEndsAt *time.Time           `json:"objection_cooldown_ends_at,omitempty"`
+	ElectionActive         bool                  `json:"election_active"`
+	ElectionEndsAt         *time.Time            `json:"election_ends_at,omitempty"`
+	HasVoted               bool                  `json:"has_voted"`
+	VotedForUserID         *string               `json:"voted_for_user_id,omitempty"`
+	TurnoutCount           int                   `json:"turnout_count"`
+	TurnoutThreshold       int                   `json:"turnout_threshold"`
+	Candidates             []LeadershipCandidate `json:"candidates,omitempty"`
+}

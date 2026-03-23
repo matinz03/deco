@@ -159,6 +159,61 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	}
 
 	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_leadership_cycles (
+			conversation_id UUID PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+			objection_cooldown_until TIMESTAMPTZ,
+			election_started_at TIMESTAMPTZ,
+			election_ends_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_leadership_objections (
+			conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (conversation_id, user_id)
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_leadership_votes (
+			conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			voter_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			candidate_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (conversation_id, voter_user_id)
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger WHERE tgname = 'trg_group_leadership_cycles_updated_at'
+			) THEN
+				CREATE TRIGGER trg_group_leadership_cycles_updated_at
+				  BEFORE UPDATE ON group_leadership_cycles
+				  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
 		ALTER TABLE messages
 		ADD COLUMN IF NOT EXISTS media_name TEXT
 	`)

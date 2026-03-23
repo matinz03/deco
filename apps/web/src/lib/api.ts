@@ -12,6 +12,7 @@ import type {
   UploadResponse,
   Poll,
   CreatePollInput,
+  LeadershipStatus,
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -161,6 +162,32 @@ function mapPoll(r: any): Poll {
       text: option.text ?? "",
       voteCount: option.vote_count ?? option.voteCount ?? 0,
       votedByMe: Boolean(option.voted_by_me ?? option.votedByMe ?? false),
+    })),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapLeadershipStatus(r: any): LeadershipStatus {
+  return {
+    conversationId: r.conversation_id ?? r.conversationId ?? "",
+    currentOwnerId: r.current_owner_id ?? r.currentOwnerId ?? "",
+    objectionCount: r.objection_count ?? r.objectionCount ?? 0,
+    objectionThreshold: r.objection_threshold ?? r.objectionThreshold ?? 0,
+    hasObjected: Boolean(r.has_objected ?? r.hasObjected ?? false),
+    canObject: Boolean(r.can_object ?? r.canObject ?? false),
+    objectionCooldownEndsAt: r.objection_cooldown_ends_at ?? r.objectionCooldownEndsAt,
+    electionActive: Boolean(r.election_active ?? r.electionActive ?? false),
+    electionEndsAt: r.election_ends_at ?? r.electionEndsAt,
+    hasVoted: Boolean(r.has_voted ?? r.hasVoted ?? false),
+    votedForUserId: r.voted_for_user_id ?? r.votedForUserId,
+    turnoutCount: r.turnout_count ?? r.turnoutCount ?? 0,
+    turnoutThreshold: r.turnout_threshold ?? r.turnoutThreshold ?? 0,
+    candidates: (r.candidates ?? []).map((candidate: any) => ({
+      userId: candidate.user_id ?? candidate.userId ?? "",
+      displayName: candidate.display_name ?? candidate.displayName ?? "",
+      username: candidate.username ?? "",
+      avatarUrl: resolveAssetUrl(candidate.avatar_url ?? candidate.avatarUrl ?? ""),
+      voteCount: candidate.vote_count ?? candidate.voteCount ?? 0,
     })),
   };
 }
@@ -394,6 +421,26 @@ export const api = {
           encrypted_by: e.encryptedBy,
         }))),
       });
+    },
+
+    getLeadership: async (id: string) => {
+      const raw = await request<unknown>(`/api/v1/conversations/${id}/leadership`);
+      return mapLeadershipStatus(raw);
+    },
+
+    objectToLeadership: async (id: string) => {
+      const raw = await request<unknown>(`/api/v1/conversations/${id}/leadership/object`, {
+        method: "POST",
+      });
+      return mapLeadershipStatus(raw);
+    },
+
+    voteLeadership: async (id: string, candidateUserId: string) => {
+      const raw = await request<unknown>(`/api/v1/conversations/${id}/leadership/vote`, {
+        method: "POST",
+        body: JSON.stringify({ candidate_user_id: candidateUserId }),
+      });
+      return mapLeadershipStatus(raw);
     },
   },
 

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
 import { useRouter } from "next/navigation";
-import type { Conversation, Member, User } from "@deco/types";
+import type { Conversation, LeadershipStatus, Member, User } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
 import { api } from "@/lib/api";
@@ -56,6 +56,9 @@ export function ChatHeader({ conversation }: Props) {
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [portalMounted, setPortalMounted] = useState(false);
+  const [leadershipStatus, setLeadershipStatus] = useState<LeadershipStatus | null>(null);
+  const [leadershipBusy, setLeadershipBusy] = useState(false);
+  const [leadershipError, setLeadershipError] = useState("");
 
   useEffect(() => setPortalMounted(true), []);
 
@@ -68,6 +71,23 @@ export function ChatHeader({ conversation }: Props) {
     if (!settingsOpen || liveConversation.type !== "group") return;
     void listMembers(liveConversation.id);
   }, [settingsOpen, liveConversation.id, liveConversation.type, listMembers]);
+
+  useEffect(() => {
+    if (!settingsOpen || liveConversation.type !== "group") return;
+    let cancelled = false;
+    setLeadershipError("");
+    void api.conversations
+      .getLeadership(liveConversation.id)
+      .then((status) => {
+        if (!cancelled) setLeadershipStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setLeadershipError("Failed to load leadership status");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsOpen, liveConversation.id, liveConversation.type]);
 
   useEffect(() => {
     if (!settingsOpen || !searchQuery.trim() || searchQuery.trim().length < 2) {
@@ -151,6 +171,34 @@ export function ChatHeader({ conversation }: Props) {
       router.push("/inbox?tab=groups");
     } finally {
       setManagingMembers(false);
+    }
+  }
+
+  async function handleLeadershipObjection() {
+    setLeadershipBusy(true);
+    setLeadershipError("");
+    try {
+      const status = await api.conversations.objectToLeadership(liveConversation.id);
+      setLeadershipStatus(status);
+      await listMembers(liveConversation.id);
+    } catch {
+      setLeadershipError("Could not register your objection");
+    } finally {
+      setLeadershipBusy(false);
+    }
+  }
+
+  async function handleLeadershipVote(candidateUserId: string) {
+    setLeadershipBusy(true);
+    setLeadershipError("");
+    try {
+      const status = await api.conversations.voteLeadership(liveConversation.id, candidateUserId);
+      setLeadershipStatus(status);
+      await listMembers(liveConversation.id);
+    } catch {
+      setLeadershipError("Could not submit your leadership vote");
+    } finally {
+      setLeadershipBusy(false);
     }
   }
 
@@ -437,6 +485,106 @@ export function ChatHeader({ conversation }: Props) {
                               );
                             })}
                           </div>
+                        </div>
+
+                        <div className="space-y-3 rounded-2xl border border-sidebar/80 bg-background/40 p-4">
+                          <div>
+                            <h5 className="text-sm font-semibold">Leadership</h5>
+                            <p className="mt-0.5 text-xs text-muted">
+                              Members can object to the current owner. If objections reach two-thirds of the group,
+                              a one-day election begins. After an election starts, objections stay on cooldown for 30 days.
+                            </p>
+                          </div>
+
+                          {leadershipStatus ? (
+                            <div className="space-y-3">
+                              <div className="rounded-xl border border-sidebar/70 px-3 py-3">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted">Current owner</p>
+                                <p className="mt-1 text-sm font-medium">
+                                  {members.find((member) => member.userId === leadershipStatus.currentOwnerId)?.user?.displayName ||
+                                    members.find((member) => member.userId === leadershipStatus.currentOwnerId)?.user?.username ||
+                                    "Unknown"}
+                                </p>
+                              </div>
+
+                              {!leadershipStatus.electionActive ? (
+                                <div className="space-y-2 rounded-xl border border-sidebar/70 px-3 py-3">
+                                  <p className="text-sm font-medium">
+                                    Objections: {leadershipStatus.objectionCount}/{leadershipStatus.objectionThreshold}
+                                  </p>
+                                  {leadershipStatus.objectionCooldownEndsAt &&
+                                    new Date(leadershipStatus.objectionCooldownEndsAt).getTime() > Date.now() && (
+                                      <p className="text-xs text-muted">
+                                        Next objection window opens{" "}
+                                        {formatDistanceToNowStrict(new Date(leadershipStatus.objectionCooldownEndsAt), {
+                                          addSuffix: true,
+                                        })}
+                                      </p>
+                                    )}
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleLeadershipObjection()}
+                                    disabled={!leadershipStatus.canObject || leadershipStatus.hasObjected || leadershipBusy}
+                                    className="rounded-xl border border-sidebar px-4 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                                  >
+                                    {leadershipStatus.hasObjected ? "You objected" : "Object to leadership"}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 px-3 py-3">
+                                  <div>
+                                    <p className="text-sm font-medium">Owner election is live</p>
+                                    {leadershipStatus.electionEndsAt && (
+                                      <p className="mt-0.5 text-xs text-muted">
+                                        Voting ends{" "}
+                                        {formatDistanceToNowStrict(new Date(leadershipStatus.electionEndsAt), { addSuffix: true })}
+                                      </p>
+                                    )}
+                                    <p className="mt-1 text-xs text-muted">
+                                      Turnout: {leadershipStatus.turnoutCount}/{leadershipStatus.turnoutThreshold}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-2">
+                                    {leadershipStatus.candidates.map((candidate) => (
+                                      <button
+                                        key={candidate.userId}
+                                        type="button"
+                                        onClick={() => void handleLeadershipVote(candidate.userId)}
+                                        disabled={leadershipBusy}
+                                        className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${
+                                          leadershipStatus.votedForUserId === candidate.userId
+                                            ? "border-primary bg-primary/10"
+                                            : "border-sidebar hover:bg-accent"
+                                        }`}
+                                      >
+                                        <Avatar
+                                          src={candidate.avatarUrl}
+                                          name={candidate.displayName || candidate.username}
+                                          size="sm"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                          <p className="truncate text-sm font-medium">
+                                            {candidate.displayName || candidate.username}
+                                            {candidate.userId === currentUserId ? " (You)" : ""}
+                                          </p>
+                                          <p className="truncate text-xs text-muted">@{candidate.username}</p>
+                                        </div>
+                                        <div className="shrink-0 text-xs text-muted">{candidate.voteCount} votes</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {leadershipError && (
+                                <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                                  {leadershipError}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted">Loading leadership status...</p>
+                          )}
                         </div>
                       </div>
 

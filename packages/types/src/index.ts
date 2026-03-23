@@ -36,6 +36,31 @@ export interface Conversation {
   updatedAt: string;
 }
 
+export interface LeadershipCandidate {
+  userId: string;
+  displayName: string;
+  username: string;
+  avatarUrl: string;
+  voteCount: number;
+}
+
+export interface LeadershipStatus {
+  conversationId: string;
+  currentOwnerId: string;
+  objectionCount: number;
+  objectionThreshold: number;
+  hasObjected: boolean;
+  canObject: boolean;
+  objectionCooldownEndsAt?: string;
+  electionActive: boolean;
+  electionEndsAt?: string;
+  hasVoted: boolean;
+  votedForUserId?: string;
+  turnoutCount: number;
+  turnoutThreshold: number;
+  candidates: LeadershipCandidate[];
+}
+
 // ─── Message ──────────────────────────────────────────────────────────────────
 
 export interface PollOption {
