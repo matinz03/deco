@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { ChangeEvent, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
+import { api } from "@/lib/api";
 
 interface Props {
   open: boolean;
@@ -17,8 +18,13 @@ export function OwnProfileModal({ open, onClose }: Props) {
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarProcessing, setAvatarProcessing] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -26,15 +32,37 @@ export function OwnProfileModal({ open, onClose }: Props) {
     if (open) {
       setDisplayName(user?.displayName ?? "");
       setBio(user?.bio ?? "");
+      setAvatarUrl(user?.avatarUrl ?? "");
+      setAvatarFile(null);
+      setAvatarProcessing(false);
+      setProfileError("");
       setEditing(false);
     }
   }, [open, user]);
 
   async function handleSave() {
-    if (!displayName.trim()) return;
+    if (!displayName.trim()) {
+      setProfileError("Display name cannot be empty");
+      return;
+    }
+    if (avatarProcessing) {
+      setProfileError("Please wait for the image to finish processing");
+      return;
+    }
     setSaving(true);
+    setProfileError("");
     try {
-      await updateProfile({ displayName: displayName.trim(), bio: bio.trim() });
+      let nextAvatarUrl = avatarUrl;
+      if (avatarFile) {
+        const upload = await api.uploads.create(avatarFile, "avatar", avatarFile.name);
+        nextAvatarUrl = upload.url;
+      }
+      await updateProfile({
+        displayName: displayName.trim(),
+        bio: bio.trim(),
+        avatarUrl: nextAvatarUrl,
+      });
+      setAvatarFile(null);
       setEditing(false);
     } finally {
       setSaving(false);
@@ -87,10 +115,42 @@ export function OwnProfileModal({ open, onClose }: Props) {
             </div>
 
             <div className="flex flex-col items-center gap-3 px-6 py-6">
-              <Avatar src={user.avatarUrl} name={user.displayName || user.username} size="lg" />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(event) =>
+                  void handleAvatarSelect(
+                    event,
+                    setAvatarUrl,
+                    setAvatarFile,
+                    setAvatarProcessing,
+                    setProfileError
+                  )
+                }
+              />
+              <Avatar
+                src={editing ? avatarUrl : user.avatarUrl}
+                name={displayName || user.displayName || user.username}
+                size="lg"
+              />
 
               {editing ? (
                 <div className="w-full space-y-3">
+                  <div className="flex flex-col items-center gap-2 rounded-2xl border border-sidebar/70 bg-background/40 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={avatarProcessing || saving}
+                      className="rounded-xl border border-sidebar px-4 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                    >
+                      {avatarProcessing ? "Processing image..." : "Choose profile picture"}
+                    </button>
+                    <p className="text-center text-xs text-muted">
+                      JPG, PNG, GIF, or WebP. We resize it automatically before saving.
+                    </p>
+                  </div>
                   <label className="flex flex-col gap-1.5">
                     <span className="text-xs font-semibold uppercase tracking-wider text-muted">Display name</span>
                     <input
@@ -109,16 +169,27 @@ export function OwnProfileModal({ open, onClose }: Props) {
                       placeholder="Tell people a little about yourself"
                     />
                   </label>
+                  {profileError && (
+                    <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">{profileError}</p>
+                  )}
                   <div className="flex justify-end gap-2 pt-1">
                     <button
                       className="rounded-lg border border-sidebar px-3 py-1.5 text-sm text-muted transition-colors hover:text-foreground"
-                      onClick={() => setEditing(false)}
+                      onClick={() => {
+                        setDisplayName(user.displayName ?? "");
+                        setBio(user.bio ?? "");
+                        setAvatarUrl(user.avatarUrl ?? "");
+                        setAvatarFile(null);
+                        setAvatarProcessing(false);
+                        setProfileError("");
+                        setEditing(false);
+                      }}
                     >
                       Cancel
                     </button>
                     <button
                       className="btn-primary px-4 py-1.5 text-sm"
-                      disabled={saving || !displayName.trim()}
+                      disabled={saving || avatarProcessing || !displayName.trim()}
                       onClick={() => void handleSave()}
                     >
                       {saving ? "Saving..." : "Save"}
@@ -162,4 +233,83 @@ export function OwnProfileModal({ open, onClose }: Props) {
     </AnimatePresence>,
     document.body
   );
+}
+
+async function handleAvatarSelect(
+  event: ChangeEvent<HTMLInputElement>,
+  setAvatarUrl: (value: string) => void,
+  setAvatarFile: (value: File | null) => void,
+  setAvatarProcessing: (value: boolean) => void,
+  setProfileError: (value: string) => void
+) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    setProfileError("Please choose an image file");
+    return;
+  }
+  if (file.size > 6 * 1024 * 1024) {
+    setProfileError("Please choose an image smaller than 6MB");
+    return;
+  }
+
+  setAvatarProcessing(true);
+  setProfileError("");
+
+  try {
+    const resized = await resizeImage(file, 512);
+    setAvatarUrl(URL.createObjectURL(resized));
+    setAvatarFile(resized);
+  } catch {
+    setProfileError("We couldn't process that image");
+  } finally {
+    setAvatarProcessing(false);
+  }
+}
+
+async function resizeImage(file: File, maxSize: number) {
+  const sourceUrl = await fileToDataUrl(file);
+  const image = await loadImage(sourceUrl);
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas is not available");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const quality = mimeType === "image/png" ? undefined : 0.86;
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType, quality));
+  if (!blob) {
+    throw new Error("Image encoding failed");
+  }
+  const extension = mimeType === "image/png" ? "png" : "jpg";
+  return new File([blob], `avatar.${extension}`, { type: mimeType });
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
 }
