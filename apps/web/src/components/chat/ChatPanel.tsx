@@ -266,7 +266,7 @@ export function ChatPanel({ conversationId }: Props) {
           </div>
         </div>
       )}
-      <ChatHeader conversation={conversation} />
+      <ChatHeader conversation={conversation} onJumpToMessage={jumpToMessage} />
 
       <div
         ref={scrollRef}

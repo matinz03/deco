@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
 import { useRouter } from "next/navigation";
-import type { Conversation, LeadershipStatus, Member, User } from "@deco/types";
+import type { Conversation, LeadershipStatus, Member, Message, User } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
 import { api } from "@/lib/api";
@@ -15,9 +15,10 @@ import { SharedMediaPortal } from "./SharedMediaPortal";
 
 interface Props {
   conversation: Conversation;
+  onJumpToMessage?: (messageId: string) => void;
 }
 
-export function ChatHeader({ conversation }: Props) {
+export function ChatHeader({ conversation, onJumpToMessage }: Props) {
   const router = useRouter();
   const currentUserId = useAuthStore((s) => s.user?.id);
   const liveConversation =
@@ -72,6 +73,15 @@ export function ChatHeader({ conversation }: Props) {
   const [leadershipBusy, setLeadershipBusy] = useState(false);
   const [leadershipError, setLeadershipError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const messageSearchResults = useMemo(
+    () =>
+      searchMsg.trim()
+        ? conversationMessages.filter((message) =>
+            getMessageSearchText(message).toLowerCase().includes(searchMsg.trim().toLowerCase())
+          )
+        : [],
+    [conversationMessages, searchMsg]
+  );
 
   useEffect(() => setPortalMounted(true), []);
 
@@ -442,7 +452,8 @@ export function ChatHeader({ conversation }: Props) {
             transition={{ duration: 0.18 }}
             className="overflow-hidden border-b border-sidebar"
           >
-            <div className="flex items-center gap-2 px-4 py-2">
+            <div className="px-4 py-2">
+              <div className="flex items-center gap-2">
               <svg className="w-4 h-4 shrink-0 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
               </svg>
@@ -477,6 +488,38 @@ export function ChatHeader({ conversation }: Props) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
                 </svg>
               </button>
+              </div>
+              {searchMsg.trim() && (
+                <div className="mt-3 space-y-2 border-t border-sidebar/70 pt-3">
+                  {messageSearchResults.length > 0 ? (
+                    messageSearchResults.slice(0, 8).map((message) => (
+                      <button
+                        key={message.id}
+                        type="button"
+                        onClick={() => {
+                          onJumpToMessage?.(message.id);
+                          setSearchOpen(false);
+                        }}
+                        className="block w-full rounded-xl border border-sidebar/70 bg-surface/70 px-3 py-2 text-left transition-colors hover:bg-accent"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="truncate text-xs font-medium text-muted">
+                            {message.sender?.displayName || message.sender?.username || "Unknown"}
+                          </p>
+                          <span className="shrink-0 text-[11px] text-muted">
+                            {formatDistanceToNowStrict(new Date(message.sentAt), { addSuffix: true })}
+                          </span>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-sm text-foreground/90">
+                          {getMessageSearchText(message)}
+                        </p>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-1 text-xs text-muted">No matching messages in this conversation.</p>
+                  )}
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -906,4 +949,13 @@ function getDirectConversationSubtitle(lastSeenAt: string | undefined, isOnline:
   const diffMs = Date.now() - lastSeen.getTime();
   if (diffMs < 5 * 60 * 1000) return "Active recently";
   return `Last seen ${formatDistanceToNowStrict(lastSeen, { addSuffix: true })}`;
+}
+
+function getMessageSearchText(message: Message) {
+  if (message.decryptedContent) return message.decryptedContent;
+  if (message.poll?.question) return message.poll.question;
+  if (message.type === "location") return "Shared location";
+  if (message.type === "contact") return "Shared contact";
+  if (message.type === "sticker") return `${message.sticker?.emoji ?? ""} Sticker`.trim();
+  return message.mediaName || "Attachment";
 }
