@@ -11,6 +11,7 @@ import {
 import type { User } from "@deco/types";
 
 type BackupPrompt = "setup" | "restore" | null;
+const KNOWN_ACCOUNTS_KEY = "deco_known_accounts";
 
 interface AuthState {
   user: User | null;
@@ -108,7 +109,38 @@ async function syncKeyBackupState(
 function persistAuth(token: string, user: User) {
   localStorage.setItem("deco_token", token);
   localStorage.setItem("deco_user", JSON.stringify(user));
+  rememberKnownAccount(user);
   document.cookie = `auth_token=${token}; path=/; SameSite=Lax; Max-Age=604800`;
+}
+
+function rememberKnownAccount(user: User) {
+  const nextEntry = {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+  };
+
+  const existing = readKnownAccounts().filter((account) => account.id !== user.id);
+  localStorage.setItem(KNOWN_ACCOUNTS_KEY, JSON.stringify([nextEntry, ...existing]));
+}
+
+function readKnownAccounts(): Array<{
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+}> {
+  try {
+    return JSON.parse(localStorage.getItem(KNOWN_ACCOUNTS_KEY) ?? "[]") as Array<{
+      id: string;
+      username: string;
+      displayName: string;
+      avatarUrl: string;
+    }>;
+  } catch {
+    return [];
+  }
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -309,5 +341,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updated = await api.users.updateMe(data);
     set({ user: updated });
     localStorage.setItem("deco_user", JSON.stringify(updated));
+    rememberKnownAccount(updated);
   },
 }));

@@ -3,6 +3,7 @@
 import { ChangeEvent, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
@@ -12,7 +13,15 @@ interface Props {
   onClose: () => void;
 }
 
+type KnownAccount = {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+};
+
 export function OwnProfileModal({ open, onClose }: Props) {
+  const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
   const [editing, setEditing] = useState(false);
@@ -24,6 +33,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
   const [profileError, setProfileError] = useState("");
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [knownAccounts, setKnownAccounts] = useState<KnownAccount[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setMounted(true), []);
@@ -37,6 +47,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
       setAvatarProcessing(false);
       setProfileError("");
       setEditing(false);
+      setKnownAccounts(readKnownAccounts().filter((account) => account.id !== user?.id));
     }
   }, [open, user]);
 
@@ -225,6 +236,52 @@ export function OwnProfileModal({ open, onClose }: Props) {
                     </p>
                   </div>
                 )}
+                <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted">Accounts</p>
+                      <p className="mt-0.5 text-sm text-muted">Quick access for accounts used on this browser.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                      onClick={() => {
+                        onClose();
+                        router.push("/login");
+                      }}
+                    >
+                      Add account
+                    </button>
+                  </div>
+
+                  {knownAccounts.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {knownAccounts.map((account) => (
+                        <button
+                          key={account.id}
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            router.push("/login");
+                          }}
+                          className="flex w-full items-center gap-3 rounded-xl border border-sidebar/70 px-3 py-2 text-left transition-colors hover:bg-accent"
+                        >
+                          <Avatar
+                            src={account.avatarUrl}
+                            name={account.displayName || account.username}
+                            size="sm"
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {account.displayName || account.username}
+                            </p>
+                            <p className="truncate text-xs text-muted">@{account.username}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </motion.div>
@@ -312,4 +369,16 @@ function loadImage(src: string) {
     image.onerror = reject;
     image.src = src;
   });
+}
+
+function readKnownAccounts(): KnownAccount[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    return JSON.parse(window.localStorage.getItem("deco_known_accounts") ?? "[]") as KnownAccount[];
+  } catch {
+    return [];
+  }
 }
