@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
-import type { Message } from "@deco/types";
+import type { ContactAttachment, LocationAttachment, Message } from "@deco/types";
 
 interface Props {
   open: boolean;
@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void;
 }
 
-type SharedTab = "media" | "files";
+type SharedTab = "media" | "files" | "places" | "contacts";
 
 export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
   const [mounted, setMounted] = useState(false);
@@ -44,6 +44,24 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
     () =>
       messages
         .filter((message) => !message.isDeleted && Boolean(message.mediaUrl) && message.type === "file")
+        .slice()
+        .reverse(),
+    [messages]
+  );
+
+  const locationMessages = useMemo(
+    () =>
+      messages
+        .filter((message) => !message.isDeleted && message.type === "location" && parseLocationAttachment(message))
+        .slice()
+        .reverse(),
+    [messages]
+  );
+
+  const contactMessages = useMemo(
+    () =>
+      messages
+        .filter((message) => !message.isDeleted && message.type === "contact" && parseContactAttachment(message))
         .slice()
         .reverse(),
     [messages]
@@ -93,6 +111,12 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
                 <TabButton active={tab === "files"} onClick={() => setTab("files")}>
                   Files
                 </TabButton>
+                <TabButton active={tab === "places"} onClick={() => setTab("places")}>
+                  Places
+                </TabButton>
+                <TabButton active={tab === "contacts"} onClick={() => setTab("contacts")}>
+                  Contacts
+                </TabButton>
               </div>
             </div>
 
@@ -110,17 +134,45 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
                     description="Photos, videos, and audio messages from this chat will appear here."
                   />
                 )
-              ) : fileMessages.length > 0 ? (
-                <div className="space-y-3">
-                  {fileMessages.map((message) => (
-                    <FileRow key={message.id} message={message} />
-                  ))}
-                </div>
+              ) : tab === "files" ? (
+                fileMessages.length > 0 ? (
+                  <div className="space-y-3">
+                    {fileMessages.map((message) => (
+                      <FileRow key={message.id} message={message} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No shared files yet"
+                    description="Documents and other files from this chat will appear here."
+                  />
+                )
+              ) : tab === "places" ? (
+                locationMessages.length > 0 ? (
+                  <div className="space-y-3">
+                    {locationMessages.map((message) => (
+                      <LocationRow key={message.id} message={message} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No shared locations yet"
+                    description="Locations shared in this chat will show up here."
+                  />
+                )
               ) : (
-                <EmptyState
-                  title="No shared files yet"
-                  description="Documents and other files from this chat will appear here."
-                />
+                contactMessages.length > 0 ? (
+                  <div className="space-y-3">
+                    {contactMessages.map((message) => (
+                      <ContactRow key={message.id} message={message} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No shared contacts yet"
+                    description="Contact cards from this chat will show up here."
+                  />
+                )
               )}
             </div>
           </motion.div>
@@ -243,6 +295,73 @@ function FileRow({ message }: { message: Message }) {
   );
 }
 
+function LocationRow({ message }: { message: Message }) {
+  const location = parseLocationAttachment(message);
+  if (!location) return null;
+
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-sidebar bg-background/40 px-4 py-3">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-primary">
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21s-6.75-5.625-6.75-11.25a6.75 6.75 0 1 1 13.5 0C18.75 15.375 12 21 12 21Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+        </svg>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{location.label || "Shared location"}</p>
+        <p className="truncate text-xs text-muted">
+          {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)} · {formatDistanceToNowStrict(new Date(message.sentAt), { addSuffix: true })}
+        </p>
+      </div>
+      <a
+        href={buildMapLink(location)}
+        target="_blank"
+        rel="noreferrer"
+        className="shrink-0 rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+      >
+        Open
+      </a>
+    </div>
+  );
+}
+
+function ContactRow({ message }: { message: Message }) {
+  const contact = parseContactAttachment(message);
+  if (!contact) return null;
+
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-sidebar bg-background/40 px-4 py-3">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-muted">
+        <span className="text-sm font-semibold">{getInitials(contact.name)}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{contact.name}</p>
+        <p className="truncate text-xs text-muted">
+          {[contact.phone, contact.email].filter(Boolean).join(" · ") || "Shared contact"}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {contact.phone && (
+          <a
+            href={`tel:${contact.phone}`}
+            className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+          >
+            Call
+          </a>
+        )}
+        {contact.email && (
+          <a
+            href={`mailto:${contact.email}`}
+            className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+          >
+            Email
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
     <div className="flex h-full min-h-[260px] flex-col items-center justify-center rounded-3xl border border-dashed border-sidebar bg-background/30 px-6 text-center">
@@ -292,4 +411,49 @@ function getMediaLabel(message: Message) {
     default:
       return "Attachment";
   }
+}
+
+function parseLocationAttachment(message: Message): LocationAttachment | null {
+  if (message.type !== "location" || !message.decryptedContent) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(message.decryptedContent) as LocationAttachment;
+    if (typeof parsed.latitude !== "number" || typeof parsed.longitude !== "number") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseContactAttachment(message: Message): ContactAttachment | null {
+  if (message.type !== "contact" || !message.decryptedContent) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(message.decryptedContent) as ContactAttachment;
+    if (!parsed.name) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function buildMapLink(location: LocationAttachment) {
+  return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(location.latitude))}&mlon=${encodeURIComponent(String(location.longitude))}#map=16/${encodeURIComponent(String(location.latitude))}/${encodeURIComponent(String(location.longitude))}`;
+}
+
+function getInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 }

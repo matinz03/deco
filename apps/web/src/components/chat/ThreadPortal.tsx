@@ -175,6 +175,12 @@ function getTypeLabel(message: Message) {
       return "Audio attachment";
     case "file":
       return "File attachment";
+    case "poll":
+      return "Poll";
+    case "location":
+      return "Shared location";
+    case "contact":
+      return "Shared contact";
     default:
       return "Message";
   }
