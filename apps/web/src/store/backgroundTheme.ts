@@ -3,6 +3,7 @@
 export type BackgroundThemeId =
   | "geometric"
   | "love"
+  | "valentine"
   | "dogs"
   | "cats"
   | "space"
@@ -32,6 +33,13 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
     preview: "❤️",
     description: "Hearts & romance",
     emojis: ["❤️", "💕", "💘", "💝", "😍", "💌"],
+  },
+  {
+    id: "valentine",
+    name: "Valentine",
+    preview: "💘",
+    description: "Hearts, cupids & kisses",
+    emojis: ["💘", "💋", "😘", "❤️", "💝", "🏹", "💌", "💑", "😍", "💖"],
   },
   {
     id: "dogs",
