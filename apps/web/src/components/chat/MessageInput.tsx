@@ -1,11 +1,16 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
 import type { ContactAttachment, CreatePollInput, LocationAttachment, Message, MessageType, Sticker } from "@deco/types";
 import { useConversationStore } from "@/store/conversations";
-import { StickerPickerPanel } from "./StickerPickerPanel";
+
+const StickerPickerPanel = dynamic(
+  () => import("./StickerPickerPanel").then((mod) => mod.StickerPickerPanel),
+  { ssr: false }
+);
 
 interface Props {
   conversationId: string;
