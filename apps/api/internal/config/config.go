@@ -28,7 +28,7 @@ func Load() *Config {
 		JWTSecret:      getEnv("JWT_SECRET", "change-me"),
 		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3000"),
 		UploadRoot:     getEnv("UPLOAD_ROOT", "./uploads"),
-		PublicUploadBase: getEnv("PUBLIC_UPLOAD_BASE", "/uploads"),
+		PublicUploadBase: getEnv("PUBLIC_UPLOAD_BASE", "/api/v1/media"),
 		R2AccountID:    getEnv("R2_ACCOUNT_ID", ""),
 		R2AccessKey:    getEnv("R2_ACCESS_KEY_ID", ""),
 		R2SecretKey:    getEnv("R2_SECRET_ACCESS_KEY", ""),

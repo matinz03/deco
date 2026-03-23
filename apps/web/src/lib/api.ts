@@ -13,6 +13,7 @@ import type {
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const PUBLIC_UPLOAD_BASE = process.env.NEXT_PUBLIC_UPLOAD_BASE ?? "/api/v1/media";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -151,11 +152,20 @@ function resolveAssetUrl(value?: string) {
     return value;
   }
 
-  if (value.startsWith("/")) {
-    return `${BASE.replace(/\/$/, "")}${value}`;
+  const normalizedBase = BASE.replace(/\/$/, "");
+  const normalizedUploadBase = PUBLIC_UPLOAD_BASE.startsWith("/")
+    ? PUBLIC_UPLOAD_BASE
+    : `/${PUBLIC_UPLOAD_BASE}`;
+
+  if (value.startsWith("/uploads/")) {
+    return `${normalizedBase}${normalizedUploadBase}${value.slice("/uploads".length)}`;
   }
 
-  return `${BASE.replace(/\/$/, "")}/${value.replace(/^\//, "")}`;
+  if (value.startsWith("/")) {
+    return `${normalizedBase}${value}`;
+  }
+
+  return `${normalizedBase}/${value.replace(/^\//, "")}`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 interface AvatarProps {
   src?: string;
   name: string;
@@ -37,15 +39,22 @@ function getGradient(name: string) {
 }
 
 export function Avatar({ src, name, size = "md" }: AvatarProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [src]);
+
   const sizeClass = SIZES[size];
   const gradientClass = getGradient(name);
 
-  if (src) {
+  if (src && !imageFailed) {
     return (
       <img
         src={src}
         alt={name}
         className={`${sizeClass} rounded-full object-cover shrink-0`}
+        onError={() => setImageFailed(true)}
       />
     );
   }

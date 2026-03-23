@@ -96,9 +96,13 @@ func main() {
 	// WebSocket endpoint — auth handled inside the handler via ?token= query param
 	uploadBase := cfg.PublicUploadBase
 	if uploadBase == "" {
-		uploadBase = "/uploads"
+		uploadBase = "/api/v1/media"
 	}
-	r.Handle(uploadBase+"/*", http.StripPrefix(uploadBase+"/", http.FileServer(http.Dir(cfg.UploadRoot))))
+	uploadHandler := http.FileServer(http.Dir(cfg.UploadRoot))
+	r.Handle(uploadBase+"/*", http.StripPrefix(uploadBase+"/", uploadHandler))
+	if uploadBase != "/uploads" {
+		r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadHandler))
+	}
 	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger))
 
 	// Server
