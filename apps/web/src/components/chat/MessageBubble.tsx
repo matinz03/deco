@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import { format } from "date-fns";
-import type { Message } from "@deco/types";
+import type { ContactAttachment, LocationAttachment, Message } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
@@ -26,6 +26,8 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   if (msg.isDeleted) return null;
 
   const text = getMessageText(msg);
+  const location = parseLocationAttachment(msg);
+  const contact = parseContactAttachment(msg);
   const time = format(new Date(msg.sentAt), "HH:mm");
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
   const currentUserId = useAuthStore((s) => s.user?.id);
@@ -356,6 +358,65 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   </div>
                 </div>
               )}
+              {msg.type === "location" && location && (
+                <div className="mb-2 min-w-[260px] rounded-2xl border border-border/70 bg-background/55 p-3">
+                  <div className="mb-3 flex items-start gap-3">
+                    <div className="rounded-2xl bg-primary/10 p-2 text-primary">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21s-6.75-5.625-6.75-11.25a6.75 6.75 0 1 1 13.5 0C18.75 15.375 12 21 12 21Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{location.label || "Shared location"}</p>
+                      <p className="mt-1 text-xs text-muted">
+                        {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={buildMapLink(location)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    Open in maps
+                  </a>
+                </div>
+              )}
+              {msg.type === "contact" && contact && (
+                <div className="mb-2 min-w-[260px] rounded-2xl border border-border/70 bg-background/55 p-3">
+                  <div className="mb-3 flex items-start gap-3">
+                    <Avatar src="" name={contact.name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{contact.name}</p>
+                      {contact.phone && <p className="mt-1 text-xs text-muted">{contact.phone}</p>}
+                      {contact.email && <p className="truncate text-xs text-muted">{contact.email}</p>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {contact.phone && (
+                      <a
+                        href={`tel:${contact.phone}`}
+                        className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Call
+                      </a>
+                    )}
+                    {contact.email && (
+                      <a
+                        href={`mailto:${contact.email}`}
+                        className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Email
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {isEditing ? (
                 <div className="min-w-[220px]">
@@ -587,11 +648,49 @@ function groupReactions(reactions: Message["reactions"], currentUserId?: string 
 }
 
 function getMessageText(message: Message) {
-  if (message.decryptedContent) return message.decryptedContent;
   if (message.type === "poll" && message.poll) return message.poll.question;
+  if (message.type === "location") return "";
+  if (message.type === "contact") return "";
+  if (message.decryptedContent) return message.decryptedContent;
   if (message.type !== "text" && message.mediaUrl) return "";
   if (message.encryptedContent) return "Encrypted message unavailable on this device";
   return "";
+}
+
+function parseLocationAttachment(message: Message): LocationAttachment | null {
+  if (message.type !== "location" || !message.decryptedContent) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(message.decryptedContent) as LocationAttachment;
+    if (typeof parsed.latitude !== "number" || typeof parsed.longitude !== "number") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseContactAttachment(message: Message): ContactAttachment | null {
+  if (message.type !== "contact" || !message.decryptedContent) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(message.decryptedContent) as ContactAttachment;
+    if (!parsed.name) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function buildMapLink(location: LocationAttachment) {
+  return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(location.latitude))}&mlon=${encodeURIComponent(String(location.longitude))}#map=16/${encodeURIComponent(String(location.latitude))}/${encodeURIComponent(String(location.longitude))}`;
 }
 
 function formatBytes(value?: number) {
@@ -608,6 +707,8 @@ function formatBytes(value?: number) {
 }
 
 function getReplyPreviewText(message: Message) {
+  if (message.type === "location") return "Shared location";
+  if (message.type === "contact") return "Shared contact";
   return message.decryptedContent || message.mediaName || getMessageText(message) || "Reply";
 }
 

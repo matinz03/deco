@@ -78,7 +78,19 @@ export interface Poll {
   options: PollOption[];
 }
 
-export type MessageType = "text" | "image" | "video" | "audio" | "file" | "poll" | "system";
+export interface LocationAttachment {
+  label?: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface ContactAttachment {
+  name: string;
+  phone?: string;
+  email?: string;
+}
+
+export type MessageType = "text" | "image" | "video" | "audio" | "file" | "poll" | "location" | "contact" | "system";
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
 export type UploadKind = "avatar" | "image" | "video" | "audio" | "file";
 

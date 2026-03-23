@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
-import type { CreatePollInput, Message, MessageType } from "@deco/types";
+import type { ContactAttachment, CreatePollInput, LocationAttachment, Message, MessageType } from "@deco/types";
 import { useConversationStore } from "@/store/conversations";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
 
@@ -64,7 +64,7 @@ const attachmentActions: AttachmentAction[] = [
   },
   {
     label: "Location",
-    enabled: false,
+    enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 21s-6.75-5.625-6.75-11.25a6.75 6.75 0 1 1 13.5 0C18.75 15.375 12 21 12 21Z" />
@@ -74,7 +74,7 @@ const attachmentActions: AttachmentAction[] = [
   },
   {
     label: "Contacts",
-    enabled: false,
+    enabled: true,
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372c1.035 0 2.03-.166 2.962-.472A17.94 17.94 0 0 0 18 12.75a17.94 17.94 0 0 0-2.588 6.378ZM15 19.128A17.953 17.953 0 0 1 12 19.5c-1.033 0-2.046-.087-3-.255M15 19.128a17.944 17.944 0 0 0-3-6.378m0 0A17.945 17.945 0 0 0 9 19.245m3-6.495a17.944 17.944 0 0 1 3-6.378m-3 6.378a17.944 17.944 0 0 0-3-6.378M12 4.5a17.944 17.944 0 0 1 3 6.372M12 4.5a17.944 17.944 0 0 0-3 6.372m6 0A17.943 17.943 0 0 0 12 10.5m0 0A17.943 17.943 0 0 0 9 10.872" />
@@ -98,6 +98,8 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showPollComposer, setShowPollComposer] = useState(false);
+  const [showLocationComposer, setShowLocationComposer] = useState(false);
+  const [showContactComposer, setShowContactComposer] = useState(false);
   const [videoMode, setVideoMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -402,6 +404,38 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     }
   }
 
+  async function handleSendLocation(input: LocationAttachment) {
+    setShowAttachmentMenu(false);
+    setShowLocationComposer(false);
+    setSending(true);
+    clearTypingState(typingTimeoutRef, sendTyping, conversationId);
+    try {
+      await sendMessage(conversationId, JSON.stringify(input), {
+        replyToId: replyTo?.id,
+        type: "location",
+      });
+      onCancelReply?.();
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleSendContact(input: ContactAttachment) {
+    setShowAttachmentMenu(false);
+    setShowContactComposer(false);
+    setSending(true);
+    clearTypingState(typingTimeoutRef, sendTyping, conversationId);
+    try {
+      await sendMessage(conversationId, JSON.stringify(input), {
+        replyToId: replyTo?.id,
+        type: "contact",
+      });
+      onCancelReply?.();
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="input-bar">
       {replyTo && (
@@ -460,6 +494,18 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         onSubmit={(input) => void handleCreatePoll(input)}
         busy={sending}
       />
+      <LocationComposerModal
+        open={showLocationComposer}
+        onClose={() => setShowLocationComposer(false)}
+        onSubmit={(input) => void handleSendLocation(input)}
+        busy={sending}
+      />
+      <ContactComposerModal
+        open={showContactComposer}
+        onClose={() => setShowContactComposer(false)}
+        onSubmit={(input) => void handleSendContact(input)}
+        busy={sending}
+      />
 
       <div className="input-field-wrap">
         <div className="relative" ref={attachmentMenuRef}>
@@ -501,6 +547,16 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
                         if (action.label === "Poll") {
                           setShowAttachmentMenu(false);
                           setShowPollComposer(true);
+                          return;
+                        }
+                        if (action.label === "Location") {
+                          setShowAttachmentMenu(false);
+                          setShowLocationComposer(true);
+                          return;
+                        }
+                        if (action.label === "Contacts") {
+                          setShowAttachmentMenu(false);
+                          setShowContactComposer(true);
                           return;
                         }
                         if (!action.enabled || !action.kind) return;
@@ -675,9 +731,253 @@ function getReplyLabel(type: MessageType) {
       return "File attachment";
     case "poll":
       return "Poll";
+    case "location":
+      return "Location";
+    case "contact":
+      return "Contact";
     default:
       return "Message";
   }
+}
+
+function LocationComposerModal({
+  open,
+  onClose,
+  onSubmit,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (input: LocationAttachment) => void;
+  busy: boolean;
+}) {
+  const [label, setLabel] = useState("");
+  const [loadingLocation, setLoadingLocation] = useState(false);
+  const [location, setLocation] = useState<LocationAttachment | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setLabel("");
+      setLocation(null);
+      setLoadingLocation(false);
+      setError("");
+    }
+  }, [open]);
+
+  function handlePickCurrentLocation() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setError("Geolocation is not available on this device.");
+      return;
+    }
+
+    setLoadingLocation(true);
+    setError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          label: label.trim() || "Shared location",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setLoadingLocation(false);
+      },
+      () => {
+        setError("We couldn't access your location. Check browser permissions and try again.");
+        setLoadingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 backdrop-blur-sm md:items-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="w-full max-w-md rounded-3xl border border-sidebar bg-surface p-5 shadow-2xl"
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 24, scale: 0.96 }}
+            transition={{ type: "spring", stiffness: 360, damping: 28 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold">Share location</h3>
+                <p className="text-xs text-muted">Drop a pin from your current location.</p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-1 text-muted transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Close location composer"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">Label</span>
+                <input
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                  className="input"
+                  placeholder="Meet me here"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={handlePickCurrentLocation}
+                disabled={loadingLocation}
+                className="btn-primary px-4 py-2 text-sm"
+              >
+                {loadingLocation ? "Locating..." : "Use current location"}
+              </button>
+
+              {location && (
+                <div className="rounded-2xl border border-sidebar bg-background/40 px-4 py-3 text-sm">
+                  <p className="font-medium">{location.label || "Shared location"}</p>
+                  <p className="mt-1 text-xs text-muted">
+                    {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                  </p>
+                </div>
+              )}
+
+              {error && (
+                <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</p>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-xl border border-sidebar px-4 py-2 text-sm text-muted transition-colors hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy || !location}
+                onClick={() => location && onSubmit({ ...location, label: label.trim() || location.label })}
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
+              >
+                {busy ? "Sending..." : "Send location"}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function ContactComposerModal({
+  open,
+  onClose,
+  onSubmit,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (input: ContactAttachment) => void;
+  busy: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setName("");
+      setPhone("");
+      setEmail("");
+    }
+  }, [open]);
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 backdrop-blur-sm md:items-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="w-full max-w-md rounded-3xl border border-sidebar bg-surface p-5 shadow-2xl"
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 24, scale: 0.96 }}
+            transition={{ type: "spring", stiffness: 360, damping: 28 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold">Share contact</h3>
+                <p className="text-xs text-muted">Send a contact card with the essentials.</p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-1 text-muted transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Close contact composer"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">Name</span>
+                <input value={name} onChange={(event) => setName(event.target.value)} className="input" placeholder="Jane Doe" />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">Phone</span>
+                <input value={phone} onChange={(event) => setPhone(event.target.value)} className="input" placeholder="+49 123 456789" />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">Email</span>
+                <input value={email} onChange={(event) => setEmail(event.target.value)} className="input" placeholder="jane@example.com" />
+              </label>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-xl border border-sidebar px-4 py-2 text-sm text-muted transition-colors hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy || !name.trim()}
+                onClick={() => onSubmit({ name: name.trim(), phone: phone.trim() || undefined, email: email.trim() || undefined })}
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
+              >
+                {busy ? "Sending..." : "Send contact"}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 }
 
 function PollComposerModal({

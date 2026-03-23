@@ -336,6 +336,12 @@ function getConversationPreview(conversation: Conversation) {
   if (conversation.lastMessage.type === "poll") {
     return conversation.lastMessage.poll?.question || "Poll";
   }
+  if (conversation.lastMessage.type === "location") {
+    return "Shared location";
+  }
+  if (conversation.lastMessage.type === "contact") {
+    return "Shared contact";
+  }
   if (conversation.lastMessage.type !== "text") return "Media message";
   return "Encrypted message";
 }

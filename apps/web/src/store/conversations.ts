@@ -69,7 +69,14 @@ interface ConversationState {
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
-  sendMessage: (conversationId: string, text: string, options?: { replyToId?: string }) => Promise<void>;
+  sendMessage: (
+    conversationId: string,
+    text: string,
+    options?: {
+      replyToId?: string;
+      type?: Extract<MessageType, "text" | "location" | "contact">;
+    }
+  ) => Promise<void>;
   sendMediaMessage: (
     conversationId: string,
     input: {
@@ -185,6 +192,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     async sendMessage(conversationId, text, options) {
       const user = useAuthStore.getState().user;
       if (!user) return;
+      const messageType = options?.type ?? "text";
       const replyTo = options?.replyToId
         ? get().messages[conversationId]?.find((message) => message.id === options.replyToId)
         : undefined;
@@ -196,7 +204,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         conversationId,
         senderId: user.id,
         sender: user,
-        type: "text",
+        type: messageType,
         encryptedContent: "",
         decryptedContent: text,
         replyToId: options?.replyToId,
@@ -220,6 +228,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const encryptedContent = await encryptOutgoingContent(conversation, user.id, text);
 
         const confirmed = await api.messages.send(conversationId, {
+          type: messageType,
           encryptedContent,
           replyToId: options?.replyToId,
         });
