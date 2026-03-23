@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
@@ -12,6 +13,9 @@ import { NewConversationModal } from "@/components/ui/NewConversationModal";
 import { ConversationSkeleton } from "@/components/layout/ConversationSkeleton";
 import { formatDistanceToNowStrict } from "date-fns";
 import type { Conversation } from "@deco/types";
+
+const VIRTUALIZATION_THRESHOLD = 24;
+const ROW_ESTIMATE = 88;
 
 export function ConversationList() {
   const pathname = usePathname();
@@ -156,32 +160,129 @@ export function ConversationList() {
                 )}
               </div>
             ) : (
-              <ul>
-                {filtered.map((conversation) => (
-                  <ConversationItem
-                    key={conversation.id}
-                    conversation={conversation}
-                    href={
-                      conversation.type === "group" || conversation.type === "channel"
-                        ? `/inbox/${conversation.id}?tab=groups`
-                        : `/inbox/${conversation.id}`
-                    }
-                    isActive={pathname === `/inbox/${conversation.id}`}
-                    isOnline={Boolean(
-                      conversation.type === "direct" &&
-                      conversation.members?.some(
-                        (member) => member.userId !== currentUserId && presence[member.userId]?.status === "online"
-                      )
-                    )}
-                    isMobile={isMobile}
-                  />
-                ))}
-              </ul>
+              <ConversationItems
+                conversations={filtered}
+                pathname={pathname}
+                currentUserId={currentUserId}
+                presence={presence}
+                isMobile={isMobile}
+                isGroupsTab={isGroupsTab}
+              />
             )}
           </motion.div>
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+function ConversationItems({
+  conversations,
+  pathname,
+  currentUserId,
+  presence,
+  isMobile,
+  isGroupsTab,
+}: {
+  conversations: Conversation[];
+  pathname: string | null;
+  currentUserId?: string;
+  presence: Record<string, { status: string }>;
+  isMobile: boolean;
+  isGroupsTab: boolean;
+}) {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const shouldVirtualize = conversations.length >= VIRTUALIZATION_THRESHOLD;
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? conversations.length : 0,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_ESTIMATE,
+    overscan: 8,
+  });
+
+  if (!shouldVirtualize) {
+    return (
+      <div ref={parentRef} className="h-full overflow-y-auto">
+        <ul>
+          {conversations.map((conversation) => (
+            <ConversationRow
+              key={conversation.id}
+              conversation={conversation}
+              pathname={pathname}
+              currentUserId={currentUserId}
+              presence={presence}
+              isMobile={isMobile}
+              isGroupsTab={isGroupsTab}
+            />
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={parentRef} className="h-full overflow-y-auto">
+      <div
+        className="relative w-full"
+        style={{ height: `${virtualizer.getTotalSize()}px` }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const conversation = conversations[virtualRow.index];
+          if (!conversation) return null;
+          return (
+            <div
+              key={conversation.id}
+              className="absolute left-0 top-0 w-full"
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+            >
+              <ConversationRow
+                conversation={conversation}
+                pathname={pathname}
+                currentUserId={currentUserId}
+                presence={presence}
+                isMobile={isMobile}
+                isGroupsTab={isGroupsTab}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ConversationRow({
+  conversation,
+  pathname,
+  currentUserId,
+  presence,
+  isMobile,
+  isGroupsTab,
+}: {
+  conversation: Conversation;
+  pathname: string | null;
+  currentUserId?: string;
+  presence: Record<string, { status: string }>;
+  isMobile: boolean;
+  isGroupsTab: boolean;
+}) {
+  return (
+    <ConversationItem
+      conversation={conversation}
+      href={
+        isGroupsTab || conversation.type === "group" || conversation.type === "channel"
+          ? `/inbox/${conversation.id}?tab=groups`
+          : `/inbox/${conversation.id}`
+      }
+      isActive={pathname === `/inbox/${conversation.id}`}
+      isOnline={Boolean(
+        conversation.type === "direct" &&
+        conversation.members?.some(
+          (member) => member.userId !== currentUserId && presence[member.userId]?.status === "online"
+        )
+      )}
+      isMobile={isMobile}
+    />
   );
 }
 
