@@ -283,7 +283,7 @@ function ConversationItem({
         style={{ x }}
         onDragEnd={handleDragEnd}
         onClick={() => { if (isOpen) snapClosed(); }}
-        className="relative bg-sidebar"
+        className="relative"
       >
         <Link
           href={isOpen ? "#" : href}
