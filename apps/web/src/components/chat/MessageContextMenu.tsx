@@ -47,9 +47,13 @@ function MenuItem({
 export function MessageContextMenu({
   x, y, isSent, text, seenLabel, seenTitle, onEdit, onReply, onCopy, onDelete, onClose,
 }: MessageContextMenuProps) {
-  // Clamp to viewport
-  const clampedX = Math.min(x, window.innerWidth - 176);
-  const clampedY = Math.min(y, window.innerHeight - 160);
+  // Keep within viewport — flip upward if too close to the bottom
+  const menuWidth = 184;
+  const menuHeight = 260; // generous upper bound (5 rows + seen row + padding)
+  const clampedX = Math.min(Math.max(x, 8), window.innerWidth - menuWidth - 8);
+  const clampedY = y + menuHeight > window.innerHeight
+    ? Math.max(8, y - menuHeight)
+    : y;
 
   useEffect(() => {
     const handler = (e: MouseEvent | KeyboardEvent) => {
