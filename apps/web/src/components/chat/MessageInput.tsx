@@ -138,10 +138,9 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     videoModeRef.current = videoMode;
   }, [videoMode]);
 
-  // Refocus after send completes so the textarea stays focused on all devices.
   const wasSendingRef = useRef(false);
   useEffect(() => {
-    if (wasSendingRef.current && !sending) {
+    if (wasSendingRef.current && !sending && !isTouchDevice()) {
       textareaRef.current?.focus();
     }
     wasSendingRef.current = sending;
@@ -283,7 +282,9 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
       onCancelReply?.();
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
-        textareaRef.current.focus();
+        if (!isTouchDevice()) {
+          textareaRef.current.focus();
+        }
       }
     } finally {
       setSending(false);
@@ -311,10 +312,17 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
 
   async function startRecording() {
     try {
+      if (typeof MediaRecorder === "undefined") {
+        throw new Error("MediaRecorder is not supported");
+      }
+
       const constraints = videoModeRef.current ? { video: true, audio: true } : { audio: true };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(stream);
+      const mimeType = getPreferredRecordingMimeType(videoModeRef.current);
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -325,9 +333,9 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         const isVideo = videoModeRef.current;
-        const mimeType = recorder.mimeType || (isVideo ? "video/webm" : "audio/webm");
-        const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
-        const blob = new Blob(chunks, { type: mimeType });
+        const resolvedMimeType = recorder.mimeType || getPreferredRecordingMimeType(isVideo) || (isVideo ? "video/webm" : "audio/webm");
+        const extension = fileExtensionForMimeType(resolvedMimeType, isVideo);
+        const blob = new Blob(chunks, { type: resolvedMimeType });
         void handleRecordingFinished(blob, isVideo ? "video" : "audio", `recording-${Date.now()}.${extension}`);
       };
 
@@ -365,7 +373,9 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
       onCancelReply?.();
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
-        textareaRef.current.focus();
+        if (!isTouchDevice()) {
+          textareaRef.current.focus();
+        }
       }
     } finally {
       setSending(false);
@@ -768,6 +778,49 @@ function fallbackMimeForType(type: Extract<MessageType, "image" | "video" | "aud
     default:
       return "application/octet-stream";
   }
+}
+
+function isTouchDevice() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+
+function getPreferredRecordingMimeType(isVideo: boolean) {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return isVideo ? "video/webm" : "audio/webm";
+  }
+
+  const candidates = isVideo
+    ? [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm;codecs=h264,opus",
+        "video/webm",
+        "video/mp4;codecs=h264,aac",
+        "video/mp4",
+      ]
+    : [
+        "audio/webm;codecs=opus",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "audio/webm",
+      ];
+
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
+}
+
+function fileExtensionForMimeType(mimeType: string, isVideo: boolean) {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes("mp4")) {
+    return isVideo ? "mp4" : "m4a";
+  }
+  if (normalized.includes("ogg")) {
+    return "ogg";
+  }
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) {
+    return "mp3";
+  }
+  return "webm";
 }
 
 function getReplyLabel(type: MessageType) {

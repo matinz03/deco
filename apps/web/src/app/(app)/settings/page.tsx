@@ -41,6 +41,13 @@ export default function SettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [avatarProcessing, setAvatarProcessing] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [accountEmail, setAccountEmail] = useState(user?.email ?? "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const [accountSuccess, setAccountSuccess] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { pushNotifications, messagePreviews, readReceipts, showOnlineStatus, hydrate, setPref } =
@@ -55,6 +62,10 @@ export default function SettingsPage() {
   useEffect(() => {
     void refreshKeyBackupStatus("settings");
   }, [refreshKeyBackupStatus]);
+
+  useEffect(() => {
+    setAccountEmail(user?.email ?? "");
+  }, [user?.email]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -497,6 +508,107 @@ export default function SettingsPage() {
       <section id="account">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Account</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setAccountError("");
+              setAccountSuccess("");
+
+              if (newPassword && newPassword.length < 8) {
+                setAccountError("New password must be at least 8 characters");
+                return;
+              }
+              if (newPassword !== confirmNewPassword) {
+                setAccountError("New password and confirmation do not match");
+                return;
+              }
+              if (newPassword && !currentPassword) {
+                setAccountError("Enter your current password to change it");
+                return;
+              }
+
+              setAccountSaving(true);
+              try {
+                await updateProfile({
+                  email: accountEmail.trim(),
+                  currentPassword: currentPassword || undefined,
+                  newPassword: newPassword || undefined,
+                });
+                setCurrentPassword("");
+                setNewPassword("");
+                setConfirmNewPassword("");
+                setAccountSuccess("Account details updated");
+              } catch (error) {
+                setAccountError(error instanceof Error ? error.message : "Failed to update account");
+              } finally {
+                setAccountSaving(false);
+              }
+            }}
+            className="space-y-3 border-b border-sidebar px-4 py-4"
+          >
+            <div>
+              <p className="text-sm font-medium">Email and password</p>
+              <p className="mt-1 text-xs text-muted">Keep your sign-in details current.</p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted">Email</label>
+              <input
+                type="email"
+                value={accountEmail}
+                onChange={(event) => setAccountEmail(event.target.value)}
+                className="input"
+                placeholder="you@example.com"
+              />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="flex flex-col gap-1.5 md:col-span-2">
+                <label className="text-xs font-medium text-muted">Current password</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  className="input"
+                  placeholder="Required only to change password"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted">New password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  className="input"
+                  placeholder="At least 8 characters"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted">Confirm new password</label>
+                <input
+                  type="password"
+                  value={confirmNewPassword}
+                  onChange={(event) => setConfirmNewPassword(event.target.value)}
+                  className="input"
+                  placeholder="Repeat new password"
+                />
+              </div>
+            </div>
+
+            {accountError && (
+              <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">{accountError}</p>
+            )}
+            {accountSuccess && (
+              <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500">{accountSuccess}</p>
+            )}
+
+            <div className="flex justify-end">
+              <button type="submit" disabled={accountSaving} className="btn-primary">
+                {accountSaving ? "Saving..." : "Save account"}
+              </button>
+            </div>
+          </form>
+
           <button
             onClick={async () => { await logout(); router.replace("/login"); }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/10"

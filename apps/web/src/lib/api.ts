@@ -57,6 +57,7 @@ export function mapUser(r: any): User {
   return {
     id: r.id,
     username: r.username ?? "",
+    email: r.email ?? "",
     displayName: r.display_name ?? r.displayName ?? "",
     avatarUrl: resolveAssetUrl(r.avatar_url ?? r.avatarUrl ?? ""),
     publicKey: r.public_key ?? r.publicKey ?? "",
@@ -589,13 +590,23 @@ export const api = {
       return mapUser(raw);
     },
 
-    updateMe: async (body: { displayName?: string; bio?: string; avatarUrl?: string }) => {
+    updateMe: async (body: {
+      displayName?: string;
+      bio?: string;
+      avatarUrl?: string;
+      email?: string;
+      currentPassword?: string;
+      newPassword?: string;
+    }) => {
       const raw = await request<unknown>("/api/v1/users/me", {
         method: "PATCH",
         body: JSON.stringify({
           display_name: body.displayName,
           bio: body.bio,
           avatar_url: body.avatarUrl,
+          email: body.email,
+          current_password: body.currentPassword,
+          new_password: body.newPassword,
         }),
       });
       return mapUser(raw);

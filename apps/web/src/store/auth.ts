@@ -47,7 +47,14 @@ interface AuthState {
   deleteKeyBackup: () => Promise<void>;
   dismissBackupPrompt: () => void;
   clearBackupError: () => void;
-  updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<void>;
+  updateProfile: (data: {
+    displayName?: string;
+    bio?: string;
+    avatarUrl?: string;
+    email?: string;
+    currentPassword?: string;
+    newPassword?: string;
+  }) => Promise<void>;
   switchAccount: (userId: string) => Promise<boolean>;
 }
 

@@ -66,6 +66,7 @@ interface ConversationState {
   mutedIds: Set<string>;
   muteConversation: (conversationId: string) => void;
   unmuteConversation: (conversationId: string) => void;
+  clearConversationMessages: (conversationId: string) => void;
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
@@ -143,6 +144,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         localStorage.setItem("deco_muted", JSON.stringify([...next]));
         return { mutedIds: next };
       });
+    },
+
+    clearConversationMessages(conversationId) {
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: [],
+        },
+      }));
     },
 
     setActiveConversation(id) {

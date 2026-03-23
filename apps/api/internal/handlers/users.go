@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/matinz03/deco/internal/config"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserHandler struct {
@@ -42,13 +44,49 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 
 	var req struct {
-		DisplayName string `json:"display_name"`
-		Bio         string `json:"bio"`
-		AvatarURL   string `json:"avatar_url"`
+		DisplayName     string `json:"display_name"`
+		Bio             string `json:"bio"`
+		AvatarURL       string `json:"avatar_url"`
+		Email           string `json:"email"`
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	req.Email = strings.TrimSpace(req.Email)
+
+	var nextPasswordHash *string
+	if strings.TrimSpace(req.NewPassword) != "" {
+		if len(req.NewPassword) < 8 {
+			respondError(w, http.StatusBadRequest, "new password must be at least 8 characters")
+			return
+		}
+		if strings.TrimSpace(req.CurrentPassword) == "" {
+			respondError(w, http.StatusBadRequest, "current_password is required to change password")
+			return
+		}
+
+		var passwordHash string
+		if err := h.pool.QueryRow(r.Context(), `SELECT password_hash FROM users WHERE id = $1`, userID).Scan(&passwordHash); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to verify current password")
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.CurrentPassword)); err != nil {
+			respondError(w, http.StatusUnauthorized, "current password is incorrect")
+			return
+		}
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to update password")
+			return
+		}
+		hashValue := string(hash)
+		nextPasswordHash = &hashValue
 	}
 
 	var user models.User
@@ -57,15 +95,21 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		SET display_name = COALESCE(NULLIF($1,''), display_name),
 		    bio          = COALESCE(NULLIF($2,''), bio),
 		    avatar_url   = COALESCE(NULLIF($3,''), avatar_url),
+		    email        = COALESCE(NULLIF($4,''), email),
+		    password_hash = COALESCE($5, password_hash),
 		    updated_at   = NOW()
-		WHERE id = $4
+		WHERE id = $6
 		RETURNING id, username, COALESCE(email,''), display_name, public_key,
 		          avatar_url, bio, last_seen_at, created_at
-	`, req.DisplayName, req.Bio, req.AvatarURL, userID).
+	`, req.DisplayName, req.Bio, req.AvatarURL, req.Email, nextPasswordHash, userID).
 		Scan(&user.ID, &user.Username, &user.Email, &user.DisplayName,
 			&user.PublicKey, &user.AvatarURL, &user.Bio, &user.LastSeenAt, &user.CreatedAt)
 
 	if err != nil {
+		if strings.Contains(err.Error(), "users_email_key") {
+			respondError(w, http.StatusConflict, "email is already taken")
+			return
+		}
 		respondError(w, http.StatusInternalServerError, "failed to update user")
 		return
 	}

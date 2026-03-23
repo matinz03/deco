@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -29,6 +29,10 @@ export function ChatHeader({ conversation }: Props) {
   const updateMemberRole = useConversationStore((s) => s.updateMemberRole);
   const removeMember = useConversationStore((s) => s.removeMember);
   const deleteConversation = useConversationStore((s) => s.deleteConversation);
+  const mutedIds = useConversationStore((s) => s.mutedIds);
+  const muteConversation = useConversationStore((s) => s.muteConversation);
+  const unmuteConversation = useConversationStore((s) => s.unmuteConversation);
+  const clearConversationMessages = useConversationStore((s) => s.clearConversationMessages);
   const conversationMessages = useConversationStore((s) => s.messages[liveConversation.id] ?? []);
 
   const title = liveConversation.name || "Unknown conversation";
@@ -41,6 +45,7 @@ export function ChatHeader({ conversation }: Props) {
   const canManageRoles = liveConversation.type === "group" && currentMember?.role === "owner";
   const canDeleteGroup = liveConversation.type === "group" && currentMember?.role === "owner";
   const isSaved = liveConversation.type === "saved";
+  const isMuted = mutedIds.has(liveConversation.id);
   const subtitle =
     liveConversation.type === "saved"
       ? "Private notes to yourself"
@@ -54,6 +59,7 @@ export function ChatHeader({ conversation }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchMsg, setSearchMsg] = useState("");
   const [sharedMediaOpen, setSharedMediaOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [groupName, setGroupName] = useState(liveConversation.name || "");
   const [description, setDescription] = useState(liveConversation.description || "");
   const [saving, setSaving] = useState(false);
@@ -65,8 +71,20 @@ export function ChatHeader({ conversation }: Props) {
   const [leadershipStatus, setLeadershipStatus] = useState<LeadershipStatus | null>(null);
   const [leadershipBusy, setLeadershipBusy] = useState(false);
   const [leadershipError, setLeadershipError] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setPortalMounted(true), []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
 
   useEffect(() => {
     setGroupName(liveConversation.name || "");
@@ -173,6 +191,20 @@ export function ChatHeader({ conversation }: Props) {
     setManagingMembers(true);
     try {
       await deleteConversation(liveConversation.id);
+      setSettingsOpen(false);
+      router.push("/inbox?tab=groups");
+    } finally {
+      setManagingMembers(false);
+    }
+  }
+
+  async function handleLeaveGroup() {
+    if (!currentUserId) return;
+    if (!window.confirm(`Leave "${title}"?`)) return;
+    setManagingMembers(true);
+    try {
+      await removeMember(liveConversation.id, currentUserId);
+      setMenuOpen(false);
       setSettingsOpen(false);
       router.push("/inbox?tab=groups");
     } finally {
@@ -297,11 +329,106 @@ export function ChatHeader({ conversation }: Props) {
               </svg>
             </button>
           ) : !isSaved ? (
-            <button className="chat-action-btn" title="More options" aria-label="More options">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-              </svg>
-            </button>
+            <div className="relative" ref={menuRef}>
+              <button
+                className="chat-action-btn"
+                title="More options"
+                aria-label="More options"
+                onClick={() => setMenuOpen((value) => !value)}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+                </svg>
+              </button>
+
+              <AnimatePresence>
+                {menuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.16 }}
+                    className="absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-2xl border border-sidebar bg-surface shadow-2xl"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSharedMediaOpen(true);
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition-colors hover:bg-accent"
+                    >
+                      <span>Shared media</span>
+                      <span className="text-xs text-muted">{conversationMessages.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isMuted) {
+                          unmuteConversation(liveConversation.id);
+                        } else {
+                          muteConversation(liveConversation.id);
+                        }
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition-colors hover:bg-accent"
+                    >
+                      <span>{isMuted ? "Unmute chat" : "Mute chat"}</span>
+                      <span className="text-xs text-muted">{isMuted ? "Muted" : "Active"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Clear currently loaded history from this device?")) {
+                          clearConversationMessages(liveConversation.id);
+                        }
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition-colors hover:bg-accent"
+                    >
+                      <span>Clear history</span>
+                      <span className="text-xs text-muted">Local</span>
+                    </button>
+                    {isGroup ? (
+                      canDeleteGroup ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void handleDeleteGroup();
+                          }}
+                          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                        >
+                          <span>Delete chat</span>
+                          <span className="text-xs text-red-300/80">Owner</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void handleLeaveGroup()}
+                          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                        >
+                          <span>Leave chat</span>
+                          <span className="text-xs text-red-300/80">Group</span>
+                        </button>
+                      )
+                    ) : otherMember ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileUser(otherMember);
+                          setMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition-colors hover:bg-accent"
+                      >
+                        <span>View profile</span>
+                        <span className="text-xs text-muted">@{otherMember.username}</span>
+                      </button>
+                    ) : null}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           ) : null}
         </div>
       </header>
