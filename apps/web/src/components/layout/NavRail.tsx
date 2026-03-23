@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
@@ -8,7 +9,11 @@ import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
-import { OwnProfileModal } from "@/components/ui/OwnProfileModal";
+
+const OwnProfileModal = dynamic(
+  () => import("@/components/ui/OwnProfileModal").then((mod) => mod.OwnProfileModal),
+  { ssr: false }
+);
 
 export function NavRail({
   sidebarCollapsed,
