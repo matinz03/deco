@@ -55,8 +55,8 @@ export function MobileNav() {
   const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
   const conversations = useConversationStore((s) => s.conversations);
-  const hasUnreadMessages = conversations.some((conversation) => conversation.type !== "group" && conversation.unreadCount > 0);
-  const hasUnreadGroups = conversations.some((conversation) => conversation.type === "group" && conversation.unreadCount > 0);
+  const hasUnreadMessages = conversations.some((conversation) => (conversation.type === "direct" || conversation.type === "saved") && conversation.unreadCount > 0);
+  const hasUnreadGroups = conversations.some((conversation) => (conversation.type === "group" || conversation.type === "channel") && conversation.unreadCount > 0);
   const isInConversation = /^\/inbox\/.+/.test(pathname);
 
   if (isInConversation) return null;

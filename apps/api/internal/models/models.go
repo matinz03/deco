@@ -25,6 +25,7 @@ const (
 	ConversationTypeDirect  ConversationType = "direct"
 	ConversationTypeGroup   ConversationType = "group"
 	ConversationTypeChannel ConversationType = "channel"
+	ConversationTypeSaved   ConversationType = "saved"
 )
 
 type Conversation struct {

@@ -46,7 +46,7 @@ export function ConversationList() {
   }, [fetchConversations]);
 
   const filtered = conversations
-    .filter((c) => (isGroupsTab ? c.type !== "direct" : c.type === "direct"))
+    .filter((c) => (isGroupsTab ? c.type === "group" || c.type === "channel" : c.type === "direct" || c.type === "saved"))
     .filter((c) =>
       (c.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
     );
@@ -162,9 +162,9 @@ export function ConversationList() {
                     key={conversation.id}
                     conversation={conversation}
                     href={
-                      conversation.type === "direct"
-                        ? `/inbox/${conversation.id}`
-                        : `/inbox/${conversation.id}?tab=groups`
+                      conversation.type === "group" || conversation.type === "channel"
+                        ? `/inbox/${conversation.id}?tab=groups`
+                        : `/inbox/${conversation.id}`
                     }
                     isActive={pathname === `/inbox/${conversation.id}`}
                     isOnline={Boolean(
@@ -329,6 +329,7 @@ function ConversationItem({
 }
 
 function getConversationPreview(conversation: Conversation) {
+  if (conversation.type === "saved" && !conversation.lastMessage) return "Keep notes, links, and files for yourself";
   if (!conversation.lastMessage) return "...";
   if (conversation.lastMessage.isDeleted) return "Message deleted";
   if (conversation.lastMessage.decryptedContent) return conversation.lastMessage.decryptedContent;

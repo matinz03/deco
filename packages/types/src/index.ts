@@ -19,7 +19,7 @@ export interface UserPresence {
 
 // ─── Conversation ─────────────────────────────────────────────────────────────
 
-export type ConversationType = "direct" | "group" | "channel";
+export type ConversationType = "direct" | "group" | "channel" | "saved";
 
 export interface Conversation {
   id: string;

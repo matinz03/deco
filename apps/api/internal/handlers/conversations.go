@@ -33,6 +33,12 @@ type ConversationHandler struct {
 func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 
+	if _, err := h.ensureSavedConversation(r.Context(), userID); err != nil {
+		h.logger.Error("failed to ensure saved conversation", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to fetch conversations")
+		return
+	}
+
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT
 			c.id, c.type, c.name, c.avatar_url, c.description,
@@ -102,7 +108,7 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.attachMembers(r, conversations)
-	h.decorateDirectConversations(conversations, userID)
+	h.decorateConversations(conversations, userID)
 
 	respondJSON(w, http.StatusOK, conversations)
 }
@@ -145,7 +151,7 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 				&conv.Description, &conv.CreatedByID, &conv.CreatedAt, &conv.UpdatedAt)
 			convSlice := []models.Conversation{conv}
 			h.attachMembers(r, convSlice)
-			h.decorateDirectConversations(convSlice, userID)
+			h.decorateConversations(convSlice, userID)
 			conv = convSlice[0]
 			respondJSON(w, http.StatusOK, conv)
 			return
@@ -195,7 +201,7 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	convSlice := []models.Conversation{conv}
 	h.attachMembers(r, convSlice)
-	h.decorateDirectConversations(convSlice, userID)
+	h.decorateConversations(convSlice, userID)
 	conv = convSlice[0]
 
 	respondJSON(w, http.StatusCreated, conv)
@@ -228,7 +234,7 @@ func (h *ConversationHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	convSlice := []models.Conversation{conv}
 	h.attachMembers(r, convSlice)
-	h.decorateDirectConversations(convSlice, userID)
+	h.decorateConversations(convSlice, userID)
 	conv = convSlice[0]
 
 	respondJSON(w, http.StatusOK, conv)
@@ -525,26 +531,101 @@ func (h *ConversationHandler) attachMembers(r *http.Request, conversations []mod
 	}
 }
 
-func (h *ConversationHandler) decorateDirectConversations(conversations []models.Conversation, currentUserID string) {
+func (h *ConversationHandler) decorateConversations(conversations []models.Conversation, currentUserID string) {
 	for i := range conversations {
 		conv := &conversations[i]
-		if conv.Type != models.ConversationTypeDirect {
-			continue
-		}
-
-		for _, member := range conv.Members {
-			if member.UserID == currentUserID || member.User == nil {
-				continue
+		switch conv.Type {
+		case models.ConversationTypeDirect:
+			for _, member := range conv.Members {
+				if member.UserID == currentUserID || member.User == nil {
+					continue
+				}
+				if strings.TrimSpace(conv.Name) == "" {
+					conv.Name = member.User.DisplayName
+				}
+				if conv.AvatarURL == "" {
+					conv.AvatarURL = member.User.AvatarURL
+				}
+				break
 			}
-			if strings.TrimSpace(conv.Name) == "" {
-				conv.Name = member.User.DisplayName
+		case models.ConversationTypeSaved:
+			conv.Name = "Saved Messages"
+			if strings.TrimSpace(conv.Description) == "" {
+				conv.Description = "Private notes to yourself"
 			}
-			if conv.AvatarURL == "" {
-				conv.AvatarURL = member.User.AvatarURL
+			for _, member := range conv.Members {
+				if member.UserID != currentUserID || member.User == nil {
+					continue
+				}
+				if conv.AvatarURL == "" {
+					conv.AvatarURL = member.User.AvatarURL
+				}
+				break
 			}
-			break
 		}
 	}
+}
+
+func (h *ConversationHandler) ensureSavedConversation(ctx context.Context, userID string) (string, error) {
+	var conversationID string
+	err := h.pool.QueryRow(ctx, `
+		SELECT c.id
+		FROM conversations c
+		JOIN members m ON m.conversation_id = c.id
+		WHERE c.type = 'saved' AND m.user_id = $1
+		LIMIT 1
+	`, userID).Scan(&conversationID)
+	if err == nil {
+		return conversationID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	err = tx.QueryRow(ctx, `
+		SELECT c.id
+		FROM conversations c
+		JOIN members m ON m.conversation_id = c.id
+		WHERE c.type = 'saved' AND m.user_id = $1
+		LIMIT 1
+	`, userID).Scan(&conversationID)
+	if err == nil {
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return "", commitErr
+		}
+		return conversationID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+
+	err = tx.QueryRow(ctx, `
+		INSERT INTO conversations (type, name, description, created_by_id)
+		VALUES ('saved', 'Saved Messages', 'Private notes to yourself', $1)
+		RETURNING id
+	`, userID).Scan(&conversationID)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO members (conversation_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+	`, conversationID, userID); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+
+	return conversationID, nil
 }
 
 func (h *ConversationHandler) isConversationMember(r *http.Request, convID, userID string) bool {

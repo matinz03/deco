@@ -24,7 +24,7 @@ CREATE INDEX idx_users_username_trgm ON users USING gin(username gin_trgm_ops);
 CREATE INDEX idx_users_display_name_trgm ON users USING gin(display_name gin_trgm_ops);
 
 -- ─── Conversations ────────────────────────────────────────────────────────────
-CREATE TYPE conversation_type AS ENUM ('direct', 'group', 'channel');
+CREATE TYPE conversation_type AS ENUM ('direct', 'group', 'channel', 'saved');
 
 CREATE TABLE conversations (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

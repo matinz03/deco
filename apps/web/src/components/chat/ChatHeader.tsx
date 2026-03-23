@@ -38,8 +38,11 @@ export function ChatHeader({ conversation }: Props) {
   const canManageMembers = liveConversation.type === "group" && (currentMember?.role === "owner" || currentMember?.role === "admin");
   const canManageRoles = liveConversation.type === "group" && currentMember?.role === "owner";
   const canDeleteGroup = liveConversation.type === "group" && currentMember?.role === "owner";
+  const isSaved = liveConversation.type === "saved";
   const subtitle =
-    liveConversation.type === "direct"
+    liveConversation.type === "saved"
+      ? "Private notes to yourself"
+      : liveConversation.type === "direct"
       ? getDirectConversationSubtitle(otherPresence?.lastSeenAt || otherMember?.lastSeenAt, isOnline)
       : `${liveConversation.memberCount} members`;
 
@@ -219,18 +222,20 @@ export function ChatHeader({ conversation }: Props) {
           className="relative shrink-0 rounded-full cursor-pointer"
           onClick={() => {
             if (isGroup) setSettingsOpen(true);
+            else if (isSaved) return;
             else if (otherMember) setProfileUser(otherMember);
           }}
-          aria-label={isGroup ? "Group settings" : "View profile"}
+          aria-label={isGroup ? "Group settings" : isSaved ? "Saved messages" : "View profile"}
         >
           <Avatar src={liveConversation.avatarUrl} name={title} size="sm" />
-          {!isGroup && <OnlineDot isOnline={isOnline} borderClass="border-surface" />}
+          {!isGroup && !isSaved && <OnlineDot isOnline={isOnline} borderClass="border-surface" />}
         </button>
 
         <button
           className="chat-header-info min-w-0 text-left cursor-pointer"
           onClick={() => {
             if (isGroup) setSettingsOpen(true);
+            else if (isSaved) return;
             else if (otherMember) setProfileUser(otherMember);
           }}
         >
@@ -250,17 +255,21 @@ export function ChatHeader({ conversation }: Props) {
             </svg>
           </button>
 
-          <button className="chat-action-btn hidden sm:flex" title="Voice call" aria-label="Voice call">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-            </svg>
-          </button>
+          {!isSaved && (
+            <button className="chat-action-btn hidden sm:flex" title="Voice call" aria-label="Voice call">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+              </svg>
+            </button>
+          )}
 
-          <button className="chat-action-btn hidden sm:flex" title="Video call" aria-label="Video call">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9A2.25 2.25 0 0 0 13.5 5.25h-9A2.25 2.25 0 0 0 2.25 7.5v9A2.25 2.25 0 0 0 4.5 18.75Z" />
-            </svg>
-          </button>
+          {!isSaved && (
+            <button className="chat-action-btn hidden sm:flex" title="Video call" aria-label="Video call">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9A2.25 2.25 0 0 0 13.5 5.25h-9A2.25 2.25 0 0 0 2.25 7.5v9A2.25 2.25 0 0 0 4.5 18.75Z" />
+              </svg>
+            </button>
+          )}
 
           {isGroup ? (
             <button
@@ -273,13 +282,13 @@ export function ChatHeader({ conversation }: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
               </svg>
             </button>
-          ) : (
+          ) : !isSaved ? (
             <button className="chat-action-btn" title="More options" aria-label="More options">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
               </svg>
             </button>
-          )}
+          ) : null}
         </div>
       </header>
 

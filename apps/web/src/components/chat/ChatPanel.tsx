@@ -246,6 +246,8 @@ export function ChatPanel({ conversationId }: Props) {
     );
   }
 
+  const isSavedConversation = conversation.type === "saved";
+
   return (
     <div
       className="flex flex-col h-full relative"
@@ -283,7 +285,9 @@ export function ChatPanel({ conversationId }: Props) {
             <div>
               <p className="font-semibold">{conversation.name}</p>
               <p className="mt-1 text-sm text-muted">
-                {conversation.type === "direct"
+                {isSavedConversation
+                  ? "Keep notes, links, files, and reminders here just for you."
+                  : conversation.type === "direct"
                   ? `Say hi to ${otherMember?.user?.displayName || conversation.name}! 👋`
                   : "No messages yet. Start the conversation!"}
               </p>

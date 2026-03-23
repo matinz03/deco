@@ -527,7 +527,7 @@ function getReadersForMessage(message: Message, members?: { userId: string; user
     .sort((a, b) => new Date(b.lastReadAt).getTime() - new Date(a.lastReadAt).getTime());
 }
 
-function getReadReceiptLabel(message: Message, conversationType: "direct" | "group" | "channel" | undefined, readers: ReturnType<typeof getReadersForMessage>) {
+function getReadReceiptLabel(message: Message, conversationType: "direct" | "group" | "channel" | "saved" | undefined, readers: ReturnType<typeof getReadersForMessage>) {
   if (!readers.length || message.status !== "read") {
     return "";
   }

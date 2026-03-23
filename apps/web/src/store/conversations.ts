@@ -1134,6 +1134,9 @@ async function hydrateMessage(message: Message, conversation?: Conversation) {
   if (!user || !message.encryptedContent || message.isDeleted) return message;
 
   try {
+    if (conversation?.type === "saved") {
+      return { ...message, decryptedContent: message.encryptedContent };
+    }
     if (conversation?.type === "group") {
       // Group: decrypt with the shared group key
       const groupKey = await getOrFetchGroupKey(message.conversationId, conversation);
@@ -1156,6 +1159,10 @@ async function hydrateMessage(message: Message, conversation?: Conversation) {
 async function encryptOutgoingContent(conversation: Conversation | undefined, userId: string, text: string) {
   if (!text) {
     return "";
+  }
+
+  if (conversation?.type === "saved") {
+    return text;
   }
 
   if (conversation?.type === "group") {

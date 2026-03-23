@@ -44,6 +44,23 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 			IF NOT EXISTS (
 				SELECT 1
 				FROM pg_enum
+				WHERE enumlabel = 'saved'
+				  AND enumtypid = 'conversation_type'::regtype
+			) THEN
+				ALTER TYPE conversation_type ADD VALUE 'saved';
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_enum
 				WHERE enumlabel = 'poll'
 				  AND enumtypid = 'message_type'::regtype
 			) THEN
