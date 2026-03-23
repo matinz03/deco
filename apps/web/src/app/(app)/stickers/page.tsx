@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 export default function StickersPage() {
   const [packs, setPacks] = useState<StickerPack[]>([]);
   const [activePackId, setActivePackId] = useState("");
+  const [packSearch, setPackSearch] = useState("");
+  const [stickerSearch, setStickerSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -24,6 +26,24 @@ export default function StickersPage() {
   const activePack = useMemo(
     () => packs.find((pack) => pack.id === activePackId) ?? packs[0],
     [activePackId, packs]
+  );
+  const filteredPacks = useMemo(
+    () =>
+      packs.filter((pack) =>
+        [pack.title, pack.description]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(packSearch.trim().toLowerCase()))
+      ),
+    [packSearch, packs]
+  );
+  const filteredStickers = useMemo(
+    () =>
+      (activePack?.stickers ?? []).filter((sticker) =>
+        [sticker.name, sticker.emoji]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(stickerSearch.trim().toLowerCase()))
+      ),
+    [activePack?.stickers, stickerSearch]
   );
 
   async function loadPacks(nextActivePackId?: string) {
@@ -185,8 +205,16 @@ export default function StickersPage() {
 
         <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-sidebar bg-surface">
           <div className="border-b border-sidebar px-3 py-3 sm:px-5 sm:py-4">
+            <div className="mb-3">
+              <input
+                value={packSearch}
+                onChange={(event) => setPackSearch(event.target.value)}
+                className="input"
+                placeholder="Search packs..."
+              />
+            </div>
             <div className="flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {packs.map((pack) => (
+              {filteredPacks.map((pack) => (
                 <button
                   key={pack.id}
                   type="button"
@@ -229,8 +257,17 @@ export default function StickersPage() {
                   </div>
                 </div>
 
+                <div className="mb-4">
+                  <input
+                    value={stickerSearch}
+                    onChange={(event) => setStickerSearch(event.target.value)}
+                    className="input"
+                    placeholder="Search stickers in this pack..."
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                  {activePack.stickers?.map((sticker) => (
+                  {filteredStickers.map((sticker) => (
                     <div key={sticker.id} className="rounded-2xl border border-sidebar bg-background/40 p-2 sm:p-3">
                       <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface">
                         {sticker.format === "video" ? (
@@ -243,6 +280,11 @@ export default function StickersPage() {
                     </div>
                   ))}
                 </div>
+                {filteredStickers.length === 0 && (
+                  <p className="mt-4 rounded-2xl border border-dashed border-sidebar px-4 py-6 text-center text-sm text-muted">
+                    No stickers match that search.
+                  </p>
+                )}
               </>
             )}
           </div>
