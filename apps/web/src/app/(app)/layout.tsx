@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { NavRail } from "@/components/layout/NavRail";
 import { ConversationList } from "@/components/layout/ConversationList";
 import { SearchPanel } from "@/components/layout/SearchPanel";
+import { SettingsSidebar } from "@/components/layout/SettingsSidebar";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
@@ -22,6 +23,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isInboxRoot = pathname === "/inbox";
   const isSearchPage = pathname === "/search";
+  const isSettingsPage = pathname === "/settings";
   const showSidebarMobile = isInboxRoot || isSearchPage;
   const showMainMobile = !isInboxRoot && !isSearchPage;
 
@@ -70,7 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       >
         <NoiseOverlay />
         <Suspense>
-          {isSearchPage ? <SearchPanel /> : <ConversationList />}
+          {isSearchPage ? <SearchPanel /> : isSettingsPage ? <SettingsSidebar /> : <ConversationList />}
         </Suspense>
       </aside>
 
