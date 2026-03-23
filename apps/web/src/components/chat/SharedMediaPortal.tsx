@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -18,12 +18,15 @@ type SharedTab = "media" | "files" | "places" | "contacts";
 export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<SharedTab>("media");
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) {
       setTab("media");
+      setQuery("");
     }
   }, [open]);
 
@@ -65,6 +68,52 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
         .slice()
         .reverse(),
     [messages]
+  );
+
+  const normalizedQuery = deferredQuery.trim().toLowerCase();
+
+  const filteredMediaMessages = useMemo(
+    () =>
+      filterByQuery(mediaMessages, normalizedQuery, (message) => [
+        message.mediaName,
+        message.decryptedContent,
+        getMediaLabel(message),
+      ]),
+    [mediaMessages, normalizedQuery]
+  );
+
+  const filteredFileMessages = useMemo(
+    () =>
+      filterByQuery(fileMessages, normalizedQuery, (message) => [
+        message.mediaName,
+        message.decryptedContent,
+        message.mediaMimeType,
+        "file",
+      ]),
+    [fileMessages, normalizedQuery]
+  );
+
+  const filteredLocationMessages = useMemo(
+    () =>
+      filterByQuery(locationMessages, normalizedQuery, (message) => {
+        const location = parseLocationAttachment(message);
+        return [
+          location?.label,
+          location ? `${location.latitude},${location.longitude}` : undefined,
+          message.decryptedContent,
+          "location",
+        ];
+      }),
+    [locationMessages, normalizedQuery]
+  );
+
+  const filteredContactMessages = useMemo(
+    () =>
+      filterByQuery(contactMessages, normalizedQuery, (message) => {
+        const contact = parseContactAttachment(message);
+        return [contact?.name, contact?.phone, contact?.email, message.decryptedContent, "contact"];
+      }),
+    [contactMessages, normalizedQuery]
   );
 
   if (!mounted) return null;
@@ -118,59 +167,87 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
                   Contacts
                 </TabButton>
               </div>
+              <div className="mt-3 flex items-center gap-2 rounded-2xl border border-sidebar bg-background/40 px-3 py-2">
+                <svg className="h-4 w-4 shrink-0 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35m0 0A7.65 7.65 0 1 0 5.85 5.85a7.65 7.65 0 0 0 10.8 10.8Z" />
+                </svg>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={getSearchPlaceholder(tab)}
+                  className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+                />
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-5">
               {tab === "media" ? (
-                mediaMessages.length > 0 ? (
+                filteredMediaMessages.length > 0 ? (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {mediaMessages.map((message) => (
+                    {filteredMediaMessages.map((message) => (
                       <MediaCard key={message.id} message={message} />
                     ))}
                   </div>
                 ) : (
                   <EmptyState
-                    title="No shared media yet"
-                    description="Photos, videos, and audio messages from this chat will appear here."
+                    title={normalizedQuery ? "No media matches" : "No shared media yet"}
+                    description={
+                      normalizedQuery
+                        ? "Try a file name, caption, or media keyword."
+                        : "Photos, videos, and audio messages from this chat will appear here."
+                    }
                   />
                 )
               ) : tab === "files" ? (
-                fileMessages.length > 0 ? (
+                filteredFileMessages.length > 0 ? (
                   <div className="space-y-3">
-                    {fileMessages.map((message) => (
+                    {filteredFileMessages.map((message) => (
                       <FileRow key={message.id} message={message} />
                     ))}
                   </div>
                 ) : (
                   <EmptyState
-                    title="No shared files yet"
-                    description="Documents and other files from this chat will appear here."
+                    title={normalizedQuery ? "No files match" : "No shared files yet"}
+                    description={
+                      normalizedQuery
+                        ? "Try a file name, type, or note from the message."
+                        : "Documents and other files from this chat will appear here."
+                    }
                   />
                 )
               ) : tab === "places" ? (
-                locationMessages.length > 0 ? (
+                filteredLocationMessages.length > 0 ? (
                   <div className="space-y-3">
-                    {locationMessages.map((message) => (
+                    {filteredLocationMessages.map((message) => (
                       <LocationRow key={message.id} message={message} />
                     ))}
                   </div>
                 ) : (
                   <EmptyState
-                    title="No shared locations yet"
-                    description="Locations shared in this chat will show up here."
+                    title={normalizedQuery ? "No places match" : "No shared locations yet"}
+                    description={
+                      normalizedQuery
+                        ? "Try a place label or coordinate."
+                        : "Locations shared in this chat will show up here."
+                    }
                   />
                 )
               ) : (
-                contactMessages.length > 0 ? (
+                filteredContactMessages.length > 0 ? (
                   <div className="space-y-3">
-                    {contactMessages.map((message) => (
+                    {filteredContactMessages.map((message) => (
                       <ContactRow key={message.id} message={message} />
                     ))}
                   </div>
                 ) : (
                   <EmptyState
-                    title="No shared contacts yet"
-                    description="Contact cards from this chat will show up here."
+                    title={normalizedQuery ? "No contacts match" : "No shared contacts yet"}
+                    description={
+                      normalizedQuery
+                        ? "Try a name, phone number, or email address."
+                        : "Contact cards from this chat will show up here."
+                    }
                   />
                 )
               )}
@@ -369,6 +446,32 @@ function EmptyState({ title, description }: { title: string; description: string
       <p className="mt-2 max-w-sm text-sm text-muted">{description}</p>
     </div>
   );
+}
+
+function filterByQuery<T>(
+  items: T[],
+  query: string,
+  getFields: (item: T) => Array<string | undefined | null>
+) {
+  if (!query) return items;
+  return items.filter((item) =>
+    getFields(item)
+      .filter((field): field is string => Boolean(field))
+      .some((field) => field.toLowerCase().includes(query))
+  );
+}
+
+function getSearchPlaceholder(tab: SharedTab) {
+  switch (tab) {
+    case "media":
+      return "Search media...";
+    case "files":
+      return "Search files...";
+    case "places":
+      return "Search places...";
+    case "contacts":
+      return "Search contacts...";
+  }
 }
 
 function formatMeta(message: Message) {
