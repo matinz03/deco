@@ -26,6 +26,9 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
   const time = format(new Date(msg.sentAt), "HH:mm");
   const senderName = msg.sender?.displayName || msg.sender?.username || "Unknown";
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const conversation = useConversationStore((s) =>
+    s.conversations.find((item) => item.id === msg.conversationId)
+  );
   const toggleReaction = useConversationStore((s) => s.toggleReaction);
   const editMessage = useConversationStore((s) => s.editMessage);
   const deleteMessage = useConversationStore((s) => s.deleteMessage);
@@ -38,6 +41,9 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPos = useRef({ x: 0, y: 0 });
   const reactionContainerRef = useRef<HTMLDivElement>(null);
+  const readers = getReadersForMessage(msg, conversation?.members, currentUserId);
+  const readReceiptLabel = getReadReceiptLabel(msg, conversation?.type, readers);
+  const readReceiptTitle = getReadReceiptTitle(readers);
 
   function openReactions() {
     const rect = reactionContainerRef.current?.getBoundingClientRect();
@@ -309,6 +315,15 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
               {replyCount > 0 ? `View thread (${replyCount + (msg.replyToId ? 1 : 0)})` : "View thread"}
             </button>
           )}
+
+          {isSent && readReceiptLabel && (
+            <span
+              className="px-1 text-[11px] text-muted"
+              title={readReceiptTitle}
+            >
+              {readReceiptLabel}
+            </span>
+          )}
         </div>
       </motion.div>
 
@@ -333,33 +348,41 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
 
 function DeliveryIcon({ status }: { status: Message["status"] }) {
   if (status === "sending") {
-    return <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent opacity-60" />;
+    return <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent opacity-60" title="Sending" />;
   }
   if (status === "failed") {
     return (
-      <svg className="h-3.5 w-3.5 text-destructive" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
-      </svg>
+      <span title="Failed">
+        <svg className="h-3.5 w-3.5 text-destructive" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+        </svg>
+      </span>
     );
   }
   if (status === "read") {
     return (
-      <svg className="h-3.5 w-3.5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
-      </svg>
+      <span title="Read">
+        <svg className="h-3.5 w-3.5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+        </svg>
+      </span>
     );
   }
   if (status === "delivered") {
     return (
-      <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
-      </svg>
+      <span title="Delivered">
+        <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+        </svg>
+      </span>
     );
   }
   return (
-    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-    </svg>
+    <span title="Sent">
+      <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+      </svg>
+    </span>
   );
 }
 
@@ -402,4 +425,52 @@ function formatBytes(value?: number) {
 
 function getReplyPreviewText(message: Message) {
   return message.decryptedContent || message.mediaName || getMessageText(message) || "Reply";
+}
+
+function getReadersForMessage(message: Message, members?: { userId: string; user?: { displayName: string; username: string }; lastReadAt: string }[], currentUserId?: string | null) {
+  if (!members?.length) {
+    return [];
+  }
+
+  const sentAt = new Date(message.sentAt).getTime();
+  if (Number.isNaN(sentAt)) {
+    return [];
+  }
+
+  return members
+    .filter((member) => member.userId !== currentUserId && member.userId !== message.senderId && Boolean(member.lastReadAt))
+    .filter((member) => new Date(member.lastReadAt).getTime() >= sentAt)
+    .sort((a, b) => new Date(b.lastReadAt).getTime() - new Date(a.lastReadAt).getTime());
+}
+
+function getReadReceiptLabel(message: Message, conversationType: "direct" | "group" | "channel" | undefined, readers: ReturnType<typeof getReadersForMessage>) {
+  if (!readers.length || message.status !== "read") {
+    return "";
+  }
+
+  if (conversationType === "direct") {
+    return `Seen ${format(new Date(readers[0]!.lastReadAt), "HH:mm")}`;
+  }
+
+  const names = readers.map((reader) => reader.user?.displayName || reader.user?.username || "Someone");
+  if (names.length === 1) {
+    return `Seen by ${names[0]}`;
+  }
+  if (names.length === 2) {
+    return `Seen by ${names[0]} and ${names[1]}`;
+  }
+  return `Seen by ${names[0]} and ${names.length - 1} others`;
+}
+
+function getReadReceiptTitle(readers: ReturnType<typeof getReadersForMessage>) {
+  if (!readers.length) {
+    return "";
+  }
+
+  return readers
+    .map((reader) => {
+      const name = reader.user?.displayName || reader.user?.username || "Someone";
+      return `${name} • ${format(new Date(reader.lastReadAt), "PPp")}`;
+    })
+    .join("\n");
 }

@@ -96,10 +96,26 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     markConversationRead(conversationId) {
+      const currentUserId = useAuthStore.getState().user?.id;
+      const now = new Date().toISOString();
       set((s) => ({
         conversations: s.conversations.map((conversation) =>
           conversation.id === conversationId
-            ? { ...conversation, unreadCount: 0 }
+            ? {
+                ...conversation,
+                unreadCount: 0,
+                members: conversation.members?.map((member) =>
+                  member.userId === currentUserId
+                    ? {
+                        ...member,
+                        lastReadAt:
+                          !member.lastReadAt || new Date(member.lastReadAt).getTime() < new Date(now).getTime()
+                            ? now
+                            : member.lastReadAt,
+                      }
+                    : member
+                ),
+              }
             : conversation
         ),
       }));
@@ -685,7 +701,23 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const readAt = new Date(lastReadAt).getTime();
         set((s) => ({
           conversations: s.conversations.map((c) =>
-            c.id === conversationId ? { ...c, unreadCount: 0 } : c
+            c.id === conversationId
+              ? {
+                  ...c,
+                  unreadCount: userId === useAuthStore.getState().user?.id ? 0 : c.unreadCount,
+                  members: c.members?.map((member) =>
+                    member.userId === userId
+                      ? {
+                          ...member,
+                          lastReadAt:
+                            !member.lastReadAt || new Date(member.lastReadAt).getTime() < readAt
+                              ? lastReadAt
+                              : member.lastReadAt,
+                        }
+                      : member
+                  ),
+                }
+              : c
           ),
           // Mark all messages sent by the current user (not the reader) as "read"
           // if they were sent before or at the lastReadAt timestamp
