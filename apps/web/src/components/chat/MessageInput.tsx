@@ -134,13 +134,11 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     videoModeRef.current = videoMode;
   }, [videoMode]);
 
-  // Refocus after send completes — desktop only; on mobile refocusing the
-  // textarea after send would reopen the soft keyboard which feels wrong.
+  // Refocus after send completes so the textarea stays focused on all devices.
   const wasSendingRef = useRef(false);
   useEffect(() => {
     if (wasSendingRef.current && !sending) {
-      const isTouchDevice = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
-      if (!isTouchDevice) textareaRef.current?.focus();
+      textareaRef.current?.focus();
     }
     wasSendingRef.current = sending;
   }, [sending]);
@@ -626,7 +624,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
 
         {text.trim() ? (
           <button
-            onMouseDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => e.preventDefault()}
             onClick={() => void handleSend()}
             disabled={sending}
             className="send-btn"
