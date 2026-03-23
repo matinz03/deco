@@ -398,14 +398,6 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
             </button>
           )}
 
-          {isSent && readReceiptLabel && (
-            <span
-              className="px-1 text-[11px] text-muted"
-              title={readReceiptTitle}
-            >
-              {readReceiptLabel}
-            </span>
-          )}
         </div>
         </motion.div>
       </div>
@@ -417,6 +409,8 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
             y={contextMenu.y}
             isSent={isSent}
             text={text}
+            seenLabel={readReceiptLabel || undefined}
+            seenTitle={readReceiptTitle || undefined}
             onEdit={isSent && !msg.isDeleted ? () => setIsEditing(true) : undefined}
             onReply={() => onReply?.(msg)}
             onCopy={() => void navigator.clipboard.writeText(text)}
