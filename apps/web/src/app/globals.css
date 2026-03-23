@@ -136,7 +136,7 @@
 
   .nav-rail {
     @apply w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-sidebar;
-    background-color: hsl(var(--nav) / 0.65);
+    background-color: hsl(var(--nav) / 0.30);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
@@ -195,7 +195,7 @@
     @apply w-full pl-8 pr-3 py-2 text-sm rounded-lg border-0
            focus:outline-none focus:ring-1 focus:ring-ring/30
            placeholder:text-muted-foreground/50;
-    background-color: hsl(var(--muted) / 0.5);
+    background-color: hsl(var(--muted) / 0.25);
   }
 
   .sidebar-list {
@@ -251,7 +251,7 @@
   .chat-header {
     @apply flex items-center gap-2 px-3 md:px-4 py-3
            border-b border-border shrink-0;
-    background-color: hsl(var(--surface) / 0.72);
+    background-color: hsl(var(--surface) / 0.35);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
   }
@@ -283,7 +283,7 @@
 
   .input-bar {
     @apply px-3 md:px-4 py-3 border-t border-border shrink-0 safe-area-bottom;
-    background-color: hsl(var(--surface) / 0.72);
+    background-color: hsl(var(--surface) / 0.35);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
   }
@@ -316,7 +316,7 @@
   .mobile-nav {
     @apply md:hidden fixed bottom-0 left-0 right-0 z-50
            border-t border-sidebar safe-area-bottom;
-    background-color: hsl(var(--nav) / 0.65);
+    background-color: hsl(var(--nav) / 0.30);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
@@ -368,12 +368,12 @@
   }
 
   .glass-nav {
-    background-color: hsl(var(--nav) / 0.85);
+    background-color: hsl(var(--nav) / 0.40);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
   .glass-sidebar {
-    background-color: hsl(var(--sidebar) / 0.70);
+    background-color: hsl(var(--sidebar) / 0.35);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
   }
