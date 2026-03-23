@@ -11,6 +11,7 @@ type Config struct {
 	AllowedOrigins string
 	UploadRoot     string
 	PublicUploadBase string
+	TelegramBotToken string
 	R2AccountID    string
 	R2AccessKey    string
 	R2SecretKey    string
@@ -29,6 +30,7 @@ func Load() *Config {
 		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3000"),
 		UploadRoot:     getEnv("UPLOAD_ROOT", "./uploads"),
 		PublicUploadBase: getEnv("PUBLIC_UPLOAD_BASE", "/api/v1/media"),
+		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		R2AccountID:    getEnv("R2_ACCOUNT_ID", ""),
 		R2AccessKey:    getEnv("R2_ACCESS_KEY_ID", ""),
 		R2SecretKey:    getEnv("R2_SECRET_ACCESS_KEY", ""),

@@ -53,6 +53,7 @@ const (
 	MessageTypeVideo    MessageType = "video"
 	MessageTypeAudio    MessageType = "audio"
 	MessageTypeFile     MessageType = "file"
+	MessageTypeSticker  MessageType = "sticker"
 	MessageTypePoll     MessageType = "poll"
 	MessageTypeSystem   MessageType = "system"
 )
@@ -78,6 +79,8 @@ type Message struct {
 	MediaName      *string       `json:"media_name,omitempty" db:"media_name"`
 	MediaMimeType  *string       `json:"media_mime_type,omitempty" db:"media_mime_type"`
 	MediaSize      *int64        `json:"media_size,omitempty" db:"media_size"`
+	StickerID      *string       `json:"sticker_id,omitempty" db:"sticker_id"`
+	Sticker        *Sticker      `json:"sticker,omitempty"`
 	Poll           *Poll         `json:"poll,omitempty"`
 	ReplyToID      *string       `json:"reply_to_id,omitempty" db:"reply_to_id"`
 	Reactions      []Reaction    `json:"reactions,omitempty"`
@@ -112,6 +115,55 @@ type PollOption struct {
 	Position  int    `json:"position" db:"position"`
 	VoteCount int    `json:"vote_count"`
 	VotedByMe bool   `json:"voted_by_me"`
+}
+
+type StickerFormat string
+
+const (
+	StickerFormatStatic   StickerFormat = "static"
+	StickerFormatAnimated StickerFormat = "animated"
+	StickerFormatVideo    StickerFormat = "video"
+)
+
+type StickerPackSource string
+
+const (
+	StickerPackSourceDeco     StickerPackSource = "deco"
+	StickerPackSourceTelegram StickerPackSource = "telegram"
+)
+
+type StickerPack struct {
+	ID              string            `json:"id" db:"id"`
+	OwnerID         string            `json:"owner_id" db:"owner_id"`
+	Name            string            `json:"name" db:"name"`
+	Slug            string            `json:"slug" db:"slug"`
+	Title           string            `json:"title" db:"title"`
+	Description     string            `json:"description" db:"description"`
+	Source          StickerPackSource `json:"source" db:"source"`
+	TelegramSetName *string           `json:"telegram_set_name,omitempty" db:"telegram_set_name"`
+	StickerCount    int               `json:"sticker_count" db:"sticker_count"`
+	CoverStickerID  *string           `json:"cover_sticker_id,omitempty" db:"cover_sticker_id"`
+	CoverSticker    *Sticker          `json:"cover_sticker,omitempty"`
+	Stickers        []Sticker         `json:"stickers,omitempty"`
+	CreatedAt       time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at" db:"updated_at"`
+}
+
+type Sticker struct {
+	ID                   string        `json:"id" db:"id"`
+	PackID               string        `json:"pack_id" db:"pack_id"`
+	Name                 string        `json:"name" db:"name"`
+	Emoji                string        `json:"emoji" db:"emoji"`
+	AssetURL             string        `json:"asset_url" db:"asset_url"`
+	ThumbnailURL         *string       `json:"thumbnail_url,omitempty" db:"thumbnail_url"`
+	MimeType             string        `json:"mime_type" db:"mime_type"`
+	Format               StickerFormat `json:"format" db:"format"`
+	Width                *int          `json:"width,omitempty" db:"width"`
+	Height               *int          `json:"height,omitempty" db:"height"`
+	TelegramFileID       *string       `json:"telegram_file_id,omitempty" db:"telegram_file_id"`
+	TelegramUniqueFileID *string       `json:"telegram_unique_file_id,omitempty" db:"telegram_unique_file_id"`
+	SortOrder            int           `json:"sort_order" db:"sort_order"`
+	CreatedAt            time.Time     `json:"created_at" db:"created_at"`
 }
 
 // ─── Member ───────────────────────────────────────────────────────────────────

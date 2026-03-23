@@ -3,6 +3,7 @@ package handlers
 import (
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
+	"github.com/matinz03/deco/internal/telegram"
 	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,6 +65,20 @@ func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, 
 		r.Use(middleware.Auth(cfg.JWTSecret))
 		r.Route("/uploads", func(r chi.Router) {
 			r.Post("/", h.Create)
+		})
+	})
+}
+
+func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+	h := &StickerHandler{pool: pool, cfg: cfg, logger: logger, telegram: telegram.NewClient(cfg.TelegramBotToken)}
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Route("/stickers", func(r chi.Router) {
+			r.Get("/packs", h.ListPacks)
+			r.Post("/packs", h.CreatePack)
+			r.Get("/packs/{packID}", h.GetPack)
+			r.Post("/packs/{packID}/stickers", h.AddSticker)
+			r.Post("/import/telegram", h.ImportTelegramPack)
 		})
 	})
 }

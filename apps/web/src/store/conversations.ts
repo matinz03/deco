@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
 import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
-import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput } from "@deco/types";
+import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker } from "@deco/types";
 import { useAuthStore } from "./auth";
 import { usePreferencesStore } from "./preferences";
 
@@ -89,6 +89,7 @@ interface ConversationState {
       replyToId?: string;
     }
   ) => Promise<void>;
+  sendSticker: (conversationId: string, sticker: Sticker, options?: { replyToId?: string }) => Promise<void>;
   sendPoll: (conversationId: string, input: CreatePollInput, options?: { replyToId?: string }) => Promise<void>;
   votePoll: (conversationId: string, messageId: string, optionId: string) => Promise<void>;
   retryMediaMessage: (conversationId: string, messageId: string) => Promise<void>;
@@ -305,6 +306,75 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }));
 
       await uploadAndSendMediaMessage({ conversationId, tempId, input, userId: user.id });
+    },
+
+    async sendSticker(conversationId, sticker, options) {
+      const user = useAuthStore.getState().user;
+      if (!user) return;
+
+      const replyTo = options?.replyToId
+        ? get().messages[conversationId]?.find((message) => message.id === options.replyToId)
+        : undefined;
+      const tempId = `temp_${Date.now()}`;
+      const optimisticMsg: Message = {
+        id: tempId,
+        conversationId,
+        senderId: user.id,
+        sender: user,
+        type: "sticker",
+        encryptedContent: "",
+        mediaUrl: sticker.assetUrl,
+        mediaName: sticker.name,
+        mediaMimeType: sticker.mimeType,
+        sticker,
+        replyToId: options?.replyToId,
+        replyTo,
+        reactions: [],
+        status: "sending",
+        isEdited: false,
+        isDeleted: false,
+        sentAt: new Date().toISOString(),
+      };
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: withReplyLinks([...(s.messages[conversationId] ?? []), optimisticMsg]),
+        },
+      }));
+
+      try {
+        const confirmed = await api.messages.send(conversationId, {
+          type: "sticker",
+          mediaUrl: sticker.assetUrl,
+          mediaName: sticker.name,
+          mediaMimeType: sticker.mimeType,
+          stickerId: sticker.id,
+          replyToId: options?.replyToId,
+        });
+        const conversation = get().conversations.find((c) => c.id === conversationId);
+        const confirmedMessage = await hydrateMessage(confirmed, conversation);
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks(upsertMessage(
+              (s.messages[conversationId] ?? []).map((message) =>
+                message.id === tempId ? confirmedMessage : message
+              ),
+              confirmedMessage
+            )),
+          },
+        }));
+      } catch {
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+              message.id === tempId ? { ...message, status: "failed" as const } : message
+            )),
+          },
+        }));
+      }
     },
 
     async sendPoll(conversationId, input, options) {

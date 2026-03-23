@@ -342,6 +342,9 @@ function getConversationPreview(conversation: Conversation) {
   if (conversation.lastMessage.type === "contact") {
     return "Shared contact";
   }
+  if (conversation.lastMessage.type === "sticker") {
+    return `${conversation.lastMessage.sticker?.emoji ?? "🙂"} Sticker`;
+  }
   if (conversation.lastMessage.type !== "text") return "Media message";
   return "Encrypted message";
 }

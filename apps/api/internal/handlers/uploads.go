@@ -79,7 +79,7 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func isAllowedUploadKind(kind storage.Kind) bool {
 	switch kind {
-	case storage.KindAvatar, storage.KindImage, storage.KindVideo, storage.KindAudio, storage.KindFile:
+	case storage.KindAvatar, storage.KindImage, storage.KindVideo, storage.KindAudio, storage.KindFile, storage.KindSticker:
 		return true
 	default:
 		return false
@@ -94,6 +94,8 @@ func maxBytesForKind(kind storage.Kind) int64 {
 		return 25 << 20
 	case storage.KindVideo:
 		return 100 << 20
+	case storage.KindSticker:
+		return 12 << 20
 	case storage.KindFile:
 		return 50 << 20
 	default:
@@ -119,6 +121,8 @@ func isAllowedMime(kind storage.Kind, mimeType string) bool {
 		return strings.HasPrefix(mimeType, "audio/") || mimeType == "video/webm" || mimeType == "application/mp4"
 	case storage.KindFile:
 		return true
+	case storage.KindSticker:
+		return strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "video/") || mimeType == "application/x-tgsticker"
 	default:
 		return false
 	}
@@ -139,6 +143,8 @@ func isAllowedExtension(kind storage.Kind, filename string) bool {
 		return matchesExtension(ext, ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".flac", ".webm", ".mp4")
 	case storage.KindFile:
 		return true
+	case storage.KindSticker:
+		return matchesExtension(ext, ".png", ".jpg", ".jpeg", ".gif", ".webp", ".webm", ".tgs")
 	default:
 		return false
 	}

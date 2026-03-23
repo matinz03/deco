@@ -90,9 +90,43 @@ export interface ContactAttachment {
   email?: string;
 }
 
-export type MessageType = "text" | "image" | "video" | "audio" | "file" | "poll" | "location" | "contact" | "system";
+export interface Sticker {
+  id: string;
+  packId: string;
+  name: string;
+  emoji: string;
+  assetUrl: string;
+  thumbnailUrl?: string;
+  mimeType: string;
+  format: "static" | "animated" | "video";
+  width?: number;
+  height?: number;
+  telegramFileId?: string;
+  telegramUniqueFileId?: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface StickerPack {
+  id: string;
+  ownerId: string;
+  name: string;
+  slug: string;
+  title: string;
+  description: string;
+  source: "deco" | "telegram";
+  telegramSetName?: string;
+  stickerCount: number;
+  coverStickerId?: string;
+  coverSticker?: Sticker;
+  createdAt: string;
+  updatedAt: string;
+  stickers?: Sticker[];
+}
+
+export type MessageType = "text" | "image" | "video" | "audio" | "file" | "sticker" | "poll" | "location" | "contact" | "system";
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
-export type UploadKind = "avatar" | "image" | "video" | "audio" | "file";
+export type UploadKind = "avatar" | "image" | "video" | "audio" | "file" | "sticker";
 
 export interface Message {
   id: string;
@@ -108,6 +142,7 @@ export interface Message {
   mediaName?: string;
   mediaMimeType?: string;
   mediaSize?: number;
+  sticker?: Sticker;
   poll?: Poll;
   replyToId?: string;
   replyTo?: Message;
@@ -222,4 +257,20 @@ export interface UploadResponse {
 export interface CreatePollInput {
   question: string;
   options: string[];
+}
+
+export interface CreateStickerPackInput {
+  title: string;
+  description?: string;
+}
+
+export interface AddStickerInput {
+  name: string;
+  emoji: string;
+  assetUrl: string;
+  mimeType: string;
+  format: Sticker["format"];
+  thumbnailUrl?: string;
+  telegramFileId?: string;
+  telegramUniqueFileId?: string;
 }

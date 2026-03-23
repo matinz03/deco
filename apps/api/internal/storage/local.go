@@ -22,6 +22,7 @@ const (
 	KindVideo  Kind = "video"
 	KindAudio  Kind = "audio"
 	KindFile   Kind = "file"
+	KindSticker Kind = "sticker"
 )
 
 type SavedFile struct {
@@ -38,6 +39,9 @@ func EnsureDirectories(root string) error {
 		filepath.Join(root, "messages", "videos"),
 		filepath.Join(root, "messages", "audio"),
 		filepath.Join(root, "messages", "files"),
+		filepath.Join(root, "stickers", "static"),
+		filepath.Join(root, "stickers", "video"),
+		filepath.Join(root, "stickers", "animated"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -47,7 +51,7 @@ func EnsureDirectories(root string) error {
 }
 
 func Save(kind Kind, root, publicBase, originalName, mimeType string, data io.Reader, size int64) (*SavedFile, error) {
-	subdir := subdirectoryForKind(kind)
+	subdir := subdirectoryForKind(kind, originalName, mimeType)
 	if subdir == "" {
 		return nil, fmt.Errorf("unsupported upload kind: %s", kind)
 	}
@@ -88,7 +92,7 @@ func DetectMimeType(header []byte, fallback string) string {
 	return detected
 }
 
-func subdirectoryForKind(kind Kind) string {
+func subdirectoryForKind(kind Kind, originalName, mimeType string) string {
 	switch kind {
 	case KindAvatar:
 		return "avatars"
@@ -100,6 +104,14 @@ func subdirectoryForKind(kind Kind) string {
 		return filepath.Join("messages", "audio")
 	case KindFile:
 		return filepath.Join("messages", "files")
+	case KindSticker:
+		if strings.HasSuffix(strings.ToLower(filepath.Ext(originalName)), ".tgs") || mimeType == "application/x-tgsticker" {
+			return filepath.Join("stickers", "animated")
+		}
+		if strings.HasPrefix(mimeType, "video/") || strings.HasSuffix(strings.ToLower(filepath.Ext(originalName)), ".webm") {
+			return filepath.Join("stickers", "video")
+		}
+		return filepath.Join("stickers", "static")
 	default:
 		return ""
 	}

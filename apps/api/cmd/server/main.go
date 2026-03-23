@@ -90,6 +90,7 @@ func main() {
 		handlers.RegisterUserRoutes(r, pool, cfg, logger)
 		handlers.RegisterConversationRoutes(r, pool, cfg, logger)
 		handlers.RegisterUploadRoutes(r, pool, cfg, logger)
+		handlers.RegisterStickerRoutes(r, pool, cfg, logger)
 		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub)
 	})
 

@@ -13,6 +13,10 @@ import type {
   Poll,
   CreatePollInput,
   LeadershipStatus,
+  Sticker,
+  StickerPack,
+  AddStickerInput,
+  CreateStickerPackInput,
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -76,6 +80,7 @@ export function mapMessage(r: any): Message {
     mediaName: r.media_name ?? r.mediaName,
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
+    sticker: r.sticker ? mapSticker(r.sticker) : undefined,
     poll: r.poll ? mapPoll(r.poll) : undefined,
     replyToId: r.reply_to_id ?? r.replyToId,
     reactions: (r.reactions ?? []).map(mapReaction),
@@ -147,6 +152,46 @@ function mapUploadResponse(r: any): UploadResponse {
     size: r.size ?? 0,
     name: r.name ?? "",
     kind: r.kind ?? "file",
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapSticker(r: any): Sticker {
+  return {
+    id: r.id ?? "",
+    packId: r.pack_id ?? r.packId ?? "",
+    name: r.name ?? "",
+    emoji: r.emoji ?? "",
+    assetUrl: resolveAssetUrl(r.asset_url ?? r.assetUrl ?? ""),
+    thumbnailUrl: resolveAssetUrl(r.thumbnail_url ?? r.thumbnailUrl ?? ""),
+    mimeType: r.mime_type ?? r.mimeType ?? "",
+    format: r.format ?? "static",
+    width: r.width ?? undefined,
+    height: r.height ?? undefined,
+    telegramFileId: r.telegram_file_id ?? r.telegramFileId,
+    telegramUniqueFileId: r.telegram_unique_file_id ?? r.telegramUniqueFileId,
+    sortOrder: r.sort_order ?? r.sortOrder ?? 0,
+    createdAt: r.created_at ?? r.createdAt ?? "",
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapStickerPack(r: any): StickerPack {
+  return {
+    id: r.id ?? "",
+    ownerId: r.owner_id ?? r.ownerId ?? "",
+    name: r.name ?? "",
+    slug: r.slug ?? "",
+    title: r.title ?? "",
+    description: r.description ?? "",
+    source: r.source ?? "deco",
+    telegramSetName: r.telegram_set_name ?? r.telegramSetName,
+    stickerCount: r.sticker_count ?? r.stickerCount ?? 0,
+    coverStickerId: r.cover_sticker_id ?? r.coverStickerId,
+    coverSticker: r.cover_sticker ? mapSticker(r.cover_sticker) : undefined,
+    stickers: (r.stickers ?? []).map(mapSticker),
+    createdAt: r.created_at ?? r.createdAt ?? "",
+    updatedAt: r.updated_at ?? r.updatedAt ?? "",
   };
 }
 
@@ -462,6 +507,7 @@ export const api = {
         mediaName?: string;
         mediaMimeType?: string;
         mediaSize?: number;
+        stickerId?: string;
         poll?: CreatePollInput;
       }
     ) => {
@@ -475,6 +521,7 @@ export const api = {
           media_name: body.mediaName,
           media_mime_type: body.mediaMimeType,
           media_size: body.mediaSize,
+          sticker_id: body.stickerId,
           poll: body.poll ? {
             question: body.poll.question,
             options: body.poll.options,
@@ -625,6 +672,58 @@ export const api = {
         body: form,
       });
       return mapUploadResponse(raw);
+    },
+  },
+
+  stickers: {
+    listPacks: async () => {
+      const raw = await request<unknown[]>("/api/v1/stickers/packs");
+      return raw.map(mapStickerPack);
+    },
+
+    getPack: async (packId: string) => {
+      const raw = await request<unknown>(`/api/v1/stickers/packs/${packId}`);
+      return mapStickerPack(raw);
+    },
+
+    createPack: async (body: CreateStickerPackInput) => {
+      const raw = await request<unknown>("/api/v1/stickers/packs", {
+        method: "POST",
+        body: JSON.stringify({
+          title: body.title,
+          description: body.description,
+        }),
+      });
+      return mapStickerPack(raw);
+    },
+
+    addSticker: async (packId: string, body: AddStickerInput) => {
+      const raw = await request<unknown>(`/api/v1/stickers/packs/${packId}/stickers`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: body.name,
+          emoji: body.emoji,
+          asset_url: body.assetUrl,
+          mime_type: body.mimeType,
+          format: body.format,
+          thumbnail_url: body.thumbnailUrl,
+          telegram_file_id: body.telegramFileId,
+          telegram_unique_file_id: body.telegramUniqueFileId,
+        }),
+      });
+      return mapSticker(raw);
+    },
+
+    importTelegramPack: async (input: string) => {
+      const raw = await request<{ pack: unknown; imported_count: number; skipped?: string[] }>("/api/v1/stickers/import/telegram", {
+        method: "POST",
+        body: JSON.stringify({ input }),
+      });
+      return {
+        pack: mapStickerPack(raw.pack),
+        importedCount: raw.imported_count,
+        skipped: raw.skipped ?? [],
+      };
     },
   },
 };

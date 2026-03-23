@@ -3,9 +3,10 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
-import type { ContactAttachment, CreatePollInput, LocationAttachment, Message, MessageType } from "@deco/types";
+import type { ContactAttachment, CreatePollInput, LocationAttachment, Message, MessageType, Sticker } from "@deco/types";
 import { useConversationStore } from "@/store/conversations";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
+import { StickerPickerPanel } from "./StickerPickerPanel";
 
 interface Props {
   conversationId: string;
@@ -96,6 +97,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showPollComposer, setShowPollComposer] = useState(false);
   const [showLocationComposer, setShowLocationComposer] = useState(false);
@@ -106,6 +108,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const emojiWrapRef = useRef<HTMLDivElement>(null);
+  const stickerWrapRef = useRef<HTMLDivElement>(null);
   const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -120,6 +123,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
 
   const sendMessage = useConversationStore((s) => s.sendMessage);
   const sendMediaMessage = useConversationStore((s) => s.sendMediaMessage);
+  const sendSticker = useConversationStore((s) => s.sendSticker);
   const sendPoll = useConversationStore((s) => s.sendPoll);
   const sendTyping = useConversationStore((s) => s.sendTyping);
 
@@ -179,6 +183,17 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   }, [showEmojiPicker]);
 
   useEffect(() => {
+    if (!showStickerPicker) return;
+    const handleOutside = (event: MouseEvent) => {
+      if (stickerWrapRef.current && !stickerWrapRef.current.contains(event.target as Node)) {
+        setShowStickerPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [showStickerPicker]);
+
+  useEffect(() => {
     if (!showAttachmentMenu) return;
     const handleOutside = (event: MouseEvent) => {
       if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target as Node)) {
@@ -196,6 +211,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     clearTypingState(typingTimeoutRef, sendTyping, conversationId);
     setText("");
     setShowEmojiPicker(false);
+    setShowStickerPicker(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
       await sendMessage(conversationId, trimmed, { replyToId: replyTo?.id });
@@ -434,6 +450,18 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     }
   }
 
+  async function handleSelectSticker(sticker: Sticker) {
+    setSending(true);
+    setShowStickerPicker(false);
+    clearTypingState(typingTimeoutRef, sendTyping, conversationId);
+    try {
+      await sendSticker(conversationId, sticker, { replyToId: replyTo?.id });
+      onCancelReply?.();
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="input-bar">
       {replyTo && (
@@ -511,10 +539,11 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
             className="input-action"
             title="Attach"
             aria-label="Attach"
-            onClick={() => {
-              setShowAttachmentMenu((value) => !value);
-              setShowEmojiPicker(false);
-            }}
+              onClick={() => {
+                setShowAttachmentMenu((value) => !value);
+                setShowEmojiPicker(false);
+                setShowStickerPicker(false);
+              }}
             disabled={sending || isRecording}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -600,6 +629,29 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
           disabled={isRecording || sending}
         />
 
+        <div className="relative" ref={stickerWrapRef}>
+          {showStickerPicker && (
+            <div className="absolute bottom-full right-0 z-50 mb-2 overflow-hidden rounded-2xl shadow-2xl">
+              <StickerPickerPanel onSelect={(sticker) => void handleSelectSticker(sticker)} />
+            </div>
+          )}
+          <button
+            className={`input-action ${showStickerPicker ? "text-primary" : ""}`}
+            title="Stickers"
+            aria-label="Stickers"
+            onClick={() => {
+              setShowStickerPicker((value) => !value);
+              setShowEmojiPicker(false);
+              setShowAttachmentMenu(false);
+            }}
+            disabled={sending || isRecording}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.75h3.75A4.5 4.5 0 0 1 20.25 8.25V12M12 3.75H8.25a4.5 4.5 0 0 0-4.5 4.5V12m8.25-8.25V12m0 0h8.25m-8.25 0v8.25m0-8.25H3.75m8.25 8.25h3.75a4.5 4.5 0 0 0 4.5-4.5V12m-8.25 8.25H8.25a4.5 4.5 0 0 1-4.5-4.5V12" />
+            </svg>
+          </button>
+        </div>
+
         <div className="relative" ref={emojiWrapRef}>
           {showEmojiPicker && (
             <div className="absolute bottom-full right-0 z-50 mb-2 overflow-hidden rounded-2xl shadow-2xl">
@@ -612,6 +664,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
             aria-label="Emoji"
             onClick={() => {
               setShowEmojiPicker((value) => !value);
+              setShowStickerPicker(false);
               setShowAttachmentMenu(false);
             }}
             disabled={sending || isRecording}
@@ -727,6 +780,8 @@ function getReplyLabel(type: MessageType) {
       return "Audio attachment";
     case "file":
       return "File attachment";
+    case "sticker":
+      return "Sticker";
     case "poll":
       return "Poll";
     case "location":

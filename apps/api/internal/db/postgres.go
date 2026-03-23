@@ -73,6 +73,47 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	}
 
 	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_enum
+				WHERE enumlabel = 'sticker'
+				  AND enumtypid = 'message_type'::regtype
+			) THEN
+				ALTER TYPE message_type ADD VALUE 'sticker';
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sticker_pack_source') THEN
+				CREATE TYPE sticker_pack_source AS ENUM ('deco', 'telegram');
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sticker_format') THEN
+				CREATE TYPE sticker_format AS ENUM ('static', 'animated', 'video');
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS user_key_backups (
 			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 			version INTEGER NOT NULL,
@@ -120,6 +161,123 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		)
 	`)
 
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS sticker_packs (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			slug TEXT NOT NULL UNIQUE,
+			title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			source sticker_pack_source NOT NULL DEFAULT 'deco',
+			telegram_set_name TEXT,
+			cover_sticker_id UUID,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_sticker_packs_owner_id ON sticker_packs(owner_id)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_sticker_packs_source ON sticker_packs(source)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		DECLARE constraint_name text;
+		BEGIN
+			SELECT con.conname
+			INTO constraint_name
+			FROM pg_constraint con
+			JOIN pg_class rel ON rel.oid = con.conrelid
+			JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+			WHERE rel.relname = 'sticker_packs'
+			  AND nsp.nspname = current_schema()
+			  AND con.contype = 'u'
+			  AND pg_get_constraintdef(con.oid) LIKE '%telegram_set_name%';
+
+			IF constraint_name IS NOT NULL THEN
+				EXECUTE format('ALTER TABLE sticker_packs DROP CONSTRAINT %I', constraint_name);
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_sticker_packs_owner_set_name
+		ON sticker_packs(owner_id, telegram_set_name)
+		WHERE telegram_set_name IS NOT NULL
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS stickers (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			pack_id UUID NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			emoji TEXT NOT NULL DEFAULT '',
+			asset_url TEXT NOT NULL,
+			thumbnail_url TEXT,
+			mime_type TEXT NOT NULL,
+			format sticker_format NOT NULL DEFAULT 'static',
+			width INTEGER,
+			height INTEGER,
+			telegram_file_id TEXT,
+			telegram_unique_file_id TEXT,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_stickers_pack_id ON stickers(pack_id, sort_order, created_at)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_stickers_pack_sort_order ON stickers(pack_id, sort_order)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger WHERE tgname = 'trg_sticker_packs_updated_at'
+			) THEN
+				CREATE TRIGGER trg_sticker_packs_updated_at
+				  BEFORE UPDATE ON sticker_packs
+				  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+			END IF;
+		END $$;
+	`)
 	if err != nil {
 		return err
 	}
@@ -233,6 +391,14 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	_, err = pool.Exec(ctx, `
 		ALTER TABLE messages
 		ADD COLUMN IF NOT EXISTS media_name TEXT
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE messages
+		ADD COLUMN IF NOT EXISTS sticker_id UUID
 	`)
 
 	return err

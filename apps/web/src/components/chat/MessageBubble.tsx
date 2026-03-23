@@ -225,6 +225,27 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   </div>
                 </>
               )}
+              {msg.type === "sticker" && (msg.sticker?.assetUrl || msg.mediaUrl) && (
+                <div className="mb-2 flex justify-center">
+                  {msg.sticker?.format === "video" || msg.mediaMimeType?.startsWith("video/") ? (
+                    <video
+                      src={msg.sticker?.assetUrl || msg.mediaUrl}
+                      muted
+                      loop
+                      autoPlay
+                      playsInline
+                      className="max-h-48 max-w-[180px] rounded-2xl object-contain"
+                    />
+                  ) : (
+                    <img
+                      src={msg.sticker?.assetUrl || msg.mediaUrl}
+                      alt={msg.sticker?.name || "Sticker"}
+                      className="max-h-48 max-w-[180px] rounded-2xl object-contain"
+                      loading="lazy"
+                    />
+                  )}
+                </div>
+              )}
               {msg.type === "video" && msg.mediaUrl && (
                 <>
                   <video
@@ -651,6 +672,7 @@ function getMessageText(message: Message) {
   if (message.type === "poll" && message.poll) return message.poll.question;
   if (message.type === "location") return "";
   if (message.type === "contact") return "";
+  if (message.type === "sticker") return "";
   if (message.decryptedContent) return message.decryptedContent;
   if (message.type !== "text" && message.mediaUrl) return "";
   if (message.encryptedContent) return "Encrypted message unavailable on this device";
@@ -709,6 +731,7 @@ function formatBytes(value?: number) {
 function getReplyPreviewText(message: Message) {
   if (message.type === "location") return "Shared location";
   if (message.type === "contact") return "Shared contact";
+  if (message.type === "sticker") return `${message.sticker?.emoji ?? "🙂"} Sticker`;
   return message.decryptedContent || message.mediaName || getMessageText(message) || "Reply";
 }
 

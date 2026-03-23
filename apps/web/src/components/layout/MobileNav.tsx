@@ -59,6 +59,15 @@ export function MobileNav() {
         }]
       : []),
     {
+      href: "/stickers",
+      label: "Stickers",
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.75h3.75A4.5 4.5 0 0 1 20.25 8.25V12M12 3.75H8.25a4.5 4.5 0 0 0-4.5 4.5V12m8.25-8.25V12m0 0h8.25m-8.25 0v8.25m0-8.25H3.75m8.25 8.25h3.75a4.5 4.5 0 0 0 4.5-4.5V12m-8.25 8.25H8.25a4.5 4.5 0 0 1-4.5-4.5V12" />
+        </svg>
+      ),
+    },
+    {
       href: "/settings",
       label: "Settings",
       icon: (

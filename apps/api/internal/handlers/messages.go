@@ -54,7 +54,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
 				m.media_url, m.media_name, m.media_mime_type, m.media_size,
-				m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
+				m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
 			JOIN users u ON u.id = m.sender_id
@@ -69,7 +69,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
 				m.media_url, m.media_name, m.media_mime_type, m.media_size,
-				m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
+				m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
 			JOIN users u ON u.id = m.sender_id
@@ -91,10 +91,10 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var msg models.Message
 		var sender models.User
 		if err := rows.Scan(
-			&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-			&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
-			&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
-			&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
+				&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
+				&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
+				&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+				&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 		); err != nil {
 			h.logger.Error("scan error", zap.Error(err))
 			continue
@@ -109,6 +109,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 			ids[i] = m.ID
 		}
 		h.attachReactions(r, messages, ids)
+		h.attachStickers(r, messages, ids)
 		h.attachPolls(r, messages, ids, userID)
 	}
 
@@ -164,6 +165,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		MediaName        string  `json:"media_name"`
 		MediaMimeType    string  `json:"media_mime_type"`
 		MediaSize        *int64  `json:"media_size"`
+		StickerID        *string `json:"sticker_id"`
 		ReplyToID        *string `json:"reply_to_id,omitempty"`
 		Poll             *struct {
 			Question       string   `json:"question"`
@@ -178,7 +180,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "text"
 	}
-	isMediaMessage := req.Type == "image" || req.Type == "video" || req.Type == "audio" || req.Type == "file"
+	isMediaMessage := req.Type == "image" || req.Type == "video" || req.Type == "audio" || req.Type == "file" || req.Type == "sticker"
 	isPollMessage := req.Type == "poll"
 	if !isMediaMessage && req.EncryptedContent == "" {
 		if !isPollMessage {
@@ -203,6 +205,10 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "media_url is required for media messages")
 		return
 	}
+	if req.Type == string(models.MessageTypeSticker) && req.StickerID == nil {
+		respondError(w, http.StatusBadRequest, "sticker_id is required for sticker messages")
+		return
+	}
 
 	var msg models.Message
 	tx, err := h.pool.Begin(r.Context())
@@ -215,16 +221,16 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO messages (
 			conversation_id, sender_id, type, encrypted_content,
-			media_url, media_name, media_mime_type, media_size, reply_to_id
+			media_url, media_name, media_mime_type, media_size, sticker_id, reply_to_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_name, media_mime_type, media_size,
+		          media_url, media_name, media_mime_type, media_size, sticker_id,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
-	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.ReplyToID).Scan(
+	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.StickerID, req.ReplyToID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
 		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
-		&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
 		h.logger.Error("failed to insert message", zap.Error(err))
@@ -248,6 +254,9 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	if isPollMessage {
 		msg.Poll = h.loadPoll(r, tx, msg.ID, userID)
 	}
+	attachedMessage := []models.Message{msg}
+	h.attachStickers(r, attachedMessage, []string{msg.ID})
+	msg = attachedMessage[0]
 
 	if err := tx.Commit(r.Context()); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to finalize message")
@@ -335,7 +344,7 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
 			m.media_url, m.media_name, m.media_mime_type, m.media_size,
-			m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
+			m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 			u.id, u.username, u.display_name, u.avatar_url, u.public_key
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
@@ -343,7 +352,7 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 	`, msgID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
 		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
-		&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 		&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 	)
 	if err != nil {
@@ -351,6 +360,9 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg.Sender = &sender
+	attachedMessage := []models.Message{msg}
+	h.attachStickers(r, attachedMessage, []string{msg.ID})
+	msg = attachedMessage[0]
 	msg.Poll = h.loadPoll(r, tx, msg.ID, userID)
 	if err := tx.Commit(r.Context()); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to finalize vote")
@@ -387,12 +399,12 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		SET encrypted_content = $1, is_edited = true, edited_at = NOW()
 		WHERE id = $2 AND conversation_id = $3 AND sender_id = $4 AND is_deleted = false
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_name, media_mime_type, media_size,
+		          media_url, media_name, media_mime_type, media_size, sticker_id,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
 	`, req.EncryptedContent, msgID, convID, userID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
 		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
-		&msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "message not found or not yours")
@@ -671,6 +683,53 @@ func (h *MessageHandler) attachPolls(r *http.Request, messages []models.Message,
 	for index := range messages {
 		if poll := byMessageID[messages[index].ID]; poll != nil {
 			messages[index].Poll = poll
+		}
+	}
+}
+
+func (h *MessageHandler) attachStickers(r *http.Request, messages []models.Message, ids []string) {
+	_ = ids
+	stickerIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if message.StickerID != nil && *message.StickerID != "" {
+			stickerIDs = append(stickerIDs, *message.StickerID)
+		}
+	}
+	if len(stickerIDs) == 0 {
+		return
+	}
+
+	rows, err := h.pool.Query(r.Context(), `
+		SELECT
+			id, pack_id, name, emoji, asset_url, thumbnail_url, mime_type, format,
+			width, height, telegram_file_id, telegram_unique_file_id, sort_order, created_at
+		FROM stickers
+		WHERE id = ANY($1)
+	`, stickerIDs)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	stickersByID := make(map[string]models.Sticker, len(stickerIDs))
+	for rows.Next() {
+		var sticker models.Sticker
+		if err := rows.Scan(
+			&sticker.ID, &sticker.PackID, &sticker.Name, &sticker.Emoji, &sticker.AssetURL, &sticker.ThumbnailURL,
+			&sticker.MimeType, &sticker.Format, &sticker.Width, &sticker.Height, &sticker.TelegramFileID,
+			&sticker.TelegramUniqueFileID, &sticker.SortOrder, &sticker.CreatedAt,
+		); err == nil {
+			stickersByID[sticker.ID] = sticker
+		}
+	}
+
+	for i := range messages {
+		if messages[i].StickerID == nil {
+			continue
+		}
+		if sticker, ok := stickersByID[*messages[i].StickerID]; ok {
+			copySticker := sticker
+			messages[i].Sticker = &copySticker
 		}
 	}
 }

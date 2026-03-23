@@ -175,6 +175,8 @@ function getTypeLabel(message: Message) {
       return "Audio attachment";
     case "file":
       return "File attachment";
+    case "sticker":
+      return "Sticker";
     case "poll":
       return "Poll";
     case "location":

@@ -55,8 +55,10 @@ CREATE TABLE members (
 CREATE INDEX idx_members_user_id ON members(user_id);
 
 -- ─── Messages ─────────────────────────────────────────────────────────────────
-CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'audio', 'file', 'poll', 'system');
+CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'audio', 'file', 'sticker', 'poll', 'system');
 CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read');
+CREATE TYPE sticker_pack_source AS ENUM ('deco', 'telegram');
+CREATE TYPE sticker_format AS ENUM ('static', 'animated', 'video');
 
 CREATE TABLE messages (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,6 +70,7 @@ CREATE TABLE messages (
   media_name        TEXT,
   media_mime_type   TEXT,
   media_size        BIGINT,
+  sticker_id        UUID,
   reply_to_id       UUID REFERENCES messages(id),
   status            message_status NOT NULL DEFAULT 'sent',
   is_edited         BOOLEAN NOT NULL DEFAULT FALSE,
@@ -114,6 +117,44 @@ CREATE TABLE poll_votes (
 );
 
 CREATE INDEX idx_poll_votes_option_id ON poll_votes(option_id);
+
+CREATE TABLE sticker_packs (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name               TEXT NOT NULL,
+  slug               TEXT NOT NULL UNIQUE,
+  title              TEXT NOT NULL,
+  description        TEXT NOT NULL DEFAULT '',
+  source             sticker_pack_source NOT NULL DEFAULT 'deco',
+  telegram_set_name  TEXT,
+  cover_sticker_id   UUID,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_sticker_packs_owner_id ON sticker_packs(owner_id);
+CREATE INDEX idx_sticker_packs_source ON sticker_packs(source);
+CREATE UNIQUE INDEX idx_sticker_packs_owner_set_name ON sticker_packs(owner_id, telegram_set_name) WHERE telegram_set_name IS NOT NULL;
+
+CREATE TABLE stickers (
+  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pack_id                  UUID NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+  name                     TEXT NOT NULL,
+  emoji                    TEXT NOT NULL DEFAULT '',
+  asset_url                TEXT NOT NULL,
+  thumbnail_url            TEXT,
+  mime_type                TEXT NOT NULL,
+  format                   sticker_format NOT NULL DEFAULT 'static',
+  width                    INTEGER,
+  height                   INTEGER,
+  telegram_file_id         TEXT,
+  telegram_unique_file_id  TEXT,
+  sort_order               INTEGER NOT NULL DEFAULT 0,
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_stickers_pack_id ON stickers(pack_id, sort_order, created_at);
+CREATE UNIQUE INDEX idx_stickers_pack_sort_order ON stickers(pack_id, sort_order);
 
 CREATE TABLE group_leadership_cycles (
   conversation_id            UUID PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -172,4 +213,8 @@ CREATE TRIGGER trg_conversations_updated_at
 
 CREATE TRIGGER trg_user_key_backups_updated_at
   BEFORE UPDATE ON user_key_backups
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER trg_sticker_packs_updated_at
+  BEFORE UPDATE ON sticker_packs
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
