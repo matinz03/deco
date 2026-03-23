@@ -133,6 +133,12 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   }, [videoMode]);
 
   useEffect(() => {
+    if (replyTo) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [replyTo]);
+
+  useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -179,12 +185,16 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     clearTypingState(typingTimeoutRef, sendTyping, conversationId);
     setText("");
     setShowEmojiPicker(false);
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.focus();
+    }
     try {
       await sendMessage(conversationId, trimmed, { replyToId: replyTo?.id });
       onCancelReply?.();
     } finally {
       setSending(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
     }
   }, [conversationId, onCancelReply, replyTo?.id, sendMessage, sendTyping, sending, text]);
 

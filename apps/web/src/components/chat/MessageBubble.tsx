@@ -9,6 +9,7 @@ import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
 import { ReactionPicker } from "./ReactionPicker";
 import { MessageContextMenu } from "./MessageContextMenu";
+import { ImageLightbox } from "./ImageLightbox";
 
 interface Props {
   message: Message;
@@ -35,6 +36,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const votePoll = useConversationStore((s) => s.votePoll);
   const editMessage = useConversationStore((s) => s.editMessage);
   const deleteMessage = useConversationStore((s) => s.deleteMessage);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [pickerAbove, setPickerAbove] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -180,18 +182,26 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   ? `bubble-sent ${!isGrouped ? "rounded-2xl rounded-br-sm" : isLastInGroup ? "rounded-2xl rounded-br-sm rounded-tr-md" : "rounded-xl rounded-r-md"}`
                   : `bubble-received shadow-sm ${!isGrouped ? "rounded-2xl rounded-bl-sm" : isLastInGroup ? "rounded-2xl rounded-bl-sm rounded-tl-md" : "rounded-xl rounded-l-md"}`
               }`}
-              initial={{ scale: 0.92, opacity: 0, x: isSent ? 8 : -8 }}
-              animate={{ scale: 1, opacity: 1, x: 0 }}
-              transition={{ type: "spring", stiffness: 420, damping: 28 }}
+              initial={{ scale: 0.9, opacity: 0, y: 14 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 30 }}
               onClick={handleBubbleClick}
             >
               {msg.type === "image" && msg.mediaUrl && (
-                <img
-                  src={msg.mediaUrl}
-                  alt="Image"
-                  className="mb-1.5 max-h-64 max-w-full rounded-xl object-cover"
-                  loading="lazy"
-                />
+                <>
+                  <img
+                    src={msg.mediaUrl}
+                    alt="Image"
+                    className="mb-1.5 max-h-64 max-w-full rounded-xl object-cover cursor-zoom-in"
+                    loading="lazy"
+                    onClick={(e) => { e.stopPropagation(); setLightboxOpen(true); }}
+                  />
+                  <ImageLightbox
+                    src={msg.mediaUrl}
+                    open={lightboxOpen}
+                    onClose={() => setLightboxOpen(false)}
+                  />
+                </>
               )}
               {msg.type === "video" && msg.mediaUrl && (
                 <video

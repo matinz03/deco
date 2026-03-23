@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useConversationStore } from "@/store/conversations";
@@ -19,7 +19,6 @@ export function ConversationList() {
   const tab = searchParams.get("tab") ?? "messages";
   const isGroupsTab = tab === "groups";
 
-  // Track direction: groups=1 (right/down), messages=-1 (left/up)
   const directionRef = useRef(0);
   const prevTabRef = useRef(tab);
   if (prevTabRef.current !== tab) {
@@ -85,7 +84,7 @@ export function ConversationList() {
         initialMode={isGroupsTab ? "group" : "direct"}
       />
 
-      {/* Mobile compose FAB — floats above the bottom nav */}
+      {/* Mobile compose FAB */}
       <button
         className="md:hidden fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg active:scale-95 transition-transform"
         aria-label="New conversation"
@@ -174,6 +173,7 @@ export function ConversationList() {
                         (member) => member.userId !== currentUserId && presence[member.userId]?.status === "online"
                       )
                     )}
+                    isMobile={isMobile}
                   />
                 ))}
               </ul>
@@ -185,55 +185,145 @@ export function ConversationList() {
   );
 }
 
+const ACTION_WIDTH = 130; // px revealed on swipe
+
 function ConversationItem({
   conversation,
   isActive,
   isOnline,
   href,
+  isMobile,
 }: {
   conversation: Conversation;
   isActive: boolean;
   isOnline: boolean;
   href: string;
+  isMobile: boolean;
 }) {
+  const { mutedIds, muteConversation, unmuteConversation, deleteConversation } = useConversationStore();
+  const isMuted = mutedIds.has(conversation.id);
   const title = conversation.name || "Unknown conversation";
   const lastMessageText = getConversationPreview(conversation);
   const timeStr = conversation.updatedAt
     ? formatDistanceToNowStrict(new Date(conversation.updatedAt), { addSuffix: false })
     : "";
 
-  return (
-    <motion.li layout transition={{ type: "spring", stiffness: 500, damping: 38 }}>
-      <Link
-        href={href}
-        className={`conv-item ${isActive ? "conv-item--active" : ""}`}
-      >
-        <div className="conv-avatar-wrap">
-          <Avatar src={conversation.avatarUrl} name={title} size="md" />
-          {conversation.type === "direct" && (
-            <OnlineDot isOnline={isOnline} borderClass="border-sidebar" />
-          )}
-        </div>
+  const x = useMotionValue(0);
+  const actionsOpacity = useTransform(x, [-ACTION_WIDTH, -ACTION_WIDTH / 2, 0], [1, 0.6, 0]);
+  const [isOpen, setIsOpen] = useState(false);
 
-        <div className="conv-meta">
-          <div className="conv-row">
-            <span className="conv-name">{title}</span>
-            <span className="conv-time">{timeStr}</span>
-          </div>
-          <div className="conv-row mt-0.5">
-            <p className="conv-preview">{lastMessageText}</p>
-            {conversation.unreadCount > 0 && (
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                className="unread-badge"
-              >
-                {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
-              </motion.span>
+  function snapOpen() {
+    x.set(-ACTION_WIDTH);
+    setIsOpen(true);
+  }
+  function snapClosed() {
+    x.set(0);
+    setIsOpen(false);
+  }
+
+  function handleDragEnd(_: unknown, info: { offset: { x: number }; velocity: { x: number } }) {
+    const offset = info.offset.x;
+    const velocity = info.velocity.x;
+    if (offset < -ACTION_WIDTH / 2 || velocity < -200) {
+      snapOpen();
+    } else {
+      snapClosed();
+    }
+  }
+
+  return (
+    <motion.li layout transition={{ type: "spring", stiffness: 500, damping: 38 }} className="relative overflow-hidden">
+      {/* Actions revealed behind the row */}
+      <motion.div
+        className="absolute inset-y-0 right-0 flex items-center gap-1 pr-2"
+        style={{ opacity: actionsOpacity }}
+        aria-hidden={!isOpen}
+      >
+        <button
+          onClick={() => {
+            isMuted ? unmuteConversation(conversation.id) : muteConversation(conversation.id);
+            snapClosed();
+          }}
+          className="flex h-10 w-10 flex-col items-center justify-center rounded-xl bg-muted text-muted-foreground transition-colors hover:bg-accent"
+          title={isMuted ? "Unmute" : "Mute"}
+        >
+          {isMuted ? (
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+            </svg>
+          ) : (
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 .984-2.058 8.963 8.963 0 0 0-1.673-7.25M15 9.75a6 6 0 0 0-6-6 6 6 0 0 0-5.022 2.735m0 0L3 3" />
+            </svg>
+          )}
+          <span className="mt-0.5 text-[9px] font-medium leading-none">{isMuted ? "Unmute" : "Mute"}</span>
+        </button>
+
+        <button
+          onClick={() => {
+            snapClosed();
+            void deleteConversation(conversation.id);
+          }}
+          className="flex h-10 w-10 flex-col items-center justify-center rounded-xl bg-destructive/15 text-destructive transition-colors hover:bg-destructive/25"
+          title="Delete"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+          </svg>
+          <span className="mt-0.5 text-[9px] font-medium leading-none">Delete</span>
+        </button>
+      </motion.div>
+
+      {/* The draggable row — only drag on mobile */}
+      <motion.div
+        drag={isMobile ? "x" : false}
+        dragConstraints={{ left: -ACTION_WIDTH, right: 0 }}
+        dragElastic={{ left: 0.05, right: 0.15 }}
+        dragMomentum={false}
+        style={{ x }}
+        onDragEnd={handleDragEnd}
+        onClick={() => { if (isOpen) snapClosed(); }}
+        className="relative bg-sidebar"
+      >
+        <Link
+          href={isOpen ? "#" : href}
+          onClick={(e) => { if (isOpen) { e.preventDefault(); snapClosed(); } }}
+          className={`conv-item ${isActive ? "conv-item--active" : ""} ${isMuted ? "opacity-60" : ""}`}
+        >
+          <div className="conv-avatar-wrap">
+            <Avatar src={conversation.avatarUrl} name={title} size="md" />
+            {conversation.type === "direct" && (
+              <OnlineDot isOnline={isOnline} borderClass="border-sidebar" />
             )}
           </div>
-        </div>
-      </Link>
+
+          <div className="conv-meta">
+            <div className="conv-row">
+              <span className="conv-name flex items-center gap-1.5">
+                {title}
+                {isMuted && (
+                  <svg className="h-3 w-3 shrink-0 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 .984-2.058 8.963 8.963 0 0 0-1.673-7.25M15 9.75a6 6 0 0 0-6-6 6 6 0 0 0-5.022 2.735m0 0L3 3" />
+                  </svg>
+                )}
+              </span>
+              <span className="conv-time">{timeStr}</span>
+            </div>
+            <div className="conv-row mt-0.5">
+              <p className="conv-preview">{lastMessageText}</p>
+              {!isMuted && conversation.unreadCount > 0 && (
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="unread-badge"
+                >
+                  {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+                </motion.span>
+              )}
+            </div>
+          </div>
+        </Link>
+      </motion.div>
     </motion.li>
   );
 }

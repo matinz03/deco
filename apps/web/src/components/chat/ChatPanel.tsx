@@ -42,13 +42,15 @@ interface Props { conversationId: string; }
 export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
   const readReceipts = usePreferencesStore((s) => s.readReceipts);
-  const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations, typing } = useConversationStore();
+  const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations, typing, sendMediaMessage } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [threadMessageId, setThreadMessageId] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
   const initialScrollDone = useRef(false);
   const lastScrollTop = useRef(0);
 
@@ -163,6 +165,43 @@ export function ChatPanel({ conversationId }: Props) {
     }
   }
 
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current += 1;
+    if (dragCounter.current === 1) setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) setIsDragOver(false);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const type = file.type.startsWith("image/") ? "image"
+      : file.type.startsWith("video/") ? "video"
+      : file.type.startsWith("audio/") ? "audio"
+      : "file";
+    const previewUrl = type === "image" || type === "video" || type === "audio"
+      ? URL.createObjectURL(file) : undefined;
+    await sendMediaMessage(conversationId, {
+      type,
+      file,
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      previewUrl,
+    });
+  }
+
   function jumpToMessage(messageId: string) {
     const element = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
     if (!element) return;
@@ -208,7 +247,23 @@ export function ChatPanel({ conversationId }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div
+      className="flex flex-col h-full relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={(e) => void handleDrop(e)}
+    >
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-sm pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-primary">
+            <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+            </svg>
+            <p className="text-sm font-semibold">Drop to send</p>
+          </div>
+        </div>
+      )}
       <ChatHeader conversation={conversation} />
 
       <div

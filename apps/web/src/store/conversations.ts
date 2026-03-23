@@ -47,6 +47,9 @@ interface ConversationState {
   activeConversationId: string | null;
   presence: Record<string, PresenceState>;
   typing: Record<string, string[]>;
+  mutedIds: Set<string>;
+  muteConversation: (conversationId: string) => void;
+  unmuteConversation: (conversationId: string) => void;
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
@@ -87,12 +90,35 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     wsClient.on("*", (event) => get().handleIncomingEvent(event));
   }
 
+  const storedMuted = typeof window !== "undefined"
+    ? (JSON.parse(localStorage.getItem("deco_muted") ?? "[]") as string[])
+    : [];
+
   return {
     conversations: [],
     messages: {},
     activeConversationId: null,
     presence: {},
     typing: {},
+    mutedIds: new Set(storedMuted),
+
+    muteConversation(conversationId) {
+      set((s) => {
+        const next = new Set(s.mutedIds);
+        next.add(conversationId);
+        localStorage.setItem("deco_muted", JSON.stringify([...next]));
+        return { mutedIds: next };
+      });
+    },
+
+    unmuteConversation(conversationId) {
+      set((s) => {
+        const next = new Set(s.mutedIds);
+        next.delete(conversationId);
+        localStorage.setItem("deco_muted", JSON.stringify([...next]));
+        return { mutedIds: next };
+      });
+    },
 
     setActiveConversation(id) {
       set({ activeConversationId: id });
@@ -787,7 +813,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
 
           const msg = await hydrateMessage(rawMsg, conversation);
           const currentUserId = useAuthStore.getState().user?.id;
+          const isMuted = get().mutedIds.has(msg.conversationId);
           const shouldNotify =
+            !isMuted &&
             msg.senderId !== currentUserId &&
             (state.activeConversationId !== msg.conversationId || typeof document !== "undefined" && document.hidden);
 
@@ -808,7 +836,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
                       lastMessage: msg,
                       updatedAt: msg.sentAt,
                       unreadCount:
-                        msg.senderId !== currentUserId && s.activeConversationId !== msg.conversationId
+                        !s.mutedIds.has(msg.conversationId) && msg.senderId !== currentUserId && s.activeConversationId !== msg.conversationId
                           ? c.unreadCount + 1
                           : c.unreadCount,
                     }
