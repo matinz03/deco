@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import { format } from "date-fns";
 import type { Message } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
@@ -14,12 +14,14 @@ interface Props {
   message: Message;
   isSent: boolean;
   showAvatar: boolean;
+  isGrouped: boolean;
+  isLastInGroup: boolean;
   replyCount?: number;
   onReply?: (message: Message) => void;
   onOpenThread?: (message: Message) => void;
 }
 
-export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0, onReply, onOpenThread }: Props) {
+export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isLastInGroup, replyCount = 0, onReply, onOpenThread }: Props) {
   if (msg.isDeleted) return null;
 
   const text = getMessageText(msg);
@@ -45,6 +47,10 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
   const readers = getReadersForMessage(msg, conversation?.members, currentUserId);
   const readReceiptLabel = getReadReceiptLabel(msg, conversation?.type, readers);
   const readReceiptTitle = getReadReceiptTitle(readers);
+
+  const swipeX = useMotionValue(0);
+  const replyIconOpacity = useTransform(swipeX, [0, 30, 70], [0, 0.6, 1]);
+  const replyIconScale = useTransform(swipeX, [0, 30, 70], [0.5, 0.8, 1]);
 
   function openReactions() {
     const rect = reactionContainerRef.current?.getBoundingClientRect();
@@ -113,14 +119,37 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
 
   return (
     <>
-      <motion.div
+      <div
         data-message-id={msg.id}
-        className={`flex items-end gap-2 ${isSent ? "flex-row-reverse" : "flex-row"}`}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+        className={`relative ${isGrouped ? "mt-0.5" : "mt-3"}`}
         onContextMenu={handleContextMenu}
       >
+        {/* Reply icon revealed by swipe */}
+        <motion.div
+          className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full bg-muted"
+          style={{ opacity: replyIconOpacity, scale: replyIconScale }}
+          aria-hidden
+        >
+          <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+          </svg>
+        </motion.div>
+
+        <motion.div
+          className={`flex items-end gap-2 ${isSent ? "flex-row-reverse" : "flex-row"}`}
+          drag="x"
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={{ left: 0, right: 0.25 }}
+          dragMomentum={false}
+          style={{ x: swipeX }}
+          onDragEnd={(_, info) => {
+            if (info.offset.x > 55) onReply?.(msg);
+            swipeX.set(0);
+          }}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 400, damping: 30 }}
+        >
         {!isSent && (
           <div className="w-7 shrink-0">
             {showAvatar && <Avatar src={msg.sender?.avatarUrl} name={senderName} size="xs" />}
@@ -128,7 +157,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
         )}
 
         <div className={`group flex max-w-[65%] flex-col gap-1 ${isSent ? "items-end" : "items-start"}`}>
-          {!isSent && showAvatar && msg.sender && (
+          {!isSent && !isGrouped && msg.sender && (
             <span className="px-1 text-[11px] font-medium text-muted">{senderName}</span>
           )}
 
@@ -146,8 +175,10 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
 
           <div className="relative" ref={reactionContainerRef}>
             <motion.div
-              className={`relative cursor-pointer select-none rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                isSent ? "bubble-sent rounded-br-sm" : "bubble-received rounded-bl-sm shadow-sm"
+              className={`relative cursor-pointer select-none px-3.5 py-2 text-sm leading-relaxed ${
+                isSent
+                  ? `bubble-sent ${!isGrouped ? "rounded-2xl rounded-br-sm" : isLastInGroup ? "rounded-2xl rounded-br-sm rounded-tr-md" : "rounded-xl rounded-r-md"}`
+                  : `bubble-received shadow-sm ${!isGrouped ? "rounded-2xl rounded-bl-sm" : isLastInGroup ? "rounded-2xl rounded-bl-sm rounded-tl-md" : "rounded-xl rounded-l-md"}`
               }`}
               initial={{ scale: 0.92, opacity: 0, x: isSent ? 8 : -8 }}
               animate={{ scale: 1, opacity: 1, x: 0 }}
@@ -366,7 +397,8 @@ export function MessageBubble({ message: msg, isSent, showAvatar, replyCount = 0
             </span>
           )}
         </div>
-      </motion.div>
+        </motion.div>
+      </div>
 
       <AnimatePresence>
         {contextMenu && (

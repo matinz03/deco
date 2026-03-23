@@ -1,20 +1,41 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { isSameDay, isToday, isYesterday, format } from "date-fns";
 import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { usePreferencesStore } from "@/store/preferences";
 import { api } from "@/lib/api";
+import { Avatar } from "@/components/ui/Avatar";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ChatSkeleton } from "./ChatSkeleton";
 import { TypingIndicator } from "./TypingIndicator";
 import { ThreadPortal } from "./ThreadPortal";
+import type { Message } from "@deco/types";
 
 const VIRTUAL_THRESHOLD = 80;
+
+type ChatItem =
+  | { kind: "divider"; key: string; label: string }
+  | {
+      kind: "message";
+      key: string;
+      msg: Message;
+      isSent: boolean;
+      isGrouped: boolean;
+      isLastInGroup: boolean;
+      showAvatar: boolean;
+    };
+
+function formatDateLabel(date: Date): string {
+  if (isToday(date)) return "Today";
+  if (isYesterday(date)) return "Yesterday";
+  return format(date, "MMMM d, yyyy");
+}
 
 interface Props { conversationId: string; }
 
@@ -26,7 +47,7 @@ export function ChatPanel({ conversationId }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const [replyTo, setReplyTo] = useState<(typeof convMessages)[number] | null>(null);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [threadMessageId, setThreadMessageId] = useState<string | null>(null);
   const initialScrollDone = useRef(false);
   const lastScrollTop = useRef(0);
@@ -34,7 +55,6 @@ export function ChatPanel({ conversationId }: Props) {
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
   const typingUsers = typing[conversationId] ?? [];
-  const useVirtual = convMessages.length > VIRTUAL_THRESHOLD;
   const typingNames = (conversation?.members ?? [])
     .filter((member) => typingUsers.includes(member.userId) && member.userId !== user?.id)
     .map((member) => member.user?.displayName || member.user?.username || "Someone");
@@ -42,17 +62,53 @@ export function ChatPanel({ conversationId }: Props) {
     typingNames.length <= 1
       ? typingNames[0]
       : `${typingNames[0]} and ${typingNames.length - 1} ${typingNames.length - 1 === 1 ? "other" : "others"}`;
-  const replyCounts = convMessages.reduce<Record<string, number>>((acc, message) => {
-    if (message.replyToId) {
-      acc[message.replyToId] = (acc[message.replyToId] ?? 0) + 1;
-    }
+
+  const replyCounts = useMemo(() => convMessages.reduce<Record<string, number>>((acc, m) => {
+    if (m.replyToId) acc[m.replyToId] = (acc[m.replyToId] ?? 0) + 1;
     return acc;
-  }, {});
+  }, {}), [convMessages]);
+
+  // Build flat items array: date dividers + messages with grouping metadata
+  const items = useMemo<ChatItem[]>(() => {
+    const result: ChatItem[] = [];
+    for (let i = 0; i < convMessages.length; i++) {
+      const msg = convMessages[i]!;
+      const prevMsg = convMessages[i - 1];
+      const nextMsg = convMessages[i + 1];
+
+      const msgDate = new Date(msg.sentAt);
+      const prevDate = prevMsg ? new Date(prevMsg.sentAt) : null;
+
+      if (!prevDate || !isSameDay(msgDate, prevDate)) {
+        result.push({ kind: "divider", key: `divider-${msg.id}`, label: formatDateLabel(msgDate) });
+      }
+
+      const isSent = msg.senderId === user?.id;
+      const sameAsPrev = !!prevMsg && prevMsg.senderId === msg.senderId && !!prevDate && isSameDay(msgDate, prevDate);
+      const sameAsNext = !!nextMsg && nextMsg.senderId === msg.senderId && isSameDay(msgDate, new Date(nextMsg.sentAt));
+
+      const isGrouped = sameAsPrev;
+      const isLastInGroup = !sameAsNext;
+
+      result.push({
+        kind: "message",
+        key: msg.id,
+        msg,
+        isSent,
+        isGrouped,
+        isLastInGroup,
+        showAvatar: !isSent && isLastInGroup,
+      });
+    }
+    return result;
+  }, [convMessages, user?.id]);
+
+  const useVirtual = items.length > VIRTUAL_THRESHOLD;
 
   const virtualizer = useVirtualizer({
-    count: useVirtual ? convMessages.length : 0,
+    count: useVirtual ? items.length : 0,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 56,
+    estimateSize: (i) => items[i]?.kind === "divider" ? 40 : 56,
     overscan: 10,
   });
 
@@ -71,7 +127,6 @@ export function ChatPanel({ conversationId }: Props) {
     if (readReceipts) void api.messages.markRead(conversationId).catch(() => {});
   }, [conversationId, convMessages.length, markConversationRead, readReceipts]);
 
-  // Reset initial scroll flag when conversation changes
   useEffect(() => {
     initialScrollDone.current = false;
     setShowScrollBtn(false);
@@ -79,20 +134,15 @@ export function ChatPanel({ conversationId }: Props) {
     setThreadMessageId(null);
   }, [conversationId]);
 
-  // Scroll logic: instant jump on first load, smooth scroll on new messages
   useEffect(() => {
     if (loading || convMessages.length === 0) return;
     const el = scrollRef.current;
     if (!el) return;
-
     if (!initialScrollDone.current) {
-      // First render of this conversation — jump instantly to bottom
       initialScrollDone.current = true;
       el.scrollTop = el.scrollHeight;
       return;
     }
-
-    // Subsequent messages — smooth scroll only if already near bottom
     if (!showScrollBtn) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
@@ -119,6 +169,36 @@ export function ChatPanel({ conversationId }: Props) {
     element.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  function renderItem(item: ChatItem) {
+    if (item.kind === "divider") {
+      return (
+        <div key={item.key} className="flex items-center gap-3 py-3 px-2">
+          <div className="flex-1 h-px bg-border/50" />
+          <span className="text-[11px] font-medium text-muted shrink-0">{item.label}</span>
+          <div className="flex-1 h-px bg-border/50" />
+        </div>
+      );
+    }
+    return (
+      <MessageBubble
+        key={item.key}
+        message={item.msg}
+        isSent={item.isSent}
+        showAvatar={item.showAvatar}
+        isGrouped={item.isGrouped}
+        isLastInGroup={item.isLastInGroup}
+        replyCount={replyCounts[item.msg.id] ?? 0}
+        onReply={setReplyTo}
+        onOpenThread={(msg) => setThreadMessageId(msg.id)}
+      />
+    );
+  }
+
+  // Other member for empty state
+  const otherMember = conversation?.type === "direct"
+    ? conversation.members?.find((m) => m.userId !== user?.id)
+    : null;
+
   if (!conversation) {
     return (
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -131,37 +211,38 @@ export function ChatPanel({ conversationId }: Props) {
     <div className="flex flex-col h-full relative">
       <ChatHeader conversation={conversation} />
 
-      {/* Messages */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 chat-scroll px-4 py-4 flex flex-col gap-1"
+        className="flex-1 chat-scroll px-4 py-4 flex flex-col"
       >
         {loading ? (
           <ChatSkeleton />
         ) : convMessages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
-              <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
-              </svg>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+            <Avatar
+              src={otherMember?.user?.avatarUrl ?? conversation.avatarUrl}
+              name={conversation.name || "?"}
+              size="lg"
+            />
+            <div>
+              <p className="font-semibold">{conversation.name}</p>
+              <p className="mt-1 text-sm text-muted">
+                {conversation.type === "direct"
+                  ? `Say hi to ${otherMember?.user?.displayName || conversation.name}! 👋`
+                  : "No messages yet. Start the conversation!"}
+              </p>
             </div>
-            <p className="text-sm text-muted">
-              This is the beginning of your conversation with <strong className="text-foreground">{conversation.name}</strong>.
-            </p>
           </div>
         ) : (
           <>
             {useVirtual ? (
               <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
                 {virtualizer.getVirtualItems().map((virtualItem) => {
-                  const msg = convMessages[virtualItem.index]!;
-                  const isSent = msg.senderId === user?.id;
-                  const prevMsg = convMessages[virtualItem.index - 1];
-                  const showAvatar = !isSent && prevMsg?.senderId !== msg.senderId;
+                  const item = items[virtualItem.index]!;
                   return (
                     <div
-                      key={msg.id}
+                      key={item.key}
                       style={{
                         position: "absolute",
                         top: 0,
@@ -172,37 +253,15 @@ export function ChatPanel({ conversationId }: Props) {
                       ref={virtualizer.measureElement}
                       data-index={virtualItem.index}
                     >
-                      <MessageBubble
-                        message={msg}
-                        isSent={isSent}
-                        showAvatar={showAvatar}
-                        replyCount={replyCounts[msg.id] ?? 0}
-                        onReply={setReplyTo}
-                        onOpenThread={(message) => setThreadMessageId(message.id)}
-                      />
+                      {renderItem(item)}
                     </div>
                   );
                 })}
               </div>
             ) : (
-              convMessages.map((msg, i) => {
-                const isSent = msg.senderId === user?.id;
-                const prevMsg = convMessages[i - 1];
-                const showAvatar = !isSent && prevMsg?.senderId !== msg.senderId;
-                return (
-                  <MessageBubble
-                    key={msg.id}
-                    message={msg}
-                    isSent={isSent}
-                    showAvatar={showAvatar}
-                    replyCount={replyCounts[msg.id] ?? 0}
-                    onReply={setReplyTo}
-                    onOpenThread={(message) => setThreadMessageId(message.id)}
-                  />
-                );
-              })
+              items.map((item) => renderItem(item))
             )}
-            {/* Scroll-to-bottom button — sticky inside scroll area */}
+
             <AnimatePresence>
               {showScrollBtn && (
                 <motion.button
