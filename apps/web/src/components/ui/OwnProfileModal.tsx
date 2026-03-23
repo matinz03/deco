@@ -100,6 +100,15 @@ export function OwnProfileModal({ open, onClose }: Props) {
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 40, opacity: 0, scale: 0.98 }}
             transition={{ type: "spring", stiffness: 400, damping: 32 }}
+            drag="y"
+            dragDirectionLock
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0, bottom: 0.22 }}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 120 || info.velocity.y > 700) {
+                onClose();
+              }
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-center pb-1 pt-3 sm:hidden">
