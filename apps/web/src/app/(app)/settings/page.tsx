@@ -95,7 +95,7 @@ export default function SettingsPage() {
     <div className="overflow-y-auto h-full w-full"><div className="max-w-xl flex flex-col px-4 pt-10 pb-24 md:pb-10 mx-auto">
       <h1 className="mb-8 text-xl font-semibold">Settings</h1>
 
-      <section className="mb-8">
+      <section id="appearance" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Appearance</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
           <div className="flex items-center justify-between px-4 py-3">
@@ -122,7 +122,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section id="background" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Animated Background</h2>
         <p className="mb-3 text-xs text-muted">Choose what floats around on the login screen.</p>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
@@ -148,7 +148,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section id="profile" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Profile</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
           <div className="flex items-center gap-4 border-b border-sidebar px-4 py-4">
@@ -290,7 +290,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section id="encryption" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Encryption Backup</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
           <div className="border-b border-sidebar px-4 py-4">
@@ -434,7 +434,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section id="notifications" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Notifications</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50 divide-y divide-sidebar">
           <SettingRow label="Push notifications" description="Get notified about new messages" />
@@ -442,7 +442,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section id="privacy" className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Privacy</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50 divide-y divide-sidebar">
           <SettingRow label="Read receipts" description="Let others see when you've read messages" />
@@ -450,7 +450,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section>
+      <section id="account">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Account</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
           <button
