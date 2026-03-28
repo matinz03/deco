@@ -8,7 +8,6 @@ import type { ContactAttachment, LocationAttachment, Message } from "@deco/types
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
-import { MessageContextMenu } from "./MessageContextMenu";
 
 const ReactionPicker = dynamic(
   () => import("./ReactionPicker").then((mod) => mod.ReactionPicker),
@@ -17,6 +16,11 @@ const ReactionPicker = dynamic(
 
 const ImageLightbox = dynamic(
   () => import("./ImageLightbox").then((mod) => mod.ImageLightbox),
+  { ssr: false }
+);
+
+const MessageContextMenu = dynamic(
+  () => import("./MessageContextMenu").then((mod) => mod.MessageContextMenu),
   { ssr: false }
 );
 
