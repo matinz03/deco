@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { StickerPack } from "@deco/types";
 import { api } from "@/lib/api";
 
 export default function StickersPage() {
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const [packs, setPacks] = useState<StickerPack[]>([]);
   const [activePackId, setActivePackId] = useState("");
   const [packSearch, setPackSearch] = useState("");
@@ -45,6 +47,16 @@ export default function StickersPage() {
       ),
     [activePack?.stickers, stickerSearch]
   );
+  const stickers = filteredStickers;
+  const shouldVirtualize = stickers.length > 60;
+  const columnCount = 4;
+  const rowCount = Math.ceil(stickers.length / columnCount);
+  const rowVirtualizer = useVirtualizer({
+    count: shouldVirtualize ? rowCount : 0,
+    getScrollElement: () => gridRef.current,
+    estimateSize: () => 190,
+    overscan: 4,
+  });
 
   async function loadPacks(nextActivePackId?: string) {
     setLoading(true);
@@ -229,7 +241,7 @@ export default function StickersPage() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+          <div ref={gridRef} className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
             {loading ? (
               <p className="text-sm text-muted">Loading packs...</p>
             ) : !activePack ? (
@@ -266,20 +278,30 @@ export default function StickersPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                  {filteredStickers.map((sticker) => (
-                    <div key={sticker.id} className="rounded-2xl border border-sidebar bg-background/40 p-2 sm:p-3">
-                      <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface">
-                        {sticker.format === "video" ? (
-                          <video src={sticker.assetUrl} muted loop autoPlay playsInline className="max-h-full max-w-full rounded-xl object-contain" />
-                        ) : (
-                          <img src={sticker.assetUrl} alt={sticker.name} className="max-h-full max-w-full rounded-xl object-contain" loading="lazy" />
-                        )}
-                      </div>
-                      <p className="mt-2 truncate text-xs font-medium sm:text-sm">{sticker.emoji} {sticker.name}</p>
-                    </div>
-                  ))}
-                </div>
+                {shouldVirtualize ? (
+                  <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const rowStickers = stickers.slice(virtualRow.index * columnCount, virtualRow.index * columnCount + columnCount);
+                      return (
+                        <div
+                          key={virtualRow.key}
+                          className="absolute left-0 top-0 grid w-full grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4"
+                          style={{ transform: `translateY(${virtualRow.start}px)` }}
+                        >
+                          {rowStickers.map((sticker) => (
+                            <StickerCard key={sticker.id} sticker={sticker} />
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                    {stickers.map((sticker) => (
+                      <StickerCard key={sticker.id} sticker={sticker} />
+                    ))}
+                  </div>
+                )}
                 {filteredStickers.length === 0 && (
                   <p className="mt-4 rounded-2xl border border-dashed border-sidebar px-4 py-6 text-center text-sm text-muted">
                     No stickers match that search.
@@ -290,6 +312,21 @@ export default function StickersPage() {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function StickerCard({ sticker }: { sticker: NonNullable<StickerPack["stickers"]>[number] }) {
+  return (
+    <div className="rounded-2xl border border-sidebar bg-background/40 p-2 sm:p-3">
+      <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface">
+        {sticker.format === "video" ? (
+          <video src={sticker.assetUrl} muted loop autoPlay playsInline className="max-h-full max-w-full rounded-xl object-contain" />
+        ) : (
+          <img src={sticker.assetUrl} alt={sticker.name} className="max-h-full max-w-full rounded-xl object-contain" loading="lazy" />
+        )}
+      </div>
+      <p className="mt-2 truncate text-xs font-medium sm:text-sm">{sticker.emoji} {sticker.name}</p>
     </div>
   );
 }
