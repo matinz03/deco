@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -47,6 +47,7 @@ export function ConversationList() {
   const { conversations, fetchConversations, presence } = useConversationStore();
   const currentUserId = useAuthStore((s) => s.user?.id);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -54,11 +55,15 @@ export function ConversationList() {
     void fetchConversations().finally(() => setLoading(false));
   }, [fetchConversations]);
 
-  const filtered = conversations
-    .filter((c) => (isGroupsTab ? c.type === "group" || c.type === "channel" : c.type === "direct" || c.type === "saved"))
-    .filter((c) =>
-      (c.name || "Unknown conversation").toLowerCase().includes(search.toLowerCase())
-    );
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
+
+  const filtered = useMemo(
+    () =>
+      conversations
+        .filter((c) => (isGroupsTab ? c.type === "group" || c.type === "channel" : c.type === "direct" || c.type === "saved"))
+        .filter((c) => (c.name || "Unknown conversation").toLowerCase().includes(normalizedSearch)),
+    [conversations, isGroupsTab, normalizedSearch]
+  );
 
   return (
     <div className="flex flex-col h-full">
