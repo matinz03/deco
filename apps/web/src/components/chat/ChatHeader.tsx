@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { Conversation, LeadershipStatus, Member, Message, User } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
