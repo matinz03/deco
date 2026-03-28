@@ -1,7 +1,6 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -72,6 +71,7 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
   const [saving, setSaving] = useState(false);
   const [managingMembers, setManagingMembers] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [portalMounted, setPortalMounted] = useState(false);
@@ -130,7 +130,8 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
   }, [settingsOpen, liveConversation.id, liveConversation.type]);
 
   useEffect(() => {
-    if (!settingsOpen || !searchQuery.trim() || searchQuery.trim().length < 2) {
+    const normalizedQuery = deferredSearchQuery.trim();
+    if (!settingsOpen || normalizedQuery.length < 2) {
       setSearchResults([]);
       return;
     }
@@ -138,7 +139,7 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
     const timer = window.setTimeout(() => {
       setSearching(true);
       void api.users
-        .search(searchQuery.trim())
+        .search(normalizedQuery)
         .then((users) => {
           if (!cancelled) setSearchResults(users);
         })
@@ -153,7 +154,7 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [settingsOpen, searchQuery]);
+  }, [deferredSearchQuery, settingsOpen]);
 
   const members = liveConversation.members ?? [];
   const memberIds = useMemo(() => new Set(members.map((member) => member.userId)), [members]);
