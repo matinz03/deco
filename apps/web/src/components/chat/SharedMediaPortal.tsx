@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict, format, isToday, isYesterday } from "date-fns";
@@ -19,6 +19,7 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<SharedTab>("media");
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
 
   useEffect(() => setMounted(true), []);
 
@@ -69,7 +70,7 @@ export function SharedMediaPortal({ open, title, messages, onClose }: Props) {
     [messages]
   );
 
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = deferredQuery.trim().toLowerCase();
 
   const filteredMediaMessages = useMemo(
     () =>
