@@ -17,6 +17,7 @@ import type {
   StickerPack,
   AddStickerInput,
   CreateStickerPackInput,
+  UserRestriction,
 } from "@deco/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -62,6 +63,11 @@ export function mapUser(r: any): User {
     avatarUrl: resolveAssetUrl(r.avatar_url ?? r.avatarUrl ?? ""),
     publicKey: r.public_key ?? r.publicKey ?? "",
     bio: r.bio ?? "",
+    isAdmin: Boolean(r.is_admin ?? r.isAdmin ?? false),
+    isOwner: Boolean(r.is_owner ?? r.isOwner ?? false),
+    restrictedActions: Array.isArray(r.restricted_actions ?? r.restrictedActions)
+      ? (r.restricted_actions ?? r.restrictedActions) as UserRestriction[]
+      : [],
     lastSeenAt: r.last_seen_at ?? r.lastSeenAt ?? "",
     createdAt: r.created_at ?? r.createdAt ?? "",
   };
@@ -590,6 +596,40 @@ export const api = {
       return mapUser(raw);
     },
 
+    listAdminUsers: async () => {
+      const raw = await request<unknown[]>("/api/v1/users/admin");
+      return raw.map(mapUser);
+    },
+
+    updateAdminUser: async (
+      userId: string,
+      body: {
+        displayName?: string;
+        username?: string;
+        avatarUrl?: string;
+        isAdmin?: boolean;
+        restrictedActions?: UserRestriction[];
+      }
+    ) => {
+      const raw = await request<unknown>(`/api/v1/users/admin/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          display_name: body.displayName,
+          username: body.username,
+          avatar_url: body.avatarUrl,
+          is_admin: body.isAdmin,
+          restricted_actions: body.restrictedActions,
+        }),
+      });
+      return mapUser(raw);
+    },
+
+    deleteAdminUser: async (userId: string) => {
+      await request(`/api/v1/users/admin/${userId}`, {
+        method: "DELETE",
+      });
+    },
+
     updateMe: async (body: {
       displayName?: string;
       bio?: string;
@@ -708,6 +748,19 @@ export const api = {
       return mapStickerPack(raw);
     },
 
+    deletePack: async (packId: string) => {
+      await request(`/api/v1/stickers/packs/${packId}`, {
+        method: "DELETE",
+      });
+    },
+
+    clonePack: async (packId: string) => {
+      const raw = await request<unknown>(`/api/v1/stickers/packs/${packId}/clone`, {
+        method: "POST",
+      });
+      return mapStickerPack(raw);
+    },
+
     addSticker: async (packId: string, body: AddStickerInput) => {
       const raw = await request<unknown>(`/api/v1/stickers/packs/${packId}/stickers`, {
         method: "POST",
@@ -723,6 +776,12 @@ export const api = {
         }),
       });
       return mapSticker(raw);
+    },
+
+    deleteSticker: async (packId: string, stickerId: string) => {
+      await request(`/api/v1/stickers/packs/${packId}/stickers/${stickerId}`, {
+        method: "DELETE",
+      });
     },
 
     importTelegramPack: async (input: string) => {

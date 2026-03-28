@@ -57,6 +57,14 @@ func (h *StickerHandler) GetPack(w http.ResponseWriter, r *http.Request) {
 
 func (h *StickerHandler) CreatePack(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "manage_stickers"); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusForbidden, "your account cannot manage stickers")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
 	var req struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
@@ -94,6 +102,14 @@ func (h *StickerHandler) CreatePack(w http.ResponseWriter, r *http.Request) {
 func (h *StickerHandler) AddSticker(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 	packID := chi.URLParam(r, "packID")
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "manage_stickers"); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusForbidden, "your account cannot manage stickers")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
 	var req struct {
 		Name                 string `json:"name"`
 		Emoji                string `json:"emoji"`
@@ -143,8 +159,101 @@ func (h *StickerHandler) AddSticker(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, sticker)
 }
 
+func (h *StickerHandler) DeleteSticker(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r)
+	packID := chi.URLParam(r, "packID")
+	stickerID := chi.URLParam(r, "stickerID")
+
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "manage_stickers"); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusForbidden, "your account cannot manage stickers")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
+
+	if !h.ownsPack(r.Context(), userID, packID) {
+		respondError(w, http.StatusForbidden, "you can't edit this sticker pack")
+		return
+	}
+
+	if err := h.deleteSticker(r.Context(), packID, stickerID); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusNotFound, "sticker not found")
+			return
+		}
+		h.logger.Error("failed to delete sticker", zap.Error(err), zap.String("pack_id", packID), zap.String("sticker_id", stickerID))
+		respondError(w, http.StatusInternalServerError, "failed to delete sticker")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (h *StickerHandler) DeletePack(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r)
+	packID := chi.URLParam(r, "packID")
+
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "manage_stickers"); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusForbidden, "your account cannot manage stickers")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
+
+	if err := h.deletePack(r.Context(), userID, packID); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusNotFound, "sticker pack not found")
+			return
+		}
+		h.logger.Error("failed to delete sticker pack", zap.Error(err), zap.String("pack_id", packID), zap.String("user_id", userID))
+		respondError(w, http.StatusInternalServerError, "failed to delete sticker pack")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (h *StickerHandler) ClonePack(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r)
+	packID := chi.URLParam(r, "packID")
+
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "manage_stickers"); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusForbidden, "your account cannot manage stickers")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
+
+	pack, err := h.clonePack(r.Context(), userID, packID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusNotFound, "sticker pack not found")
+			return
+		}
+		h.logger.Error("failed to clone sticker pack", zap.Error(err), zap.String("pack_id", packID), zap.String("user_id", userID))
+		respondError(w, http.StatusInternalServerError, "failed to clone sticker pack")
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, pack)
+}
+
 func (h *StickerHandler) ImportTelegramPack(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "manage_stickers"); err != nil {
+		if err == pgx.ErrNoRows {
+			respondError(w, http.StatusForbidden, "your account cannot manage stickers")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
 	if h.telegram == nil {
 		respondError(w, http.StatusServiceUnavailable, "telegram import is not configured")
 		return
@@ -391,6 +500,165 @@ func (h *StickerHandler) canEditPack(ctx context.Context, userID, packID string)
 		WHERE id = $1 AND owner_id = $2
 	`, packID, userID).Scan(&source)
 	return err == nil && source == models.StickerPackSourceDeco
+}
+
+func (h *StickerHandler) ownsPack(ctx context.Context, userID, packID string) bool {
+	var ownerID string
+	err := h.pool.QueryRow(ctx, `
+		SELECT owner_id
+		FROM sticker_packs
+		WHERE id = $1
+	`, packID).Scan(&ownerID)
+	return err == nil && ownerID == userID
+}
+
+func (h *StickerHandler) deleteSticker(ctx context.Context, packID, stickerID string) error {
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var currentCoverID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT cover_sticker_id
+		FROM sticker_packs
+		WHERE id = $1
+	`, packID).Scan(&currentCoverID); err != nil {
+		return err
+	}
+
+	var deletedID string
+	if err := tx.QueryRow(ctx, `
+		DELETE FROM stickers
+		WHERE id = $1 AND pack_id = $2
+		RETURNING id
+	`, stickerID, packID).Scan(&deletedID); err != nil {
+		return err
+	}
+
+	nextCoverID := currentCoverID
+	if currentCoverID == nil || *currentCoverID == deletedID {
+		nextCoverID = nil
+		if err := tx.QueryRow(ctx, `
+			SELECT id
+			FROM stickers
+			WHERE pack_id = $1
+			ORDER BY sort_order ASC, created_at ASC
+			LIMIT 1
+		`, packID).Scan(&nextCoverID); err != nil && err != pgx.ErrNoRows {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sticker_packs
+		SET cover_sticker_id = $2,
+		    updated_at = NOW()
+		WHERE id = $1
+	`, packID, nextCoverID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (h *StickerHandler) deletePack(ctx context.Context, userID, packID string) error {
+	var deletedID string
+	return h.pool.QueryRow(ctx, `
+		DELETE FROM sticker_packs
+		WHERE id = $1 AND owner_id = $2
+		RETURNING id
+	`, packID, userID).Scan(&deletedID)
+}
+
+func (h *StickerHandler) clonePack(ctx context.Context, userID, packID string) (*models.StickerPack, error) {
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var source models.StickerPack
+	if err := tx.QueryRow(ctx, `
+		SELECT id, owner_id, name, slug, title, description, source, telegram_set_name, cover_sticker_id, created_at, updated_at
+		FROM sticker_packs
+		WHERE id = $1
+	`, packID).Scan(
+		&source.ID, &source.OwnerID, &source.Name, &source.Slug, &source.Title, &source.Description,
+		&source.Source, &source.TelegramSetName, &source.CoverStickerID, &source.CreatedAt, &source.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	if source.OwnerID == userID {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return h.loadPackByID(ctx, userID, packID)
+	}
+
+	var cloned models.StickerPack
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO sticker_packs (owner_id, name, slug, title, description, source)
+		VALUES ($1, $2, $3, $4, $5, 'deco')
+		RETURNING id, owner_id, name, slug, title, description, source, telegram_set_name, cover_sticker_id, created_at, updated_at
+	`, userID, source.Name, buildPackSlug(source.Title), source.Title, source.Description).Scan(
+		&cloned.ID, &cloned.OwnerID, &cloned.Name, &cloned.Slug, &cloned.Title, &cloned.Description,
+		&cloned.Source, &cloned.TelegramSetName, &cloned.CoverStickerID, &cloned.CreatedAt, &cloned.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT name, emoji, asset_url, thumbnail_url, mime_type, format, width, height
+		FROM stickers
+		WHERE pack_id = $1
+		ORDER BY sort_order ASC, created_at ASC
+	`, source.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	index := 0
+	for rows.Next() {
+		var sticker models.Sticker
+		if err := rows.Scan(
+			&sticker.Name, &sticker.Emoji, &sticker.AssetURL, &sticker.ThumbnailURL,
+			&sticker.MimeType, &sticker.Format, &sticker.Width, &sticker.Height,
+		); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO stickers (
+				pack_id, name, emoji, asset_url, thumbnail_url, mime_type, format, width, height, sort_order
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`, cloned.ID, sticker.Name, sticker.Emoji, sticker.AssetURL, sticker.ThumbnailURL, sticker.MimeType, sticker.Format, sticker.Width, sticker.Height, index); err != nil {
+			return nil, err
+		}
+		index++
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sticker_packs
+		SET cover_sticker_id = (
+			SELECT id
+			FROM stickers
+			WHERE pack_id = $1
+			ORDER BY sort_order ASC, created_at ASC
+			LIMIT 1
+		)
+		WHERE id = $1
+	`, cloned.ID); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return h.loadPackByID(ctx, userID, cloned.ID)
 }
 
 func (h *StickerHandler) insertSticker(ctx context.Context, packID string, input insertStickerInput) (*models.Sticker, error) {

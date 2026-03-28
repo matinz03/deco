@@ -2,11 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useSearchParams } from "next/navigation";
 import type { StickerPack } from "@deco/types";
 import { api } from "@/lib/api";
+import { useAuthStore } from "@/store/auth";
 
 export default function StickersPage() {
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const searchParams = useSearchParams();
+  const userId = useAuthStore((s) => s.user?.id);
   const [packs, setPacks] = useState<StickerPack[]>([]);
   const [activePackId, setActivePackId] = useState("");
   const [packSearch, setPackSearch] = useState("");
@@ -17,13 +21,22 @@ export default function StickersPage() {
   const [createTitle, setCreateTitle] = useState("");
   const [createDescription, setCreateDescription] = useState("");
   const [telegramInput, setTelegramInput] = useState("");
+  const [sharedPackInput, setSharedPackInput] = useState("");
   const [stickerName, setStickerName] = useState("");
   const [stickerEmoji, setStickerEmoji] = useState(":)");
   const [stickerFile, setStickerFile] = useState<File | null>(null);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
 
   useEffect(() => {
     void loadPacks();
   }, []);
+
+  useEffect(() => {
+    const shared = extractSharedPackId(searchParams.get("share") ?? "");
+    if (shared) {
+      setSharedPackInput(shared);
+    }
+  }, [searchParams]);
 
   const activePack = useMemo(
     () => packs.find((pack) => pack.id === activePackId) ?? packs[0],
@@ -47,6 +60,7 @@ export default function StickersPage() {
       ),
     [activePack?.stickers, stickerSearch]
   );
+  const isOwner = Boolean(activePack && activePack.ownerId === userId);
   const stickers = filteredStickers;
   const shouldVirtualize = stickers.length > 60;
   const columnCount = 4;
@@ -111,6 +125,26 @@ export default function StickersPage() {
     }
   }
 
+  async function handleImportSharedPack(event: React.FormEvent) {
+    event.preventDefault();
+    const packId = extractSharedPackId(sharedPackInput);
+    if (!packId) {
+      setError("Paste a valid Deco pack ID or share link.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const pack = await api.stickers.clonePack(packId);
+      setSharedPackInput("");
+      await loadPacks(pack.id);
+    } catch {
+      setError("Couldn't add that shared Deco pack.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleAddSticker(event: React.FormEvent) {
     event.preventDefault();
     if (!activePack || !stickerFile || !stickerEmoji.trim()) return;
@@ -134,6 +168,42 @@ export default function StickersPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleDeleteSticker(stickerId: string) {
+    if (!activePack || !window.confirm("Delete this sticker from the database?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.stickers.deleteSticker(activePack.id, stickerId);
+      await loadPacks(activePack.id);
+    } catch {
+      setError("Couldn't delete that sticker.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeletePack() {
+    if (!activePack || !window.confirm(`Delete "${activePack.title}" and all of its stickers?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.stickers.deletePack(activePack.id);
+      await loadPacks();
+    } catch {
+      setError("Couldn't delete that sticker pack.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCopyShareLink() {
+    if (!activePack) return;
+    const shareLink = `${window.location.origin}${window.location.pathname}?share=${activePack.id}`;
+    await navigator.clipboard.writeText(shareLink);
+    setCopiedShareLink(true);
+    window.setTimeout(() => setCopiedShareLink(false), 2000);
   }
 
   return (
@@ -183,6 +253,20 @@ export default function StickersPage() {
             </button>
           </form>
 
+          <form onSubmit={handleImportSharedPack} className="rounded-3xl border border-sidebar bg-surface p-5">
+            <h2 className="text-base font-semibold">Add shared Deco pack</h2>
+            <p className="mt-1 text-xs text-muted">Paste a Deco pack ID or share link from another creator to copy it into your own studio.</p>
+            <input
+              value={sharedPackInput}
+              onChange={(event) => setSharedPackInput(event.target.value)}
+              className="input mt-4"
+              placeholder="deco pack id or share link"
+            />
+            <button type="submit" disabled={busy || !sharedPackInput.trim()} className="btn-primary mt-4 px-4 py-2 text-sm disabled:opacity-60">
+              {busy ? "Adding..." : "Add to my studio"}
+            </button>
+          </form>
+
           <form onSubmit={handleAddSticker} className="rounded-3xl border border-sidebar bg-surface p-5">
             <h2 className="text-base font-semibold">Add sticker to active pack</h2>
             <p className="mt-1 text-xs text-muted">
@@ -205,11 +289,14 @@ export default function StickersPage() {
             </div>
             <button
               type="submit"
-              disabled={busy || !activePack || activePack.source !== "deco" || !stickerFile || !stickerEmoji.trim()}
+              disabled={busy || !activePack || !isOwner || activePack.source !== "deco" || !stickerFile || !stickerEmoji.trim()}
               className="btn-primary mt-4 px-4 py-2 text-sm disabled:opacity-60"
             >
               {busy ? "Uploading..." : "Add sticker"}
             </button>
+            {activePack && !isOwner && (
+              <p className="mt-3 text-xs text-muted">Only the creator of this sticker set can add or delete stickers from the database.</p>
+            )}
           </form>
 
           {error && <p className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</p>}
@@ -267,6 +354,34 @@ export default function StickersPage() {
                       </p>
                     </div>
                   </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyShareLink()}
+                      className="rounded-full border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                    >
+                      {copiedShareLink ? "Share link copied" : "Copy share link"}
+                    </button>
+                    {!isOwner && (
+                      <button
+                        type="button"
+                        onClick={() => setSharedPackInput(activePack.id)}
+                        className="rounded-full border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                      >
+                        Copy pack ID
+                      </button>
+                    )}
+                    {isOwner && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeletePack()}
+                        disabled={busy}
+                        className="rounded-full border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-60"
+                      >
+                        Delete pack
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mb-4">
@@ -289,7 +404,7 @@ export default function StickersPage() {
                           style={{ transform: `translateY(${virtualRow.start}px)` }}
                         >
                           {rowStickers.map((sticker) => (
-                            <StickerCard key={sticker.id} sticker={sticker} />
+                            <StickerCard key={sticker.id} sticker={sticker} canDelete={isOwner} onDelete={handleDeleteSticker} />
                           ))}
                         </div>
                       );
@@ -298,7 +413,7 @@ export default function StickersPage() {
                 ) : (
                   <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                     {stickers.map((sticker) => (
-                      <StickerCard key={sticker.id} sticker={sticker} />
+                      <StickerCard key={sticker.id} sticker={sticker} canDelete={isOwner} onDelete={handleDeleteSticker} />
                     ))}
                   </div>
                 )}
@@ -316,7 +431,15 @@ export default function StickersPage() {
   );
 }
 
-function StickerCard({ sticker }: { sticker: NonNullable<StickerPack["stickers"]>[number] }) {
+function StickerCard({
+  sticker,
+  canDelete,
+  onDelete,
+}: {
+  sticker: NonNullable<StickerPack["stickers"]>[number];
+  canDelete: boolean;
+  onDelete: (stickerId: string) => void;
+}) {
   return (
     <div className="rounded-2xl border border-sidebar bg-background/40 p-2 sm:p-3">
       <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface">
@@ -326,7 +449,25 @@ function StickerCard({ sticker }: { sticker: NonNullable<StickerPack["stickers"]
           <img src={sticker.assetUrl} alt={sticker.name} className="max-h-full max-w-full rounded-xl object-contain" loading="lazy" />
         )}
       </div>
-      <p className="mt-2 truncate text-xs font-medium sm:text-sm">{sticker.emoji} {sticker.name}</p>
+      <div className="mt-2 flex items-start justify-between gap-2">
+        <p className="min-w-0 truncate text-xs font-medium sm:text-sm">{sticker.emoji} {sticker.name}</p>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(sticker.id)}
+            className="shrink-0 rounded-full border border-red-500/30 px-2 py-0.5 text-[11px] font-medium text-red-400 transition-colors hover:bg-red-500/10"
+          >
+            Delete
+          </button>
+        )}
+      </div>
     </div>
   );
+}
+
+function extractSharedPackId(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  const match = trimmed.match(/[0-9a-fA-F-]{36}/);
+  return match?.[0] ?? "";
 }

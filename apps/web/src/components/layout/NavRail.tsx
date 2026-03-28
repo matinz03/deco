@@ -78,6 +78,18 @@ export function NavRail({
         </svg>
       ),
     },
+    ...(user?.isAdmin
+      ? [{
+          href: "/manage",
+          label: "Manage",
+          icon: (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25h16.5M3.75 12h16.5m-16.5 6.75h16.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 5.25v13.5m9-13.5v13.5" />
+            </svg>
+          ),
+        }]
+      : []),
     {
       href: "/settings",
       label: "Settings",

@@ -15,6 +15,8 @@ CREATE TABLE users (
   public_key    TEXT NOT NULL,              -- X25519 public key for E2E
   avatar_url    TEXT NOT NULL DEFAULT '',
   bio           TEXT NOT NULL DEFAULT '',
+  is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
+  restricted_actions TEXT[] NOT NULL DEFAULT '{}',
   last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()

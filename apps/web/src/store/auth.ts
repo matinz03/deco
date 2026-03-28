@@ -213,8 +213,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    const user: User = JSON.parse(userRaw);
-    set({ token, user });
+    const storedUser: User = JSON.parse(userRaw);
+    set({ token, user: storedUser });
+    let user = storedUser;
+    try {
+      user = await api.users.getMe();
+      persistAuth(token, user);
+      set({ token, user });
+    } catch {
+      // Keep the stored session if the refresh fails so the user is not logged out unnecessarily.
+    }
     wsClient.connect(resolveWebSocketURL());
     await syncKeyBackupState(user, "hydrate", set);
     set({ isHydrated: true });
@@ -410,8 +418,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     wsClient.disconnect();
     persistAuth(session.token, session.user);
     set({ token: session.token, user: session.user });
+    let activeUser = session.user;
+    try {
+      activeUser = await api.users.getMe();
+      persistAuth(session.token, activeUser);
+      set({ token: session.token, user: activeUser });
+    } catch {
+      // Fall back to the saved session data if the refresh request fails.
+    }
     wsClient.connect(resolveWebSocketURL());
-    await syncKeyBackupState(session.user, "login", set);
+    await syncKeyBackupState(activeUser, "login", set);
     await refreshConversationState();
     return true;
   },

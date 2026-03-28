@@ -149,6 +149,15 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "conversationID")
 	userID := middleware.GetUserID(r)
 
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "send_messages"); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusForbidden, "your account cannot send messages")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
+
 	var count int
 	h.pool.QueryRow(r.Context(), `
 		SELECT COUNT(*) FROM members WHERE conversation_id = $1 AND user_id = $2
