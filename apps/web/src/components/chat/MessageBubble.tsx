@@ -3,13 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import { format } from "date-fns";
+import dynamic from "next/dynamic";
 import type { ContactAttachment, LocationAttachment, Message } from "@deco/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
-import { ReactionPicker } from "./ReactionPicker";
 import { MessageContextMenu } from "./MessageContextMenu";
-import { ImageLightbox } from "./ImageLightbox";
+
+const ReactionPicker = dynamic(
+  () => import("./ReactionPicker").then((mod) => mod.ReactionPicker),
+  { ssr: false }
+);
+
+const ImageLightbox = dynamic(
+  () => import("./ImageLightbox").then((mod) => mod.ImageLightbox),
+  { ssr: false }
+);
 
 interface Props {
   message: Message;
