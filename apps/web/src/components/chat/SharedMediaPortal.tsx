@@ -417,6 +417,13 @@ function LocationRow({ message }: { message: Message }) {
       >
         Open
       </a>
+      <button
+        type="button"
+        className="shrink-0 rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+        onClick={() => void navigator.clipboard.writeText(`${location.latitude}, ${location.longitude}`)}
+      >
+        Copy coords
+      </button>
     </div>
   );
 }
@@ -453,6 +460,13 @@ function ContactRow({ message }: { message: Message }) {
             Email
           </a>
         )}
+        <button
+          type="button"
+          className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+          onClick={() => void navigator.clipboard.writeText(buildContactClipboardText(contact))}
+        >
+          Copy
+        </button>
       </div>
     </div>
   );
@@ -580,4 +594,8 @@ function getInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
+}
+
+function buildContactClipboardText(contact: ContactAttachment) {
+  return [contact.name, contact.phone, contact.email].filter(Boolean).join("\n");
 }

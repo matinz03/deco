@@ -404,6 +404,16 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   >
                     Open in maps
                   </a>
+                  <button
+                    type="button"
+                    className="ml-2 inline-flex rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void navigator.clipboard.writeText(`${location.latitude}, ${location.longitude}`);
+                    }}
+                  >
+                    Copy coords
+                  </button>
                 </div>
               )}
               {msg.type === "contact" && contact && (
@@ -435,6 +445,16 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                         Email
                       </a>
                     )}
+                    <button
+                      type="button"
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void navigator.clipboard.writeText(buildContactClipboardText(contact));
+                      }}
+                    >
+                      Copy
+                    </button>
                   </div>
                 </div>
               )}
@@ -733,6 +753,10 @@ function getReplyPreviewText(message: Message) {
   if (message.type === "contact") return "Shared contact";
   if (message.type === "sticker") return `${message.sticker?.emoji ?? "🙂"} Sticker`;
   return message.decryptedContent || message.mediaName || getMessageText(message) || "Reply";
+}
+
+function buildContactClipboardText(contact: ContactAttachment) {
+  return [contact.name, contact.phone, contact.email].filter(Boolean).join("\n");
 }
 
 function getReadersForMessage(message: Message, members?: { userId: string; user?: { displayName: string; username: string }; lastReadAt: string }[], currentUserId?: string | null) {
