@@ -173,7 +173,7 @@ export function ChatPanel({ conversationId }: Props) {
     } else {
       setShowScrollBtn(false);
     }
-    if (el.scrollTop < 150 && hasMore && !isLoadingMore && !isLoadingMoreRef.current) {
+    if (el.scrollTop < 150 && hasMore && !isLoadingMore && !isLoadingMoreRef.current && initialScrollDone.current) {
       isLoadingMoreRef.current = true;
       const prevScrollHeight = el.scrollHeight;
       void loadMoreMessages(conversationId).then(() => {
