@@ -143,6 +143,7 @@ function rememberKnownAccount(user: User) {
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
+    lastUsedAt: new Date().toISOString(),
   };
 
   const existing = readKnownAccounts().filter((account) => account.id !== user.id);
@@ -154,6 +155,7 @@ function readKnownAccounts(): Array<{
   username: string;
   displayName: string;
   avatarUrl: string;
+  lastUsedAt?: string;
 }> {
   try {
     return JSON.parse(localStorage.getItem(KNOWN_ACCOUNTS_KEY) ?? "[]") as Array<{
@@ -161,6 +163,7 @@ function readKnownAccounts(): Array<{
       username: string;
       displayName: string;
       avatarUrl: string;
+      lastUsedAt?: string;
     }>;
   } catch {
     return [];

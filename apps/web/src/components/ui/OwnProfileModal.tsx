@@ -3,6 +3,7 @@
 import { ChangeEvent, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { formatDistanceToNowStrict } from "date-fns";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
@@ -18,6 +19,7 @@ type KnownAccount = {
   username: string;
   displayName: string;
   avatarUrl: string;
+  lastUsedAt?: string;
 };
 
 export function OwnProfileModal({ open, onClose }: Props) {
@@ -295,7 +297,10 @@ export function OwnProfileModal({ open, onClose }: Props) {
                             <p className="truncate text-sm font-medium">
                               {account.displayName || account.username}
                             </p>
-                            <p className="truncate text-xs text-muted">@{account.username}</p>
+                            <p className="truncate text-xs text-muted">
+                              @{account.username}
+                              {account.lastUsedAt ? ` · used ${formatDistanceToNowStrict(new Date(account.lastUsedAt), { addSuffix: true })}` : ""}
+                            </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             <button
