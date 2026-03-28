@@ -16,6 +16,7 @@ export function StickerPickerPanel({
   const [packs, setPacks] = useState<StickerPack[]>([]);
   const [activePackId, setActivePackId] = useState<string>("");
   const [recentStickerIds, setRecentStickerIds] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -68,6 +69,16 @@ export function StickerPickerPanel({
       .map((stickerId) => stickerMap.get(stickerId))
       .filter((sticker): sticker is NonNullable<StickerPack["stickers"]>[number] => Boolean(sticker));
   }, [packs, recentStickerIds]);
+  const visibleStickers = useMemo(() => {
+    const baseStickers = activePackId === "recent" ? recentStickers : activePack?.stickers ?? [];
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return baseStickers;
+    return baseStickers.filter((sticker) =>
+      [sticker.name, sticker.emoji]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(normalizedQuery))
+    );
+  }, [activePack, activePackId, query, recentStickers]);
 
   function handleSelectSticker(sticker: NonNullable<StickerPack["stickers"]>[number]) {
     setRecentStickerIds((current) => {
@@ -149,10 +160,22 @@ export function StickerPickerPanel({
             </button>
           ))}
         </div>
+        <div className="mt-3 flex items-center gap-2 rounded-2xl border border-sidebar bg-background/40 px-3 py-2">
+          <svg className="h-4 w-4 shrink-0 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35m0 0A7.65 7.65 0 1 0 5.85 5.85a7.65 7.65 0 0 0 10.8 10.8Z" />
+          </svg>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search stickers..."
+            className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+          />
+        </div>
       </div>
 
       <div className="grid max-h-[min(50vh,22rem)] grid-cols-3 gap-2 overflow-y-auto p-2 sm:grid-cols-4 sm:p-3">
-        {(activePackId === "recent" ? recentStickers : activePack.stickers ?? []).map((sticker) => (
+        {visibleStickers.map((sticker) => (
           <button
             key={sticker.id}
             type="button"
@@ -167,6 +190,11 @@ export function StickerPickerPanel({
             )}
           </button>
         ))}
+        {visibleStickers.length === 0 && (
+          <div className="col-span-full rounded-2xl border border-dashed border-sidebar px-4 py-6 text-center text-sm text-muted">
+            No stickers match your search.
+          </div>
+        )}
       </div>
     </div>
   );
