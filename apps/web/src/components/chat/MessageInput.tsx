@@ -136,6 +136,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   const [videoMode, setVideoMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const stickerWrapRef = useRef<HTMLDivElement>(null);
@@ -169,6 +170,12 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
   useEffect(() => {
     videoModeRef.current = videoMode;
   }, [videoMode]);
+
+  useEffect(() => {
+    if (!recordingError) return;
+    const t = setTimeout(() => setRecordingError(null), 5000);
+    return () => clearTimeout(t);
+  }, [recordingError]);
 
   const wasSendingRef = useRef(false);
   useEffect(() => {
@@ -344,8 +351,16 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => setRecordingSeconds((value) => value + 1), 1000);
-    } catch {
+    } catch (err) {
       setIsRecording(false);
+      const isVideo = videoModeRef.current;
+      if (err instanceof Error && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
+        setRecordingError(isVideo ? "Camera and mic access denied." : "Microphone access denied.");
+      } else if (err instanceof Error && err.name === "NotFoundError") {
+        setRecordingError(isVideo ? "No camera or microphone found." : "No microphone found.");
+      } else {
+        setRecordingError("Could not start recording. Please try again.");
+      }
     }
   }
 
@@ -726,7 +741,11 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         )}
       </div>
 
-      <p className="input-hint">{hint}</p>
+      {recordingError ? (
+        <p className="input-hint text-red-500">{recordingError}</p>
+      ) : (
+        <p className="input-hint">{hint}</p>
+      )}
     </div>
   );
 }

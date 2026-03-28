@@ -12,6 +12,7 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
 import { KeyBackupGate } from "@/components/auth/KeyBackupGate";
+import { ChatToastContainer } from "@/components/ui/ChatToast";
 
 const AuthBackground = dynamic(
   () => import("@/components/auth/AuthBackground").then((module) => module.AuthBackground),
@@ -104,6 +105,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <KeyboardShortcutsOverlay />
       <KeyBackupGate />
+      <ChatToastContainer />
     </div>
   );
 }

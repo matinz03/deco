@@ -60,8 +60,11 @@ services:
       R2_BUCKET_NAME: ${R2_BUCKET_NAME}
       R2_PUBLIC_URL: ${R2_PUBLIC_URL}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      UPLOAD_ROOT: /uploads
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - uploads_data:/uploads
 
   # ─── Next.js Web ────────────────────────────────────────────────────────────
   web:
@@ -83,3 +86,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:

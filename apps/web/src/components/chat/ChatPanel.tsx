@@ -47,7 +47,7 @@ interface Props { conversationId: string; }
 export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
   const readReceipts = usePreferencesStore((s) => s.readReceipts);
-  const { messages, fetchMessages, setActiveConversation, markConversationRead, conversations, typing, sendMediaMessage } = useConversationStore();
+  const { messages, fetchMessages, loadMoreMessages, messagesHasMore, messagesLoadingMore, setActiveConversation, markConversationRead, conversations, typing, sendMediaMessage } = useConversationStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +58,10 @@ export function ChatPanel({ conversationId }: Props) {
   const dragCounter = useRef(0);
   const initialScrollDone = useRef(false);
   const lastScrollTop = useRef(0);
+
+  const hasMore = messagesHasMore[conversationId] ?? false;
+  const isLoadingMore = messagesLoadingMore[conversationId] ?? false;
+  const isLoadingMoreRef = useRef(false);
 
   const conversation = conversations.find((c) => c.id === conversationId);
   const convMessages = messages[conversationId] ?? [];
@@ -136,6 +140,7 @@ export function ChatPanel({ conversationId }: Props) {
 
   useEffect(() => {
     initialScrollDone.current = false;
+    isLoadingMoreRef.current = false;
     setShowScrollBtn(false);
     setReplyTo(null);
     setThreadMessageId(null);
@@ -167,6 +172,16 @@ export function ChatPanel({ conversationId }: Props) {
       setShowScrollBtn(true);
     } else {
       setShowScrollBtn(false);
+    }
+    if (el.scrollTop < 150 && hasMore && !isLoadingMore && !isLoadingMoreRef.current) {
+      isLoadingMoreRef.current = true;
+      const prevScrollHeight = el.scrollHeight;
+      void loadMoreMessages(conversationId).then(() => {
+        requestAnimationFrame(() => {
+          if (el) el.scrollTop = el.scrollHeight - prevScrollHeight;
+          isLoadingMoreRef.current = false;
+        });
+      });
     }
   }
 
@@ -300,6 +315,14 @@ export function ChatPanel({ conversationId }: Props) {
           </div>
         ) : (
           <>
+            {isLoadingMore && (
+              <div className="flex justify-center py-3">
+                <svg className="h-5 w-5 animate-spin text-muted" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              </div>
+            )}
             {useVirtual ? (
               <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
                 {virtualizer.getVirtualItems().map((virtualItem) => {

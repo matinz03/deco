@@ -5,6 +5,7 @@ import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto
 import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker } from "@deco/types";
 import { useAuthStore } from "./auth";
 import { usePreferencesStore } from "./preferences";
+import { useToastStore } from "./toasts";
 
 // In-memory cache of decrypted group keys: conversationId → plaintext group key (base64)
 const groupKeyCache = new Map<string, string>();
@@ -64,12 +65,15 @@ interface ConversationState {
   presence: Record<string, PresenceState>;
   typing: Record<string, string[]>;
   mutedIds: Set<string>;
+  messagesHasMore: Record<string, boolean>;
+  messagesLoadingMore: Record<string, boolean>;
   muteConversation: (conversationId: string) => void;
   unmuteConversation: (conversationId: string) => void;
   clearConversationMessages: (conversationId: string) => void;
 
   fetchConversations: () => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
+  loadMoreMessages: (conversationId: string) => Promise<void>;
   sendMessage: (
     conversationId: string,
     text: string,
@@ -127,6 +131,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     presence: {},
     typing: {},
     mutedIds: new Set(storedMuted),
+    messagesHasMore: {},
+    messagesLoadingMore: {},
 
     muteConversation(conversationId) {
       set((s) => {
@@ -197,7 +203,35 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       const rawMessages = await api.messages.list(conversationId);
       const conversation = get().conversations.find((c) => c.id === conversationId);
       const decrypted = await hydrateMessages(rawMessages, conversation);
-      set((s) => ({ messages: { ...s.messages, [conversationId]: withReplyLinks(decrypted) } }));
+      set((s) => ({
+        messages: { ...s.messages, [conversationId]: withReplyLinks(decrypted) },
+        messagesHasMore: { ...s.messagesHasMore, [conversationId]: rawMessages.length === 50 },
+        messagesLoadingMore: { ...s.messagesLoadingMore, [conversationId]: false },
+      }));
+    },
+
+    async loadMoreMessages(conversationId) {
+      const state = get();
+      if (!state.messagesHasMore[conversationId] || state.messagesLoadingMore[conversationId]) return;
+      const existingMessages = state.messages[conversationId] ?? [];
+      if (existingMessages.length === 0) return;
+      const before = existingMessages[0]!.sentAt;
+      set((s) => ({ messagesLoadingMore: { ...s.messagesLoadingMore, [conversationId]: true } }));
+      try {
+        const rawMessages = await api.messages.list(conversationId, before);
+        const conversation = get().conversations.find((c) => c.id === conversationId);
+        const decrypted = await hydrateMessages(rawMessages, conversation);
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: withReplyLinks([...decrypted, ...(s.messages[conversationId] ?? [])]),
+          },
+          messagesHasMore: { ...s.messagesHasMore, [conversationId]: rawMessages.length === 50 },
+          messagesLoadingMore: { ...s.messagesLoadingMore, [conversationId]: false },
+        }));
+      } catch {
+        set((s) => ({ messagesLoadingMore: { ...s.messagesLoadingMore, [conversationId]: false } }));
+      }
     },
 
     async sendMessage(conversationId, text, options) {
@@ -1366,19 +1400,25 @@ async function encryptOutgoingContent(conversation: Conversation | undefined, us
 }
 
 function notifyAboutMessage(message: Message, conversation?: Conversation) {
-  if (typeof window === "undefined" || typeof Notification === "undefined") return;
-  if (Notification.permission !== "granted") return;
+  if (typeof window === "undefined") return;
 
   const { pushNotifications, messagePreviews } = usePreferencesStore.getState();
-
   if (!pushNotifications) return;
 
-  const title = conversation?.name || message.sender?.displayName || "New message";
-  const body = messagePreviews
-    ? message.isDeleted
-      ? "Message deleted"
-      : (message.decryptedContent ?? "New message")
-    : "New message";
+  // In-app toast when user is actively viewing the app (but a different conversation)
+  if (document.visibilityState !== "hidden") {
+    useToastStore.getState().pushToast(message, conversation);
+    return;
+  }
 
-  new Notification(title, { body, tag: message.conversationId });
+  // Native browser notification when the tab is hidden/backgrounded
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    const title = conversation?.name || message.sender?.displayName || "New message";
+    const body = messagePreviews
+      ? message.isDeleted
+        ? "Message deleted"
+        : (message.decryptedContent ?? "New message")
+      : "New message";
+    new Notification(title, { body, tag: message.conversationId });
+  }
 }

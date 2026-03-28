@@ -24,6 +24,95 @@ const MessageContextMenu = dynamic(
   { ssr: false }
 );
 
+function getFileTypeStyle(mimeType?: string, name?: string): { bg: string; text: string; label: string } {
+  const ext = name?.split(".").pop()?.toLowerCase() ?? "";
+  const mime = mimeType ?? "";
+  if (mime.startsWith("image/") || ["jpg","jpeg","png","gif","webp","svg"].includes(ext))
+    return { bg: "bg-blue-500/15", text: "text-blue-500", label: ext.toUpperCase() || "IMG" };
+  if (mime.startsWith("video/") || ["mp4","mov","webm","avi","mkv"].includes(ext))
+    return { bg: "bg-purple-500/15", text: "text-purple-500", label: ext.toUpperCase() || "VID" };
+  if (mime.startsWith("audio/") || ["mp3","wav","ogg","flac","m4a","aac"].includes(ext))
+    return { bg: "bg-orange-500/15", text: "text-orange-500", label: ext.toUpperCase() || "AUD" };
+  if (mime === "application/pdf" || ext === "pdf")
+    return { bg: "bg-red-500/15", text: "text-red-500", label: "PDF" };
+  if (["zip","rar","7z","tar","gz"].includes(ext))
+    return { bg: "bg-yellow-500/15", text: "text-yellow-500", label: ext.toUpperCase() || "ZIP" };
+  if (["doc","docx"].includes(ext) || mime.includes("word"))
+    return { bg: "bg-green-500/15", text: "text-green-500", label: ext.toUpperCase() || "DOC" };
+  return { bg: "bg-muted", text: "text-muted-foreground", label: ext.toUpperCase() || "FILE" };
+}
+
+function AudioPlayer({ src, name }: { src: string; name?: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  function toggle() {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) { el.pause(); } else { void el.play(); }
+  }
+
+  function fmt(s: number) {
+    const m = Math.floor(s / 60);
+    return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  }
+
+  const bars = [3, 5, 8, 6, 4, 7, 5, 9, 6, 3, 7, 5];
+
+  return (
+    <div className="mb-2 flex min-w-[220px] items-center gap-3 rounded-2xl bg-black/5 px-3 py-2.5">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrentTime(0); }}
+        onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
+        onLoadedMetadata={(e) => setDuration((e.target as HTMLAudioElement).duration)}
+      />
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); toggle(); }}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow"
+        aria-label={playing ? "Pause" : "Play"}
+      >
+        {playing ? (
+          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6" y="4" width="4" height="16" rx="1" />
+            <rect x="14" y="4" width="4" height="16" rx="1" />
+          </svg>
+        ) : (
+          <svg className="h-4 w-4 translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        )}
+      </button>
+      <div className="flex flex-1 flex-col gap-1 min-w-0">
+        <div className="flex items-end gap-px h-7">
+          {bars.map((h, i) => (
+            <div
+              key={i}
+              className={`w-1 rounded-full transition-all ${playing ? "animate-pulse" : ""}`}
+              style={{
+                height: `${h * 3}px`,
+                backgroundColor: playing ? "hsl(var(--primary))" : "hsl(var(--muted-foreground) / 0.4)",
+                animationDelay: `${i * 60}ms`,
+              }}
+            />
+          ))}
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-muted-foreground">{fmt(currentTime)} / {fmt(duration || 0)}</span>
+          {name && <span className="truncate text-[10px] text-muted-foreground ml-2 max-w-[100px]">{name}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface Props {
   message: Message;
   isSent: boolean;
@@ -260,98 +349,76 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                 </div>
               )}
               {msg.type === "video" && msg.mediaUrl && (
-                <>
+                <div className="mb-2 overflow-hidden rounded-2xl bg-black">
                   <video
                     src={msg.mediaUrl}
                     controls
                     playsInline
-                    className="mb-2 max-h-72 w-full rounded-xl bg-black"
+                    preload="metadata"
+                    className="max-h-72 w-full object-contain"
                   />
-                  <div className="mb-2 flex items-center gap-2">
-                    <a
-                      href={msg.mediaUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      Open
-                    </a>
-                    <a
-                      href={msg.mediaUrl}
-                      download={msg.mediaName || "video"}
-                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      Download
-                    </a>
-                  </div>
-                </>
-              )}
-              {msg.type === "audio" && msg.mediaUrl && (
-                <div className="mb-2 min-w-[240px] rounded-xl bg-black/5 p-2">
-                  <div className="mb-1 text-xs font-medium opacity-70">
-                    {msg.mediaName || "Audio message"}
-                  </div>
-                  <audio src={msg.mediaUrl} controls className="w-full" preload="metadata" />
-                  <div className="mt-2 flex items-center gap-2">
-                    <a
-                      href={msg.mediaUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      Open
-                    </a>
-                    <a
-                      href={msg.mediaUrl}
-                      download={msg.mediaName || "audio"}
-                      className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      Download
-                    </a>
-                  </div>
-                </div>
-              )}
-              {msg.type === "file" && (msg.mediaUrl || msg.mediaName) && (
-                <div className="mb-2 min-w-[240px] rounded-xl border border-border/70 bg-background/50 px-3 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl bg-muted p-2">
-                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15A2.25 2.25 0 0 0 6.75 21.75h10.5A2.25 2.25 0 0 0 19.5 19.5v-5.25Z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2.25v4.5A1.5 1.5 0 0 0 15 8.25h4.5" />
-                      </svg>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{msg.mediaName || "File attachment"}</div>
-                      <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
-                    </div>
-                  </div>
-                  {msg.mediaUrl && (
-                    <div className="mt-3 flex items-center gap-2">
+                  <div className="flex items-center justify-between bg-black/60 px-3 py-1.5">
+                    <span className="truncate text-[11px] text-white/70 max-w-[140px]">{msg.mediaName || "Video"}</span>
+                    <div className="flex items-center gap-2 shrink-0">
                       <a
                         href={msg.mediaUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        Open
-                      </a>
+                        className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/80 hover:bg-white/10 transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                      >Open</a>
                       <a
                         href={msg.mediaUrl}
-                        download={msg.mediaName || "attachment"}
-                        className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        Download
-                      </a>
+                        download={msg.mediaName || "video"}
+                        className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/80 hover:bg-white/10 transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                      >Download</a>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
+              {msg.type === "audio" && msg.mediaUrl && (
+                <AudioPlayer src={msg.mediaUrl} name={msg.mediaName} />
+              )}
+              {msg.type === "file" && (msg.mediaUrl || msg.mediaName) && (() => {
+                const ft = getFileTypeStyle(msg.mediaMimeType, msg.mediaName);
+                return (
+                  <div className="mb-2 min-w-[240px] rounded-xl border border-border/70 bg-background/50 px-3 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`relative rounded-xl p-2 ${ft.bg} shrink-0`}>
+                        <svg className={`h-5 w-5 ${ft.text}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15A2.25 2.25 0 0 0 6.75 21.75h10.5A2.25 2.25 0 0 0 19.5 19.5v-5.25Z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2.25v4.5A1.5 1.5 0 0 0 15 8.25h4.5" />
+                        </svg>
+                        <span className={`absolute -bottom-1.5 -right-1.5 rounded px-0.5 text-[7px] font-bold leading-none ${ft.bg} ${ft.text} border border-current/20 py-0.5`}>
+                          {ft.label.slice(0, 4)}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{msg.mediaName || "File attachment"}</div>
+                        <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
+                      </div>
+                    </div>
+                    {msg.mediaUrl && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <a
+                          href={msg.mediaUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                          onClick={(e) => e.stopPropagation()}
+                        >Open</a>
+                        <a
+                          href={msg.mediaUrl}
+                          download={msg.mediaName || "attachment"}
+                          className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+                          onClick={(e) => e.stopPropagation()}
+                        >Download</a>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {msg.type === "poll" && msg.poll && (
                 <div className="mb-2 min-w-[260px] rounded-2xl border border-border/70 bg-background/55 p-3">
                   <div className="mb-3">
