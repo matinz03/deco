@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -14,8 +15,12 @@ import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ChatSkeleton } from "./ChatSkeleton";
 import { TypingIndicator } from "./TypingIndicator";
-import { ThreadPortal } from "./ThreadPortal";
 import type { Message } from "@deco/types";
+
+const ThreadPortal = dynamic(
+  () => import("./ThreadPortal").then((mod) => mod.ThreadPortal),
+  { ssr: false }
+);
 
 const VIRTUAL_THRESHOLD = 80;
 

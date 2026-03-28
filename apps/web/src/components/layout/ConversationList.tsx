@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import Link from "next/link";
@@ -8,10 +9,14 @@ import { useConversationStore } from "@/store/conversations";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { OnlineDot } from "@/components/ui/OnlineDot";
-import { NewConversationModal } from "@/components/ui/NewConversationModal";
 import { ConversationSkeleton } from "@/components/layout/ConversationSkeleton";
 import { formatDistanceToNowStrict } from "date-fns";
 import type { Conversation } from "@deco/types";
+
+const NewConversationModal = dynamic(
+  () => import("@/components/ui/NewConversationModal").then((mod) => mod.NewConversationModal),
+  { ssr: false }
+);
 
 export function ConversationList() {
   const pathname = usePathname();
