@@ -114,6 +114,22 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	}
 
 	_, err = pool.Exec(ctx, `
+		ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS restricted_actions TEXT[] NOT NULL DEFAULT '{}'
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS user_key_backups (
 			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 			version INTEGER NOT NULL,

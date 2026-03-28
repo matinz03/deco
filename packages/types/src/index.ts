@@ -8,9 +8,14 @@ export interface User {
   avatarUrl: string;
   publicKey: string; // E2E public key
   bio: string;
+  isAdmin: boolean;
+  isOwner: boolean;
+  restrictedActions: UserRestriction[];
   lastSeenAt: string;
   createdAt: string;
 }
+
+export type UserRestriction = "send_messages" | "create_conversations" | "manage_stickers";
 
 export interface UserPresence {
   userId: string;

@@ -64,15 +64,24 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var existingUsers int
+	if err := h.pool.QueryRow(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&existingUsers); err != nil {
+		h.logger.Error("failed to count users", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
 	var user models.User
-	err = h.pool.QueryRow(r.Context(), `
-		INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key)
-		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6)
-		RETURNING id, username, COALESCE(email,''), display_name, public_key,
-		          avatar_url, bio, last_seen_at, created_at
-	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey).
-		Scan(&user.ID, &user.Username, &user.Email, &user.DisplayName,
-			&user.PublicKey, &user.AvatarURL, &user.Bio, &user.LastSeenAt, &user.CreatedAt)
+	err = scanUser(h.pool.QueryRow(r.Context(), `
+		WITH created_user AS (
+			INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key, is_admin)
+			VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6, $7)
+			RETURNING id
+		)
+		SELECT `+userSelectColumns+`
+		FROM users u
+		JOIN created_user ON created_user.id = u.id
+	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey, existingUsers == 0), &user)
 
 	if err != nil {
 		h.logger.Error("failed to create user", zap.Error(err))
@@ -103,14 +112,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var query string
 	var identifier string
 	if req.Email != "" {
-		query = `SELECT id, username, COALESCE(email,''), display_name, public_key,
-			avatar_url, bio, last_seen_at, password_hash, created_at
-			FROM users WHERE email = $1`
+		query = `SELECT ` + userSelectColumns + `,
+			password_hash
+			FROM users u WHERE u.email = $1`
 		identifier = req.Email
 	} else if req.Phone != "" {
-		query = `SELECT id, username, COALESCE(email,''), display_name, public_key,
-			avatar_url, bio, last_seen_at, password_hash, created_at
-			FROM users WHERE phone_number = $1`
+		query = `SELECT ` + userSelectColumns + `,
+			password_hash
+			FROM users u WHERE u.phone_number = $1`
 		identifier = req.Phone
 	} else {
 		respondError(w, http.StatusBadRequest, "email or phone_number is required")
@@ -119,10 +128,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	var passwordHash string
-	err := h.pool.QueryRow(r.Context(), query, identifier).
-		Scan(&user.ID, &user.Username, &user.Email, &user.DisplayName,
-			&user.PublicKey, &user.AvatarURL, &user.Bio, &user.LastSeenAt,
-			&passwordHash, &user.CreatedAt)
+	err := scanUserWithPassword(h.pool.QueryRow(r.Context(), query, identifier), &user, &passwordHash)
 	if err != nil {
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -142,6 +148,26 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, AuthResponse{Token: token, User: user})
+}
+
+func scanUserWithPassword(row interface {
+	Scan(dest ...any) error
+}, user *models.User, passwordHash *string) error {
+	return row.Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.DisplayName,
+		&user.PublicKey,
+		&user.AvatarURL,
+		&user.Bio,
+		&user.IsAdmin,
+		&user.RestrictedActions,
+		&user.LastSeenAt,
+		&user.CreatedAt,
+		&user.IsOwner,
+		passwordHash,
+	)
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {

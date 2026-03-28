@@ -117,6 +117,15 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 
+	if err := requireAllowedAction(r.Context(), h.pool, userID, "create_conversations"); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusForbidden, "your account cannot create conversations")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to verify account permissions")
+		return
+	}
+
 	var req struct {
 		Type      string   `json:"type"`
 		Name      string   `json:"name"`
