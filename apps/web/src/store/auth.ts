@@ -56,6 +56,7 @@ interface AuthState {
     newPassword?: string;
   }) => Promise<void>;
   switchAccount: (userId: string) => Promise<boolean>;
+  forgetAccount: (userId: string) => void;
 }
 
 async function refreshConversationState() {
@@ -182,6 +183,11 @@ function readSavedSessions(): SavedSession[] {
 function removeSavedSession(userId: string) {
   const filtered = readSavedSessions().filter((session) => session.user.id !== userId);
   localStorage.setItem(SAVED_SESSIONS_KEY, JSON.stringify(filtered));
+}
+
+function removeKnownAccount(userId: string) {
+  const filtered = readKnownAccounts().filter((account) => account.id !== userId);
+  localStorage.setItem(KNOWN_ACCOUNTS_KEY, JSON.stringify(filtered));
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -405,5 +411,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await syncKeyBackupState(session.user, "login", set);
     await refreshConversationState();
     return true;
+  },
+
+  forgetAccount(userId) {
+    removeSavedSession(userId);
+    removeKnownAccount(userId);
   },
 }));

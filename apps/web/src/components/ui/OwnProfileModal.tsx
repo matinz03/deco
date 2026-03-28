@@ -25,6 +25,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
   const user = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
   const switchAccount = useAuthStore((s) => s.switchAccount);
+  const forgetAccount = useAuthStore((s) => s.forgetAccount);
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
@@ -35,6 +36,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [knownAccounts, setKnownAccounts] = useState<KnownAccount[]>([]);
+  const [switchingAccountId, setSwitchingAccountId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setMounted(true), []);
@@ -247,6 +249,19 @@ export function OwnProfileModal({ open, onClose }: Props) {
                   </div>
                 )}
                 <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">Current account</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <Avatar src={user.avatarUrl} name={user.displayName || user.username} size="sm" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{user.displayName || user.username}</p>
+                      <p className="truncate text-xs text-muted">@{user.username}{user.email ? ` • ${user.email}` : ""}</p>
+                    </div>
+                    <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                      Active
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted">Accounts</p>
@@ -267,30 +282,56 @@ export function OwnProfileModal({ open, onClose }: Props) {
                   {knownAccounts.length > 0 && (
                     <div className="mt-3 space-y-2">
                       {knownAccounts.map((account) => (
-                        <button
+                        <div
                           key={account.id}
-                          type="button"
-                          onClick={() => void (async () => {
-                            const switched = await switchAccount(account.id);
-                            onClose();
-                            router.push(switched ? "/inbox" : "/login");
-                          })()}
-                          className="flex w-full items-center gap-3 rounded-xl border border-sidebar/70 px-3 py-2 text-left transition-colors hover:bg-accent"
+                          className="flex items-center gap-3 rounded-xl border border-sidebar/70 px-3 py-2"
                         >
                           <Avatar
                             src={account.avatarUrl}
                             name={account.displayName || account.username}
                             size="sm"
                           />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium">
                               {account.displayName || account.username}
                             </p>
                             <p className="truncate text-xs text-muted">@{account.username}</p>
                           </div>
-                        </button>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void (async () => {
+                                setSwitchingAccountId(account.id);
+                                try {
+                                  const switched = await switchAccount(account.id);
+                                  onClose();
+                                  router.push(switched ? "/inbox" : "/login");
+                                } finally {
+                                  setSwitchingAccountId(null);
+                                }
+                              })()}
+                              disabled={switchingAccountId === account.id}
+                              className="rounded-lg border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                            >
+                              {switchingAccountId === account.id ? "Switching..." : "Switch"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                forgetAccount(account.id);
+                                setKnownAccounts((current) => current.filter((item) => item.id !== account.id));
+                              }}
+                              className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
+                  )}
+                  {knownAccounts.length === 0 && (
+                    <p className="mt-3 text-sm text-muted">No other saved accounts on this browser yet.</p>
                   )}
                 </div>
               </div>
