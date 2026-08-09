@@ -71,23 +71,44 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isFirstUser := existingUsers == 0
+
 	var user models.User
-	err = scanUser(h.pool.QueryRow(r.Context(), `
-		WITH created_user AS (
-			INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key, is_admin)
-			VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6, $7)
-			RETURNING id
-		)
-		SELECT `+userSelectColumns+`
-		FROM users u
-		JOIN created_user ON created_user.id = u.id
-	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey, existingUsers == 0), &user)
+	err = h.pool.QueryRow(r.Context(), `
+		INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key, is_admin)
+		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6, $7)
+		RETURNING
+			id,
+			username,
+			COALESCE(email, ''),
+			display_name,
+			public_key,
+			avatar_url,
+			bio,
+			is_admin,
+			COALESCE(restricted_actions, '{}'::text[]),
+			last_seen_at,
+			created_at
+	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey, isFirstUser).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.DisplayName,
+		&user.PublicKey,
+		&user.AvatarURL,
+		&user.Bio,
+		&user.IsAdmin,
+		&user.RestrictedActions,
+		&user.LastSeenAt,
+		&user.CreatedAt,
+	)
 
 	if err != nil {
 		h.logger.Error("failed to create user", zap.Error(err))
 		respondError(w, http.StatusConflict, "username or email already taken")
 		return
 	}
+	user.IsOwner = isFirstUser
 
 	token, err := h.generateToken(user.ID)
 	if err != nil {
