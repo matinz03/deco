@@ -120,7 +120,14 @@ go vet ./...
 go test ./...
 ```
 
-Test coverage is currently minimal — `apps/api/internal/middleware/auth_test.go` (JWT validation and auth middleware) is the only test file. There are no frontend tests and no JS/TS test runner configured yet.
+Tests:
+
+```bash
+cd apps/api && go test ./...       # Go: config, handlers, middleware
+pnpm --filter @deco/crypto test    # Node: E2E crypto round-trip tests
+```
+
+Coverage is early — the Go tests cover JWT/auth middleware, registration and login validation, and config resolution; the crypto tests cover X25519 key exchange, encrypt/decrypt, and tampered-ciphertext rejection. The web app itself (`apps/web`) has no tests and no runner configured yet, and the WebSocket, uploads, and group-key paths are untested.
 
 ## Production deployment
 

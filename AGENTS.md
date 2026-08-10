@@ -39,7 +39,23 @@ go test ./...                                             # all Go tests
 go test ./internal/middleware/ -run TestValidateToken -v  # a single test
 ```
 
-Test coverage is minimal: `apps/api/internal/middleware/auth_test.go` (JWT validation + auth middleware) is currently the **only** test file in the repo. There are no frontend tests — no `*.test.*`/`*.spec.*` under `apps/web` and no test runner configured, so don't assume `pnpm test` exists.
+Crypto package tests (from repo root):
+
+```bash
+pnpm --filter @deco/crypto test    # node --test packages/crypto/test.mjs
+```
+
+Test coverage, as of the last verified run:
+
+| Suite | File | Covers |
+|---|---|---|
+| Go — middleware | `apps/api/internal/middleware/auth_test.go` | JWT validation, auth middleware |
+| Go — handlers | `apps/api/internal/handlers/auth_validation_test.go` | Register/Login validation, logout+refresh status codes, bcrypt |
+| Go — config | `apps/api/internal/config/config_test.go` | env defaults and override resolution |
+| Go — websocket | `apps/api/internal/websocket/event_test.go`, `handler_test.go` | event JSON serialization, event-type constants, and handshake rejection (401 on missing/invalid `?token=`) |
+| Node — crypto | `packages/crypto/test.mjs` | X25519 keygen, ECDH symmetry, encrypt/decrypt round-trip, tampered-ciphertext rejection |
+
+Everything else is untested. There is still **no test runner under `apps/web`** (no `*.test.*`/`*.spec.*`, no Jest/Vitest configured) — the only JS-side tests are the crypto package's, which use the built-in `node --test`. Untested and security-relevant: WebSocket origin validation and hub fanout (handshake *rejection* is covered, but the authenticated happy path and `CheckOrigin` are not), group-key distribution, uploads, and every handler beyond auth validation. Before adding tests to those paths, read [`docs/SECURITY_PLAN.md`](docs/SECURITY_PLAN.md) — several are currently broken, so a test written against today's behaviour would cement the bug.
 
 ## Environment variables — two separate `.env` files, easy to get wrong
 

@@ -12,6 +12,10 @@ build
 apps/api/bin/
 apps/api/*.exe
 
+# User-uploaded media (runtime data — avatars, message attachments, stickers).
+# Never commit: this is real user content, and in production it is a Docker volume.
+apps/api/uploads/
+
 # Environment files
 .env
 .env.local
