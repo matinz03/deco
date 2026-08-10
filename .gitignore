@@ -40,3 +40,6 @@ npm-debug.log*
 
 # Docker
 infra/compose/.env
+
+# Uploaded media (local storage backend)
+apps/api/uploads/
