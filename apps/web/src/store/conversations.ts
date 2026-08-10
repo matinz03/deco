@@ -10,6 +10,17 @@ import { useToastStore } from "./toasts";
 // In-memory cache of decrypted group keys: conversationId → plaintext group key (base64)
 const groupKeyCache = new Map<string, string>();
 
+/**
+ * Thrown when a message cannot be encrypted (missing keys). Sending must fail
+ * closed — never fall back to plaintext for anything except "saved" notes.
+ */
+export class EncryptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EncryptionError";
+  }
+}
+
 async function getOrFetchGroupKey(conversationId: string, conversation: Conversation | undefined): Promise<string | null> {
   const cached = groupKeyCache.get(conversationId);
   if (cached) return cached;
@@ -693,24 +704,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         throw new Error("Message not found");
       }
 
-      let encryptedContent = trimmed;
-      if (conversation?.type === "group") {
-        const groupKey = await getOrFetchGroupKey(conversationId, conversation);
-        if (groupKey) {
-          const { encryptMessage } = await import("@deco/crypto");
-          encryptedContent = encryptMessage(trimmed, groupKey);
-        }
-      } else {
-        const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
-        if (otherUser?.publicKey) {
-          const privateKey = await loadPrivateKey(user.id);
-          if (privateKey) {
-            const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-            const sharedSecret = derive(otherUser.publicKey, privateKey);
-            encryptedContent = encryptMessage(trimmed, sharedSecret);
-          }
-        }
-      }
+      // Throws EncryptionError when the keys needed to encrypt are unavailable.
+      const encryptedContent = await encryptOutgoingContent(conversation, user.id, trimmed);
 
       const previousMessage = message;
 
@@ -1290,7 +1285,11 @@ async function uploadAndSendMediaMessage({
         )),
       },
     }));
-  } catch {
+  } catch (error) {
+    const failureReason =
+      error instanceof EncryptionError
+        ? error.message
+        : "Upload failed. Tap retry to try again.";
     useConversationStore.setState((s) => ({
       messages: {
         ...s.messages,
@@ -1299,7 +1298,7 @@ async function uploadAndSendMediaMessage({
             ? {
                 ...m,
                 status: "failed" as const,
-                uploadError: "Upload failed. Tap retry to try again.",
+                uploadError: failureReason,
                 uploadProgress: undefined,
               }
             : m
@@ -1373,30 +1372,37 @@ async function encryptOutgoingContent(conversation: Conversation | undefined, us
     return "";
   }
 
+  // "Saved Messages" are notes to yourself, stored unencrypted by design.
   if (conversation?.type === "saved") {
     return text;
   }
 
   if (conversation?.type === "group") {
     const groupKey = await getOrFetchGroupKey(conversation.id, conversation);
-    if (groupKey) {
-      const { encryptMessage } = await import("@deco/crypto");
-      return encryptMessage(text, groupKey);
+    if (!groupKey) {
+      throw new EncryptionError(
+        "This group's encryption key isn't available on this device yet, so the message was not sent."
+      );
     }
-    return text;
+    const { encryptMessage } = await import("@deco/crypto");
+    return encryptMessage(text, groupKey);
   }
 
   const otherUser = conversation?.members?.find((member) => member.userId !== userId)?.user;
-  if (otherUser?.publicKey) {
-    const privateKey = await loadPrivateKey(userId);
-    if (privateKey) {
-      const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-      const sharedSecret = derive(otherUser.publicKey, privateKey);
-      return encryptMessage(text, sharedSecret);
-    }
+  if (!otherUser?.publicKey) {
+    throw new EncryptionError(
+      "Encryption is unavailable because the recipient's public key is missing, so the message was not sent."
+    );
   }
-
-  return text;
+  const privateKey = await loadPrivateKey(userId);
+  if (!privateKey) {
+    throw new EncryptionError(
+      "Your private key is missing on this device, so the message was not sent. Restore your key backup from Settings to send encrypted messages."
+    );
+  }
+  const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
+  const sharedSecret = derive(otherUser.publicKey, privateKey);
+  return encryptMessage(text, sharedSecret);
 }
 
 function notifyAboutMessage(message: Message, conversation?: Conversation) {

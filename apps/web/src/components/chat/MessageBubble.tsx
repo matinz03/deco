@@ -147,6 +147,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(text);
+  const [editError, setEditError] = useState<string | null>(null);
   const tapCount = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -194,11 +195,18 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
     if (!trimmed || trimmed === text) {
       setIsEditing(false);
       setDraft(text);
+      setEditError(null);
       return;
     }
 
-    await editMessage(msg.conversationId, msg.id, trimmed);
-    setIsEditing(false);
+    try {
+      await editMessage(msg.conversationId, msg.id, trimmed);
+      setIsEditing(false);
+      setEditError(null);
+    } catch (error) {
+      // Keep the editor open so the draft isn't lost (e.g. encryption keys unavailable).
+      setEditError(error instanceof Error ? error.message : "Failed to edit the message.");
+    }
   }
 
   function handleBubbleClick(event: React.MouseEvent) {
@@ -558,11 +566,15 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                     className="min-h-[84px] w-full resize-none rounded-xl border border-border bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring/40"
                     autoFocus
                   />
+                  {editError && (
+                    <p className="mt-1.5 text-[11px] text-destructive">{editError}</p>
+                  )}
                   <div className="mt-2 flex justify-end gap-2">
                     <button
                       onClick={() => {
                         setIsEditing(false);
                         setDraft(text);
+                        setEditError(null);
                       }}
                       className="rounded-lg px-2.5 py-1 text-xs text-muted transition-colors hover:text-foreground"
                     >
