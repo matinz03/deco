@@ -10,7 +10,13 @@ Every finding below was verified against the source at the cited `file:line`, no
 
 ## Status
 
-Remediation by Antigravity; reviewed independently by Claude Coder and Codex. Verified by running `go build ./...`, `go vet ./...`, and `go test ./... -count=1` — not by trusting status reports.
+Remediation reviewed independently by Claude Coder and Codex. Verified by running `go build ./...`, `go vet ./...`, and `go test ./... -count=1` — not by trusting status reports.
+
+> ⚠️ **`master` is NOT security-complete. Do not read a green build as a fixed system.**
+> `master` is *feature*-integrated (A-1, A-2, CI, docs) and compiles and tests clean — that is all a green build means.
+> **The S1-1 media remediation is NOT on `master`.** It lives on branch `security/media-tickets` at `7e33d6a`, deliberately held back pending authorization sign-off. Anything deployed from `master` today still serves media through the pre-ticket path.
+>
+> Sign-off progress on `7e33d6a`: schema/migration integration **verified against a live Postgres** — `EnsureSchema` ran clean and `media_objects` was created with `storage_path` PK and an `owner_id` FK `ON DELETE CASCADE`. **Remaining: authorization behaviour** — non-member 403, ticket expiry/tamper rejection, and a real browser render check (type-check alone did not catch the last media regression).
 
 | ID | Status | Notes |
 |---|---|---|
