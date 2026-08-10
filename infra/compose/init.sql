@@ -57,7 +57,7 @@ CREATE TABLE members (
 CREATE INDEX idx_members_user_id ON members(user_id);
 
 -- ─── Messages ─────────────────────────────────────────────────────────────────
-CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'audio', 'file', 'sticker', 'poll', 'system');
+CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'audio', 'file', 'sticker', 'poll', 'location', 'contact', 'system');
 CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read');
 CREATE TYPE sticker_pack_source AS ENUM ('deco', 'telegram');
 CREATE TYPE sticker_format AS ENUM ('static', 'animated', 'video');

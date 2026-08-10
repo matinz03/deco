@@ -92,6 +92,40 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	_, err = pool.Exec(ctx, `
 		DO $$
 		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_enum
+				WHERE enumlabel = 'location'
+				  AND enumtypid = 'message_type'::regtype
+			) THEN
+				ALTER TYPE message_type ADD VALUE 'location';
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_enum
+				WHERE enumlabel = 'contact'
+				  AND enumtypid = 'message_type'::regtype
+			) THEN
+				ALTER TYPE message_type ADD VALUE 'contact';
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		DO $$
+		BEGIN
 			IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sticker_pack_source') THEN
 				CREATE TYPE sticker_pack_source AS ENUM ('deco', 'telegram');
 			END IF;

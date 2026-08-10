@@ -58,6 +58,8 @@ const (
 	MessageTypeFile     MessageType = "file"
 	MessageTypeSticker  MessageType = "sticker"
 	MessageTypePoll     MessageType = "poll"
+	MessageTypeLocation MessageType = "location"
+	MessageTypeContact  MessageType = "contact"
 	MessageTypeSystem   MessageType = "system"
 )
 
