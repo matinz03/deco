@@ -97,6 +97,7 @@ func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config,
 			r.Get("/", h.List)
 			r.Post("/", h.Send)
 			r.Post("/read", h.MarkRead)
+			r.Get("/{messageID}/media-ticket", h.GetMediaTicket)
 			r.Patch("/{messageID}", h.Edit)
 			r.Delete("/{messageID}", h.Delete)
 			r.Post("/{messageID}/poll/vote", h.VotePoll)

@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	appmiddleware "github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/storage"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -66,6 +66,17 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to save upload", zap.Error(err), zap.String("user_id", userID), zap.String("kind", string(kind)))
 		respondError(w, http.StatusInternalServerError, "failed to save upload")
 		return
+	}
+	storagePath, ok := storage.PrivateMediaPath(saved.URL, h.cfg.PublicUploadBase)
+	if ok {
+		if _, err := h.pool.Exec(r.Context(), `
+			INSERT INTO media_objects (storage_path, owner_id, kind)
+			VALUES ($1, $2, $3)
+		`, storagePath, userID, string(kind)); err != nil {
+			h.logger.Error("failed to register upload", zap.Error(err), zap.String("user_id", userID), zap.String("path", storagePath))
+			respondError(w, http.StatusInternalServerError, "failed to register upload")
+			return
+		}
 	}
 
 	respondJSON(w, http.StatusCreated, map[string]any{

@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
+	"github.com/matinz03/deco/internal/storage"
 	"github.com/matinz03/deco/internal/websocket"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -91,15 +92,16 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var msg models.Message
 		var sender models.User
 		if err := rows.Scan(
-				&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-				&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
-				&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
-				&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
+			&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
+			&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
+			&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+			&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 		); err != nil {
 			h.logger.Error("scan error", zap.Error(err))
 			continue
 		}
 		msg.Sender = &sender
+		h.ticketMessageMedia(r.Context(), &msg)
 		messages = append(messages, msg)
 	}
 
@@ -218,6 +220,10 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "sticker_id is required for sticker messages")
 		return
 	}
+	if isPrivateMediaMessage(req.Type) && !h.ownsMediaObject(r.Context(), userID, req.MediaURL) {
+		respondError(w, http.StatusForbidden, "media must be an upload owned by the sender")
+		return
+	}
 
 	var msg models.Message
 	tx, err := h.pool.Begin(r.Context())
@@ -271,6 +277,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to finalize message")
 		return
 	}
+	h.ticketMessageMedia(r.Context(), &msg)
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
@@ -282,6 +289,80 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	h.pool.Exec(r.Context(), `UPDATE conversations SET updated_at = NOW() WHERE id = $1`, convID)
 
 	respondJSON(w, http.StatusCreated, msg)
+}
+
+func isPrivateMediaMessage(messageType string) bool {
+	return messageType == string(models.MessageTypeImage) ||
+		messageType == string(models.MessageTypeVideo) ||
+		messageType == string(models.MessageTypeAudio) ||
+		messageType == string(models.MessageTypeFile)
+}
+
+func (h *MessageHandler) ownsMediaObject(ctx context.Context, userID, mediaURL string) bool {
+	storagePath, ok := storage.PrivateMediaPath(mediaURL, h.cfg.PublicUploadBase)
+	if !ok {
+		return false
+	}
+	var count int
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM media_objects WHERE storage_path = $1 AND owner_id = $2
+	`, storagePath, userID).Scan(&count); err != nil {
+		return false
+	}
+	return count == 1
+}
+
+// ticketMessageMedia converts a stored private path into a short-lived URL
+// only after the caller has already been authorized for the containing
+// conversation. Public avatar and sticker paths intentionally remain direct.
+func (h *MessageHandler) ticketMessageMedia(ctx context.Context, msg *models.Message) {
+	if msg.MediaURL == nil {
+		return
+	}
+	_, ok := storage.PrivateMediaPath(*msg.MediaURL, h.cfg.PublicUploadBase)
+	if !ok || !h.ownsMediaObject(ctx, msg.SenderID, *msg.MediaURL) {
+		return
+	}
+	if ticketed, ok := storage.TicketedMediaURL(*msg.MediaURL, h.cfg.PublicUploadBase, h.cfg.JWTSecret, time.Now()); ok {
+		msg.MediaURL = &ticketed
+	}
+}
+
+// GetMediaTicket refreshes a browser-safe, short-lived URL for a single
+// attachment. Authorization is performed against the message's conversation,
+// never merely against knowledge of the storage path.
+func (h *MessageHandler) GetMediaTicket(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	messageID := chi.URLParam(r, "messageID")
+	userID := middleware.GetUserID(r)
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
+	var mediaURL *string
+	var senderID string
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT media_url, sender_id FROM messages
+		WHERE id = $1 AND conversation_id = $2 AND is_deleted = false
+	`, messageID, convID).Scan(&mediaURL, &senderID)
+	if err == pgx.ErrNoRows || mediaURL == nil {
+		respondError(w, http.StatusNotFound, "media attachment not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("failed to load media attachment", zap.Error(err), zap.String("message_id", messageID))
+		respondError(w, http.StatusInternalServerError, "failed to load media attachment")
+		return
+	}
+
+	message := models.Message{SenderID: senderID, MediaURL: mediaURL}
+	h.ticketMessageMedia(r.Context(), &message)
+	if message.MediaURL == nil || *message.MediaURL == *mediaURL {
+		respondError(w, http.StatusNotFound, "private media attachment not found")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"url": *message.MediaURL})
 }
 
 func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
@@ -527,7 +608,7 @@ func (h *MessageHandler) RemoveReaction(w http.ResponseWriter, r *http.Request) 
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
-			Type:    websocket.EventMessageReaction,
+			Type: websocket.EventMessageReaction,
 			Payload: mustMarshal(map[string]any{
 				"action":     "remove",
 				"message_id": msgID,
@@ -564,7 +645,7 @@ func (h *MessageHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
-			Type:    websocket.EventRead,
+			Type: websocket.EventRead,
 			Payload: mustMarshal(map[string]string{
 				"conversation_id": convID,
 				"user_id":         userID,

@@ -504,6 +504,13 @@ export const api = {
       return raw.map(mapMessage);
     },
 
+    getMediaTicket: async (conversationId: string, messageId: string) => {
+      const raw = await request<{ url?: string }>(
+        `/api/v1/conversations/${conversationId}/messages/${messageId}/media-ticket`
+      );
+      return resolveAssetUrl(raw.url ?? "");
+    },
+
     send: async (
       conversationId: string,
       body: {

@@ -6,19 +6,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/matinz03/deco/internal/config"
-	"github.com/matinz03/deco/internal/db"
-	"github.com/matinz03/deco/internal/handlers"
-	"github.com/matinz03/deco/internal/storage"
-	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
 	"github.com/joho/godotenv"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/db"
+	"github.com/matinz03/deco/internal/handlers"
+	"github.com/matinz03/deco/internal/storage"
+	"github.com/matinz03/deco/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -99,7 +101,25 @@ func main() {
 	if uploadBase == "" {
 		uploadBase = "/api/v1/media"
 	}
-	uploadHandler := http.FileServer(http.Dir(cfg.UploadRoot))
+	uploadHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		relativePath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if strings.HasSuffix(relativePath, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		if !storage.IsPublicMediaPath(relativePath) && !storage.ValidateMediaTicket(relativePath, r.URL.Query().Get("ticket"), cfg.JWTSecret, time.Now()) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		if strings.HasPrefix(relativePath, "messages/files/") {
+			w.Header().Set("Content-Disposition", "attachment")
+		}
+		fs := http.FileServer(http.Dir(cfg.UploadRoot))
+		fs.ServeHTTP(w, r)
+	})
 	r.Handle(uploadBase+"/*", http.StripPrefix(uploadBase+"/", uploadHandler))
 	if uploadBase != "/uploads" {
 		r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadHandler))
