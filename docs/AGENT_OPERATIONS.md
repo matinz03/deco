@@ -2,6 +2,8 @@
 
 An analytical record of the multi-agent WarRoom sessions on this repo: what each agent produced, what had to be corrected, and whether the arrangement is paying for itself.
 
+See also [`INTERACTION_PATTERNS.md`](INTERACTION_PATTERNS.md) for the qualitative side — tone, communication dynamics, and human/agent interaction patterns.
+
 **Why this exists.** Agent output is easy to over-trust — the failure mode in this project has not been agents refusing to work, it has been agents reporting success that was not real. This file records what was *verified*, not what was *claimed*, so the decision to keep, constrain, or cut an agent rests on evidence rather than impressions.
 
 **How to use it.** Append to the timeline as things happen. Update the scorecard at the end of each session. Every entry must be reproducible — cite a commit SHA, a `file:line`, or a command whose output can be re-run. If you cannot cite it, it does not go in.
