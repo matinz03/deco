@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -678,6 +678,14 @@ func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusForbidden, "not a member")
 		return
 	}
+	// A group key is the authority for all future group ciphertext.  Only the
+	// current group administrators may establish the first copy or rotate an
+	// existing copy; tying an update to the previous encrypted_by value lets a
+	// former regular member retain authority indefinitely.
+	if !h.canManageMembers(r, convID, callerID) {
+		respondError(w, http.StatusForbidden, "only group administrators can distribute keys")
+		return
+	}
 
 	var entries []struct {
 		UserID       string `json:"user_id"`
@@ -694,7 +702,15 @@ func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Reques
 			respondError(w, http.StatusBadRequest, "missing fields")
 			return
 		}
-		_, err := h.pool.Exec(r.Context(), `
+		if entry.EncryptedBy != callerID {
+			respondError(w, http.StatusForbidden, "cannot forge key author")
+			return
+		}
+		if !h.isConversationMember(r, convID, entry.UserID) {
+			respondError(w, http.StatusForbidden, "recipient is not a member of conversation")
+			return
+		}
+		res, err := h.pool.Exec(r.Context(), `
 			INSERT INTO group_keys (conversation_id, user_id, encrypted_by, encrypted_key)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (conversation_id, user_id) DO UPDATE
@@ -703,6 +719,10 @@ func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Reques
 			      created_at    = NOW()
 		`, convID, entry.UserID, entry.EncryptedBy, entry.EncryptedKey)
 		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to store key")
+			return
+		}
+		if res.RowsAffected() != 1 {
 			respondError(w, http.StatusInternalServerError, "failed to store key")
 			return
 		}

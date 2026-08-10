@@ -38,12 +38,40 @@ func TestHandlerUnauthorized(t *testing.T) {
 }
 
 func TestUpgraderCheckOrigin(t *testing.T) {
-	req := httptest.NewRequest("GET", "/ws", nil)
-	req.Header.Set("Origin", "http://evil-attacker.example.com")
+	cfg := &config.Config{Env: "production", AllowedOrigins: "https://deco.app"}
+	checkOrigin := makeCheckOrigin(cfg)
 
-	// Document current behavior (upgrader accepts all origins)
-	isAllowed := upgrader.CheckOrigin(req)
-	if !isAllowed {
-		t.Error("expected current upgrader to allow origin, got false")
-	}
+	t.Run("Rejects foreign origin in production", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/ws", nil)
+		req.Header.Set("Origin", "http://evil-attacker.example.com")
+		if checkOrigin(req) {
+			t.Error("expected foreign origin to be rejected, got allowed")
+		}
+	})
+
+	t.Run("Rejects unlisted localhost in production", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/ws", nil)
+		req.Header.Set("Origin", "http://localhost:3000")
+		if checkOrigin(req) {
+			t.Error("expected unlisted localhost origin to be rejected in production, got allowed")
+		}
+	})
+
+	t.Run("Allows configured production origin", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/ws", nil)
+		req.Header.Set("Origin", "https://deco.app")
+		if !checkOrigin(req) {
+			t.Error("expected https://deco.app origin to be allowed, got rejected")
+		}
+	})
+
+	t.Run("Allows localhost in development env", func(t *testing.T) {
+		devCfg := &config.Config{Env: "development", AllowedOrigins: ""}
+		devCheck := makeCheckOrigin(devCfg)
+		req := httptest.NewRequest("GET", "/ws", nil)
+		req.Header.Set("Origin", "http://localhost:3000")
+		if !devCheck(req) {
+			t.Error("expected localhost origin to be allowed in development env")
+		}
+	})
 }

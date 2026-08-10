@@ -104,17 +104,18 @@ func maxBytesForKind(kind storage.Kind) int64 {
 }
 
 func isAllowedUpload(kind storage.Kind, mimeType, filename string) bool {
-	if isAllowedMime(kind, mimeType) {
-		return true
-	}
-	return isAllowedExtension(kind, filename)
+	return isAllowedMime(kind, mimeType) && isAllowedExtension(kind, filename)
 }
 
 func isAllowedMime(kind storage.Kind, mimeType string) bool {
 	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.Contains(mimeType, "html") || strings.Contains(mimeType, "javascript") || strings.Contains(mimeType, "svg") {
+		return false
+	}
+
 	switch kind {
 	case storage.KindAvatar, storage.KindImage:
-		return strings.HasPrefix(mimeType, "image/")
+		return strings.HasPrefix(mimeType, "image/") && mimeType != "image/svg+xml"
 	case storage.KindVideo:
 		return strings.HasPrefix(mimeType, "video/") || mimeType == "application/mp4"
 	case storage.KindAudio:
@@ -130,19 +131,19 @@ func isAllowedMime(kind storage.Kind, mimeType string) bool {
 
 func isAllowedExtension(kind storage.Kind, filename string) bool {
 	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
-	if ext == "" {
+	if ext == "" || matchesExtension(ext, ".html", ".htm", ".svg", ".js", ".exe", ".cmd", ".bat", ".sh", ".php") {
 		return false
 	}
 
 	switch kind {
 	case storage.KindAvatar, storage.KindImage:
-		return matchesExtension(ext, ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
+		return matchesExtension(ext, ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 	case storage.KindVideo:
 		return matchesExtension(ext, ".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv")
 	case storage.KindAudio:
 		return matchesExtension(ext, ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".flac", ".webm", ".mp4")
 	case storage.KindFile:
-		return true
+		return matchesExtension(ext, ".pdf", ".txt", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".zip", ".tar", ".gz", ".7z", ".png", ".jpg", ".jpeg", ".mp4", ".mp3")
 	case storage.KindSticker:
 		return matchesExtension(ext, ".png", ".jpg", ".jpeg", ".gif", ".webp", ".webm", ".tgs")
 	default:

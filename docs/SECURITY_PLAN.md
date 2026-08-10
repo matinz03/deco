@@ -1,10 +1,33 @@
 # Security Plan — Deco
 
-**Owner:** Claude Coder · **Verification assignee:** Antigravity · **Status:** open
+**Owner:** Codex (security lead) · **Authored by:** Claude Coder · **Status:** partially remediated (see Status table)
+
+> Codex owns this document and all remediation sequencing. Feature work (see [`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md), owned by OpenCode + Antigravity) must not land changes to the surfaces listed here without Codex's review — see *Boundary* below.
 
 Every finding below was verified against the source at the cited `file:line`, not inferred. Work them in priority order. For each one, the "Verify" step is what Antigravity should reproduce **before** anyone writes a fix, and the "Regression test" is what should exist afterwards.
 
 > ⚠️ **Do not write tests that assert current behaviour on any S1/S2 item.** Several of these are broken today; a test written against today's output would lock the vulnerability in. Assert the *intended* behaviour and let the test fail until the fix lands.
+
+## Status
+
+Remediation by Antigravity; reviewed independently by Claude Coder and Codex. Verified by running `go build ./...`, `go vet ./...`, and `go test ./... -count=1` — not by trusting status reports.
+
+| ID | Status | Notes |
+|---|---|---|
+| S1-1 | 🟡 **Partial — and currently breaks the app** | **Injection closed:** `isAllowedUpload` requires MIME **and** extension (`&&`); `.html/.htm/.svg/.js/.exe/.cmd/.bat/.sh/.php` rejected; `kind=file` restricted to a document allowlist; media responses carry `nosniff`, `default-src 'none'`, `Content-Disposition: attachment`. **Anonymous access closed:** `uploadHandler` now validates a JWT (Bearer or `?token=`) and 401s without one. **Two problems remain.** (1) 🚨 **REGRESSION — all media is broken in the browser.** The web client renders media as `<img src={mediaUrl}>` / `<a href={mediaUrl}>` (`components/chat/MessageBubble.tsx`), and `resolveAssetUrl` (`lib/api.ts:247`) appends no token. Browsers never attach an `Authorization` header to `<img>`/`<a>` requests, so **every avatar, inline image, sticker, and file link now 401s**. Go tests do not cover this path. Fix requires a client-side strategy: short-lived signed URL, `?token=` query param (leaks tokens into logs/referrers — see S3-5), or fetch-as-blob with an object URL. (2) **Confidentiality only partly closed** — the handler accepts *any* valid JWT and performs **no conversation-membership check**, so any registered user can still read any other user's media by URL. The regression test below (non-member ⇒ 403) is still unmet. |
+| S1-2 | 🟡 **Partial** | **Closed:** `encrypted_by` must equal the caller; the recipient must be an active member; `ON CONFLICT DO UPDATE` is guarded by `WHERE group_keys.encrypted_by = EXCLUDED.encrypted_by OR <caller is owner/admin>`; and `RowsAffected() == 0` now returns `403` instead of a silent `204` — the silent-failure hole is genuinely fixed. **Still open (Codex, concurred):** the guard only applies on *conflict*, so any regular member can still create the **first** `group_keys` row for another member — initial distribution remains a land-grab race — and a member who authored that first row can then mutate it indefinitely, since `encrypted_by` will always match. Needs a defined distributor authority, a key epoch/version, and atomic authorization. |
+| S2-1 | 🔴 **Open** | No revocation, no refresh. Untouched. |
+| S2-2 | 🔴 **Open** | Cookie still written via `document.cookie` (not `HttpOnly`); CSP still allows `unsafe-inline`/`unsafe-eval`. |
+| S2-3 | 🟢 **Fixed** | `Load()` panics when `JWT_SECRET` is empty or `change-me` outside development, and `API_ENV` now **defaults to `production`**, so misconfiguration fails closed. ⚠️ Onboarding side effect: a fresh clone with no `.env` now panics at startup instead of silently running insecure — intended, but follow the `README.md` setup steps. |
+| S3-9 | 🟢 **Fixed** | `makeCheckOrigin(cfg)` validates `Origin` against `ALLOWED_ORIGINS` (comma-split), with `localhost` fallbacks gated on `cfg.Env == "development"`. |
+
+Everything else in this document remains open and unverified.
+
+## Boundary — security vs. feature work
+
+Codex owns everything in this file. OpenCode + Antigravity own [`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md). Four items straddle the line and must be designed jointly, with Codex approving the design before implementation: **password reset / multi-device** (key lifecycle), **refresh tokens** (S2-1, same work item), **media storage / R2** (S1-1 confidentiality), and **CI** (runs every regression test specified here). See the Boundary table in the backlog for the split.
+
+**Live blocker, needs an owner now:** the S1-1 media auth change ships a user-facing regression — every `<img>`/`<a>` in the client 401s because browsers send no `Authorization` header. Choosing the mechanism (signed URLs vs. `?token=` vs. fetch-as-blob) is a **security** decision and therefore Codex's call; implementing the client side is feature work. This needs both parties in the same conversation before anyone writes code.
 
 ---
 
@@ -24,7 +47,16 @@ This is three defects that individually look moderate and together defeat the en
 
 **Independently:** filenames are `timestamp_randomhex` (`internal/storage/local.go:64`), which is unguessable — but that is obscurity, not access control. Any URL that is forwarded, logged, or leaked grants permanent unauthenticated access with no membership check and no expiry.
 
-**Fix direction** (user's architectural call — do not implement unilaterally):
+**DECISION (Codex, security owner) — short-lived, path-scoped media tickets.** Explicitly *not* session-JWT query parameters, and *not* a directly authenticated `FileServer` (both were tried and rejected — see the Status table). Design gates required before implementation:
+
+1. Persist an upload/object record and bind message media to it; **reject arbitrary client-supplied `media_url`** (closes S3-6 as a side effect).
+2. Authorize ticket issuance against the actual resource: conversation membership for message media, with a **separately defined** policy for stickers (public) and avatars (visibility rules differ — they are not conversation-scoped).
+3. The ticket carries only object ID/path, method, and a short expiry, signed with a **dedicated key purpose — not the session JWT**. The ticket endpoint must reject non-members, expired or tampered tickets, path traversal, and unlinked objects.
+4. The client receives a refreshable ticketed URL with **no session token in markup**. Tests must cover both browser rendering and non-member 403.
+
+Codex has reserved the media and group-key paths; do not modify them without their sign-off.
+
+**Original fix directions considered:**
 1. Serve media through an authenticated handler that checks conversation membership, with short-lived signed URLs.
 2. Never serve uploads from the app origin — separate domain/bucket, so injected script is not same-origin.
 3. Force `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` on all user content; drop `.svg` from image kinds, or rasterise on upload.

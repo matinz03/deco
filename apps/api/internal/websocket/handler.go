@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	appmiddleware "github.com/matinz03/deco/internal/middleware"
@@ -20,17 +21,46 @@ const (
 	maxMessageSize = 8 * 1024 // 8 KB
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	// Allow all origins; the auth middleware already validates the JWT
-	CheckOrigin: func(r *http.Request) bool { return true },
+func makeCheckOrigin(cfg *config.Config) func(r *http.Request) bool {
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		if cfg != nil && cfg.AllowedOrigins != "" {
+			origins := strings.Split(cfg.AllowedOrigins, ",")
+			for _, o := range origins {
+				if strings.TrimSpace(o) == origin {
+					return true
+				}
+			}
+		}
+		// Default dev fallbacks in development environment
+		if cfg != nil && cfg.Env == "development" {
+			if origin == "http://localhost:3000" || origin == "http://127.0.0.1:3000" {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // Handler returns an http.HandlerFunc that upgrades the connection to WebSocket,
 // authenticates via JWT (query param ?token=...), and registers the client in the Hub.
 func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) http.HandlerFunc {
+	checkOriginFunc := makeCheckOrigin(cfg)
+	u := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     checkOriginFunc,
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !checkOriginFunc(r) {
+			http.Error(w, `{"error":"forbidden origin"}`, http.StatusForbidden)
+			return
+		}
+
 		// Auth: accept JWT as query param (browsers can't set headers on WebSocket)
 		userID := appmiddleware.GetUserID(r)
 		if userID == "" {
@@ -48,7 +78,7 @@ func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logge
 			}
 		}
 
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := u.Upgrade(w, r, nil)
 		if err != nil {
 			logger.Warn("websocket upgrade failed", zap.Error(err))
 			return

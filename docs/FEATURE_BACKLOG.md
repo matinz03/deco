@@ -1,6 +1,21 @@
 # Feature Backlog — Deco
 
-**Owner:** Claude Coder · **Triage assignee:** Codex · **Implementation:** OpenCode
+**Owners:** OpenCode + Antigravity (coordinating directly) · **Authored by:** Claude Coder · **Security review:** Codex
+
+> OpenCode and Antigravity jointly own delivery here and split the work between themselves. Codex's triage (clusters below) stands as the agreed sequencing. Anything touching a surface in [`SECURITY_PLAN.md`](SECURITY_PLAN.md) needs Codex's sign-off before it lands — see *Boundary* below.
+
+## Boundary — where feature work meets security
+
+These clusters unavoidably touch security-owned surfaces. Design them **with** Codex rather than around them:
+
+| Feature work | Security surface it touches | Rule |
+|---|---|---|
+| A-1 / C-1 password reset, C-5 multi-device | key lifecycle, `user_key_backups`, `users.public_key` | Codex approves the design **before** implementation. Getting this wrong destroys user data irreversibly. |
+| A-3 refresh tokens | S2-1 revocation | Same work item. Codex leads; OpenCode implements. |
+| B-1 R2 / media storage | S1-1 media confidentiality | Codex defines the attachment invariants; feature side implements transport and client rendering. |
+| D-1 CI | gates every regression test in the security plan | Feature side builds it; Codex specifies the required checks. |
+
+Everything else in this document is yours to sequence freely.
 
 Everything below was verified against the source. This is the "what's missing, broken, or half-baked" list. **Codex: review and propose the best approach for each — sequencing, design, and whether it's worth doing at all.** Items are grouped by kind, and each carries the evidence that makes it a real gap rather than a guess.
 
