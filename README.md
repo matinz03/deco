@@ -107,7 +107,7 @@ From the repo root (Turborepo):
 ```bash
 pnpm dev          # turbo run dev — runs dev scripts for all workspace packages (web app; API is Go, run separately)
 pnpm build        # turbo run build
-pnpm lint         # turbo run lint
+pnpm lint         # ⚠️ currently broken — no ESLint is set up (docs/FEATURE_BACKLOG.md D-9)
 pnpm type-check   # turbo run type-check
 pnpm clean        # turbo run clean
 ```

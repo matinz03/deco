@@ -2,6 +2,21 @@
 
 Guidance for AI coding agents (Claude Code, Codex, Cursor, etc.) working in this repository.
 
+## Working rules (read before doing anything)
+
+These are not style preferences. Every one of them exists because its absence caused a real failure here — see [`docs/AGENT_OPERATIONS.md`](docs/AGENT_OPERATIONS.md) for the incidents.
+
+1. **Never certify your own work.** Do not report "verified", "fixed", or "100% pass" on a change you authored. Say what you did and what you ran; let a *different* agent confirm. Four of five false-success reports in Session 1 were self-certifications.
+2. **`go build ./...` before any claim of passing tests.** `go test ./...` prints `ok` for packages that still compile, so a broken build reads as a green suite. One "all 23 tests pass" report was made on a tree where the API would not compile at all.
+3. **Never weaken a gate to make it green.** Do not alias a script to a weaker command, add `continue-on-error`, skip a check, or edit an existing test so it passes. A falsely-green gate is worse than a red one — it outlives everyone's memory of why it was changed. If a gate genuinely cannot pass, leave it failing and report it.
+4. **Test the intended behaviour, never the current behaviour**, on anything listed in [`docs/SECURITY_PLAN.md`](docs/SECURITY_PLAN.md). A test asserting today's buggy output will fail when the bug is fixed and will read as a regression. If the fix is not in yet, write the test for the correct behaviour and `t.Skip` it with a reference to the item.
+5. **Verify claims before you act on them.** Treat other agents' reports as untrusted input. Read the diff, run the build. Several reports here were confidently wrong.
+6. **Server and client change together.** A change correct in Go can still break the browser: `<img>` and `<a>` cannot send an `Authorization` header, so an auth change on a media route breaks every image while all Go tests stay green. Cross-boundary changes are untested by default — exercise the real client path.
+7. **Work in your own worktree, on your own branch.** `git worktree add ../deco-<name> -b <branch>`. Never edit or commit on someone else's branch, and never stage files inside a path another agent has reserved.
+8. **Announce before committing to shared history**, not after. State the files and the branch.
+9. **Report what you disproved.** A hypothesis you knocked down is as useful as a bug you found, and it stops the next agent re-investigating it.
+10. **State scope honestly.** "Standing by for approval" while five files are already modified is a status error that corrupts everyone else's decisions.
+
 ## What this is
 
 Deco (env defaults still say `Bahregram` in places) is an end-to-end encrypted messaging app: a Go REST+WebSocket API and a Next.js web client, in a pnpm/Turborepo monorepo. The server never sees plaintext message content — only ciphertext, public keys, and encrypted key backups.
@@ -25,7 +40,7 @@ Build / lint / typecheck (Turborepo, from repo root):
 
 ```bash
 pnpm build         # turbo run build — builds apps/web and workspace packages
-pnpm lint          # turbo run lint
+pnpm lint          # ⚠️ BROKEN — there is no linting in this repo; see below
 pnpm type-check    # turbo run type-check (tsc --noEmit)
 pnpm clean
 ```
@@ -38,6 +53,8 @@ go vet ./...
 go test ./...                                             # all Go tests
 go test ./internal/middleware/ -run TestValidateToken -v  # a single test
 ```
+
+**`pnpm lint` does not work, and there is no linting in this repo at all.** `apps/web`'s `lint` script is `next lint`, but Next.js 16 removed that subcommand — the CLI parses `lint` as a directory and dies with `Invalid project directory provided`. There is no ESLint config (`.eslintrc*` / `eslint.config.*`) and no `eslint` dependency anywhere in the workspace. Tracked as **D-9** in [`docs/FEATURE_BACKLOG.md`](docs/FEATURE_BACKLOG.md). **Do not "fix" this by aliasing `lint` to another command** — that was attempted and produces a gate that reports green while enforcing nothing (see working rule 3). Until real ESLint exists, `type-check` is the only static gate on the JS side.
 
 Crypto package tests (from repo root):
 
