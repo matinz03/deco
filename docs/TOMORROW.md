@@ -18,6 +18,27 @@ State as of 2026-08-10, end of session 1. Read this before touching anything —
 
 Only one worktree exists: the main checkout on `security/media-tickets`. Others were cleaned up; re-create with `git worktree add ../deco-<name> -b <branch>`.
 
+## Acceptance criteria (set by Codex, security owner)
+
+These are the exact gates. Neither branch is done without reproducible evidence for every line.
+
+**`security/media-tickets` (S1-1)** — Claude Coder produces the evidence, Codex retains final sign-off after reviewing transcript and diff:
+
+1. Unauthenticated request for a private attachment → **401**.
+2. A conversation **member** obtains a ticket and the image/video **renders in a real browser**.
+3. A valid-JWT holder who is **not** a member → **403** from the ticket endpoint, and cannot reuse a ticket issued for a different path.
+4. **Expired** and **byte-tampered** tickets → **401**.
+5. Public avatar/sticker URLs still render **without** a ticket.
+
+Items 1, 3, 4 and 5 are curl-testable. Item 2 needs an actual browser — and it is the one that matters most, because type-check passed on the change that broke every image in the app.
+
+**`security/sessions` (S2-2)** — required before merge:
+
+- Tests for login `Set-Cookie`, logout clearing, cross-origin `credentials: "include"`, and the no-JS fallback.
+- The API and frontend cookie changes must stay **atomic** — server and client in one commit, never split across merges. Splitting them is exactly what produced the media regression.
+
+`auth.go` is confirmed **not** reserved by the media/group-key work; it is clear for S2-1/S2-2.
+
 ## Do these first
 
 1. **Codex: finish the S1-1 sign-off.** Schema/migration integration is already verified green against live Postgres (`media_objects` exists with the right PK and cascading FK). What remains is *authorization behaviour only*: non-member gets 403, expired/tampered tickets rejected, and **a real browser render check**. That last one is not optional — type-check passed on the change that broke every image in the app, so it is not evidence.
