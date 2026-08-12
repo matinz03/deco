@@ -107,7 +107,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		if !storage.IsPublicMediaPath(relativePath) && !storage.ValidateMediaTicket(relativePath, r.URL.Query().Get("ticket"), cfg.JWTSecret, time.Now()) {
+		if !storage.IsPublicMediaPath(relativePath) && !storage.ValidateMediaTicket(r.Method, relativePath, r.URL.Query().Get("ticket"), cfg.JWTSecret, time.Now()) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}

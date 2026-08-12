@@ -299,7 +299,7 @@ func isPrivateMediaMessage(messageType string) bool {
 }
 
 func (h *MessageHandler) ownsMediaObject(ctx context.Context, userID, mediaURL string) bool {
-	storagePath, ok := storage.PrivateMediaPath(mediaURL, h.cfg.PublicUploadBase)
+	storagePath, ok := storage.PrivateMediaPath(mediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
 	if !ok {
 		return false
 	}
@@ -319,11 +319,11 @@ func (h *MessageHandler) ticketMessageMedia(ctx context.Context, msg *models.Mes
 	if msg.MediaURL == nil {
 		return
 	}
-	_, ok := storage.PrivateMediaPath(*msg.MediaURL, h.cfg.PublicUploadBase)
+	_, ok := storage.PrivateMediaPath(*msg.MediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
 	if !ok || !h.ownsMediaObject(ctx, msg.SenderID, *msg.MediaURL) {
 		return
 	}
-	if ticketed, ok := storage.TicketedMediaURL(*msg.MediaURL, h.cfg.PublicUploadBase, h.cfg.JWTSecret, time.Now()); ok {
+	if ticketed, ok := storage.TicketedMediaURL(*msg.MediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin, h.cfg.JWTSecret, time.Now()); ok {
 		msg.MediaURL = &ticketed
 	}
 }

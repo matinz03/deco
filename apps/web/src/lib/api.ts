@@ -154,7 +154,12 @@ function mapKeyBackupResponse(r: any): KeyBackupResponse {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapUploadResponse(r: any): UploadResponse {
   return {
-    url: resolveAssetUrl(r.url ?? ""),
+    // Keep the upload's canonical relative path when it is sent back to the
+    // API as media_url. Resolving it here would turn it into an absolute URL,
+    // which would either force the server to trust an origin supplied by the
+    // client or let an attacker substitute a different origin. Messages are
+    // resolved for display by mapMessage after the server has authorized them.
+    url: r.url ?? "",
     mimeType: r.mime_type ?? r.mimeType ?? "",
     size: r.size ?? 0,
     name: r.name ?? "",

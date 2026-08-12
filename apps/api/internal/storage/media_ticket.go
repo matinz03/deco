@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"strconv"
@@ -14,13 +15,26 @@ import (
 
 const mediaTicketLifetime = 5 * time.Minute
 
-// PrivateMediaPath converts a stored or client-resolved media URL into the
-// canonical relative path used by local storage. Only message attachments are
-// private; avatars and sticker assets deliberately have public visibility.
-func PrivateMediaPath(value, publicBase string) (string, bool) {
+// PrivateMediaPath converts a stored local media URL into the canonical
+// relative path used by local storage. Only message attachments are private;
+// avatars and sticker assets deliberately have public visibility.
+func PrivateMediaPath(value, publicBase, publicOrigin string) (string, bool) {
 	value = strings.TrimSpace(value)
-	if parsed, err := url.Parse(value); err == nil && parsed.Path != "" {
-		value = parsed.Path
+	if parsed, err := url.Parse(value); err == nil {
+		if parsed.IsAbs() || parsed.Host != "" {
+			trustedOrigin, err := url.Parse(publicOrigin)
+			if err != nil || !trustedOrigin.IsAbs() || trustedOrigin.Host == "" || parsed.User != nil || parsed.Scheme != trustedOrigin.Scheme || parsed.Host != trustedOrigin.Host {
+				return "", false
+			}
+			// Older clients persisted this same-origin absolute form. Normalize it
+			// only after the configured API origin has matched exactly.
+			if parsed.Path == "" {
+				return "", false
+			}
+			value = parsed.Path
+		} else if parsed.Path != "" {
+			value = parsed.Path
+		}
 	}
 	publicBase = strings.TrimRight(strings.TrimSpace(publicBase), "/")
 	if publicBase != "" {
@@ -45,18 +59,18 @@ func IsPublicMediaPath(value string) bool {
 	return strings.HasPrefix(cleaned, "avatars/") || strings.HasPrefix(cleaned, "stickers/")
 }
 
-func SignMediaTicket(relativePath, jwtSecret string, now time.Time) (string, error) {
-	if !isPrivateMediaPath(relativePath) {
+func SignMediaTicket(method, relativePath, jwtSecret string, now time.Time) (string, error) {
+	if method != http.MethodGet || !isPrivateMediaPath(relativePath) {
 		return "", fmt.Errorf("invalid private media path")
 	}
 	expiresAt := now.Add(mediaTicketLifetime).Unix()
-	payload := relativePath + "\n" + strconv.FormatInt(expiresAt, 10)
+	payload := method + "\n" + relativePath + "\n" + strconv.FormatInt(expiresAt, 10)
 	signature := signMediaPayload(payload, jwtSecret)
 	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
-func ValidateMediaTicket(relativePath, ticket, jwtSecret string, now time.Time) bool {
-	if !isPrivateMediaPath(relativePath) {
+func ValidateMediaTicket(method, relativePath, ticket, jwtSecret string, now time.Time) bool {
+	if method != http.MethodGet || !isPrivateMediaPath(relativePath) {
 		return false
 	}
 	parts := strings.Split(ticket, ".")
@@ -72,19 +86,19 @@ func ValidateMediaTicket(relativePath, ticket, jwtSecret string, now time.Time) 
 		return false
 	}
 	fields := strings.Split(string(payloadBytes), "\n")
-	if len(fields) != 2 || fields[0] != relativePath {
+	if len(fields) != 3 || fields[0] != method || fields[1] != relativePath {
 		return false
 	}
-	expiresAt, err := strconv.ParseInt(fields[1], 10, 64)
+	expiresAt, err := strconv.ParseInt(fields[2], 10, 64)
 	return err == nil && now.Unix() <= expiresAt
 }
 
-func TicketedMediaURL(value, publicBase, jwtSecret string, now time.Time) (string, bool) {
-	relativePath, ok := PrivateMediaPath(value, publicBase)
+func TicketedMediaURL(value, publicBase, publicOrigin, jwtSecret string, now time.Time) (string, bool) {
+	relativePath, ok := PrivateMediaPath(value, publicBase, publicOrigin)
 	if !ok {
 		return value, false
 	}
-	ticket, err := SignMediaTicket(relativePath, jwtSecret, now)
+	ticket, err := SignMediaTicket(http.MethodGet, relativePath, jwtSecret, now)
 	if err != nil {
 		return value, false
 	}

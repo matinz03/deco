@@ -67,7 +67,7 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to save upload")
 		return
 	}
-	storagePath, ok := storage.PrivateMediaPath(saved.URL, h.cfg.PublicUploadBase)
+	storagePath, ok := storage.PrivateMediaPath(saved.URL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
 	if ok {
 		if _, err := h.pool.Exec(r.Context(), `
 			INSERT INTO media_objects (storage_path, owner_id, kind)
