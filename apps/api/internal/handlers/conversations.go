@@ -138,6 +138,10 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "direct"
 	}
+	if req.Type == string(models.ConversationTypeSaved) {
+		respondError(w, http.StatusBadRequest, "saved conversations are created automatically")
+		return
+	}
 
 	// For direct messages, check if one already exists
 	if req.Type == "direct" && len(req.MemberIDs) == 1 {
@@ -576,56 +580,37 @@ func (h *ConversationHandler) decorateConversations(conversations []models.Conve
 }
 
 func (h *ConversationHandler) ensureSavedConversation(ctx context.Context, userID string) (string, error) {
-	var conversationID string
-	err := h.pool.QueryRow(ctx, `
-		SELECT c.id
-		FROM conversations c
-		JOIN members m ON m.conversation_id = c.id
-		WHERE c.type = 'saved' AND m.user_id = $1
-		LIMIT 1
-	`, userID).Scan(&conversationID)
-	if err == nil {
-		return conversationID, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
-	}
-
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback(ctx)
 
+	var conversationID string
 	err = tx.QueryRow(ctx, `
-		SELECT c.id
-		FROM conversations c
-		JOIN members m ON m.conversation_id = c.id
-		WHERE c.type = 'saved' AND m.user_id = $1
-		LIMIT 1
+		INSERT INTO conversations (type, name, description, created_by_id, saved_for_user_id)
+		VALUES ('saved', 'Saved Messages', 'Private notes to yourself', $1, $1)
+		ON CONFLICT (saved_for_user_id) DO NOTHING
+		RETURNING id
 	`, userID).Scan(&conversationID)
-	if err == nil {
-		if commitErr := tx.Commit(ctx); commitErr != nil {
-			return "", commitErr
-		}
-		return conversationID, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
 	}
 
-	err = tx.QueryRow(ctx, `
-		INSERT INTO conversations (type, name, description, created_by_id)
-		VALUES ('saved', 'Saved Messages', 'Private notes to yourself', $1)
-		RETURNING id
-	`, userID).Scan(&conversationID)
-	if err != nil {
-		return "", err
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.QueryRow(ctx, `
+			SELECT id
+			FROM conversations
+			WHERE saved_for_user_id = $1
+		`, userID).Scan(&conversationID); err != nil {
+			return "", err
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO members (conversation_id, user_id, role)
 		VALUES ($1, $2, 'owner')
+		ON CONFLICT DO NOTHING
 	`, conversationID, userID); err != nil {
 		return "", err
 	}

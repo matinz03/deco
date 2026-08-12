@@ -1,5 +1,21 @@
 import type { NextConfig } from "next";
 
+function getCspOrigin(value: string | undefined) {
+  if (!value) return undefined;
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+const mediaOrigins = Array.from(
+  new Set([getCspOrigin(process.env.NEXT_PUBLIC_API_URL), getCspOrigin(process.env.R2_PUBLIC_URL)].filter(Boolean))
+);
+const imageSources = ["'self'", "blob:", "data:", ...mediaOrigins].join(" ");
+const mediaSources = ["'self'", "blob:", ...mediaOrigins].join(" ");
+
 const nextConfig: NextConfig = {
   // Enable React strict mode for catching bugs early
   reactStrictMode: true,
@@ -37,8 +53,8 @@ const nextConfig: NextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               "style-src 'self' 'unsafe-inline'",
               `connect-src 'self' ${process.env.NEXT_PUBLIC_API_URL} ${process.env.NEXT_PUBLIC_WS_URL}`,
-              "img-src 'self' blob: data:",
-              "media-src 'self' blob:",
+              `img-src ${imageSources}`,
+              `media-src ${mediaSources}`,
             ].join("; "),
           },
         ],

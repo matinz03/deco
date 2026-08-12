@@ -18,6 +18,8 @@ const SharedMediaPortal = dynamic(
   { ssr: false }
 );
 
+const EMPTY_MESSAGES: Message[] = [];
+
 interface Props {
   conversation: Conversation;
   onJumpToMessage?: (messageId: string) => void;
@@ -39,7 +41,7 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
   const muteConversation = useConversationStore((s) => s.muteConversation);
   const unmuteConversation = useConversationStore((s) => s.unmuteConversation);
   const clearConversationMessages = useConversationStore((s) => s.clearConversationMessages);
-  const conversationMessages = useConversationStore((s) => s.messages[liveConversation.id] ?? []);
+  const conversationMessages = useConversationStore((s) => s.messages[liveConversation.id] ?? EMPTY_MESSAGES);
 
   const title = liveConversation.name || "Unknown conversation";
   const currentMember = liveConversation.members?.find((member) => member.userId === currentUserId);
