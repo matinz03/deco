@@ -163,6 +163,10 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		return err
 	}
 
+	if err := ensureSavedConversationUniqueness(ctx, pool); err != nil {
+		return err
+	}
+
 	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS user_key_backups (
 			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -452,4 +456,104 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	`)
 
 	return err
+}
+
+func ensureSavedConversationUniqueness(ctx context.Context, pool *pgxpool.Pool) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		ALTER TABLE conversations
+		ADD COLUMN IF NOT EXISTS saved_for_user_id UUID REFERENCES users(id)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		WITH saved AS (
+			SELECT c.id, m.user_id, c.created_at, COUNT(msg.id) AS message_count
+			FROM conversations c
+			JOIN members m ON m.conversation_id = c.id
+			LEFT JOIN messages msg ON msg.conversation_id = c.id
+			WHERE c.type = 'saved'
+			GROUP BY c.id, m.user_id, c.created_at
+		), ranked AS (
+			SELECT id,
+				FIRST_VALUE(id) OVER (
+					PARTITION BY user_id
+					ORDER BY message_count DESC, created_at, id
+				) AS canonical_id
+			FROM saved
+		), duplicates AS (
+			SELECT id, canonical_id
+			FROM ranked
+			WHERE id <> canonical_id
+		)
+		UPDATE messages msg
+		SET conversation_id = duplicates.canonical_id
+		FROM duplicates
+		WHERE msg.conversation_id = duplicates.id
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		WITH saved AS (
+			SELECT c.id, m.user_id, c.created_at, COUNT(msg.id) AS message_count
+			FROM conversations c
+			JOIN members m ON m.conversation_id = c.id
+			LEFT JOIN messages msg ON msg.conversation_id = c.id
+			WHERE c.type = 'saved'
+			GROUP BY c.id, m.user_id, c.created_at
+		), ranked AS (
+			SELECT id,
+				FIRST_VALUE(id) OVER (
+					PARTITION BY user_id
+					ORDER BY message_count DESC, created_at, id
+				) AS canonical_id
+			FROM saved
+		), duplicates AS (
+			SELECT id
+			FROM ranked
+			WHERE id <> canonical_id
+		)
+		DELETE FROM conversations c
+		USING duplicates
+		WHERE c.id = duplicates.id
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE conversations c
+		SET saved_for_user_id = m.user_id
+		FROM members m
+		WHERE c.id = m.conversation_id
+		  AND c.type = 'saved'
+		  AND c.saved_for_user_id IS NULL
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint
+				WHERE conname = 'conversations_saved_for_user_id_key'
+				  AND conrelid = 'conversations'::regclass
+			) THEN
+				ALTER TABLE conversations
+				ADD CONSTRAINT conversations_saved_for_user_id_key UNIQUE (saved_for_user_id);
+			END IF;
+		END $$;
+	`); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

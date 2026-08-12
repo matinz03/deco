@@ -35,6 +35,7 @@ CREATE TABLE conversations (
   avatar_url    TEXT NOT NULL DEFAULT '',
   description   TEXT NOT NULL DEFAULT '',
   created_by_id UUID NOT NULL REFERENCES users(id),
+  saved_for_user_id UUID UNIQUE REFERENCES users(id),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
