@@ -104,12 +104,29 @@ Commands run after these changes:
   exit code 0.
 - `go -C apps/api vet ./...` — exit code 0.
 
+PostgreSQL-backed integration coverage now lives in
+`apps/api/internal/handlers/media_ticket_integration_test.go` and
+`apps/api/internal/handlers/uploads_integration_test.go`. It mounts the real
+authenticated routes, creates an isolated per-run schema in a dedicated
+`deco_s1_test` database, and drops only that schema during cleanup. The test
+tables include the user/conversation foreign keys exercised by these paths.
+Coverage includes missing authentication, member/non-member authorization,
+deleted and unregistered media, multipart registration, HTML rejection, and
+definite registration-error cleanup. The tests skip unless
+`TEST_DATABASE_URL` is set and refuse any database name other than
+`deco_s1_test`:
+
+```bash
+TEST_DATABASE_URL=postgres://.../deco_s1_test?sslmode=disable \
+  go -C apps/api test ./internal/handlers \
+  -run 'Test(GetMediaTicket|Upload)Integration' -count=1 -v
+```
+
 Remaining S1-1 evidence and design work:
 
-- Database-backed tests for ticket issuance: authorized members, non-members,
-  deleted messages, and unregistered objects.
-- Multipart endpoint tests for authentication, registration, and cleanup paths.
-- Real-browser checks for image/video/audio loading and ticket refresh.
+- A real-browser, authenticated client check for image/video/audio loading and
+  ticket refresh. `apps/web` has no browser-test harness or browser-test
+  dependency, so this requires a reviewed test-environment decision.
 - The pending-to-attached object state machine and opaque object IDs required
   before the MinIO migration; messages still use legacy `media_url` values.
 
