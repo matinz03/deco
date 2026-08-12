@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
-	"strings"
 	"syscall"
 	"time"
 
@@ -96,34 +94,9 @@ func main() {
 		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub)
 	})
 
-	// WebSocket endpoint — auth handled inside the handler via ?token= query param
-	uploadBase := cfg.PublicUploadBase
-	if uploadBase == "" {
-		uploadBase = "/api/v1/media"
-	}
-	uploadHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		relativePath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-		if strings.HasSuffix(relativePath, "/") {
-			http.NotFound(w, r)
-			return
-		}
-		if !storage.IsPublicMediaPath(relativePath) && !storage.ValidateMediaTicket(r.Method, relativePath, r.URL.Query().Get("ticket"), cfg.JWTSecret, time.Now()) {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
+	registerMediaRoutes(r, cfg, time.Now)
 
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'")
-		if strings.HasPrefix(relativePath, "messages/files/") {
-			w.Header().Set("Content-Disposition", "attachment")
-		}
-		fs := http.FileServer(http.Dir(cfg.UploadRoot))
-		fs.ServeHTTP(w, r)
-	})
-	r.Handle(uploadBase+"/*", http.StripPrefix(uploadBase+"/", uploadHandler))
-	if uploadBase != "/uploads" {
-		r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadHandler))
-	}
+	// WebSocket endpoint — auth handled inside the handler via ?token= query param
 	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger))
 
 	// Server

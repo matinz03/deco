@@ -11,17 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
 )
 
 type Kind string
 
 const (
-	KindAvatar Kind = "avatar"
-	KindImage  Kind = "image"
-	KindVideo  Kind = "video"
-	KindAudio  Kind = "audio"
-	KindFile   Kind = "file"
+	KindAvatar  Kind = "avatar"
+	KindImage   Kind = "image"
+	KindVideo   Kind = "video"
+	KindAudio   Kind = "audio"
+	KindFile    Kind = "file"
 	KindSticker Kind = "sticker"
 )
 
@@ -69,10 +68,15 @@ func Save(kind Kind, root, publicBase, originalName, mimeType string, data io.Re
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
 	written, err := io.Copy(file, data)
 	if err != nil {
+		_ = file.Close()
+		_ = os.Remove(absolutePath)
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(absolutePath)
 		return nil, err
 	}
 
@@ -84,12 +88,10 @@ func Save(kind Kind, root, publicBase, originalName, mimeType string, data io.Re
 	}, nil
 }
 
-func DetectMimeType(header []byte, fallback string) string {
-	detected := http.DetectContentType(header)
-	if detected == "application/octet-stream" && fallback != "" {
-		return fallback
-	}
-	return detected
+func DetectMimeType(header []byte, _ string) string {
+	// A multipart Content-Type is supplied by an untrusted client. Keep it out
+	// of the authorization decision when the bytes cannot be identified.
+	return http.DetectContentType(header)
 }
 
 func subdirectoryForKind(kind Kind, originalName, mimeType string) string {
@@ -134,6 +136,17 @@ func sanitizeFileName(name string) string {
 		return "upload"
 	}
 	return name
+}
+
+// RemovePrivate removes a server-generated private attachment after a
+// definite failure to register it. It refuses public paths and traversal so a
+// failed upload can never delete an unrelated file.
+func RemovePrivate(root, relativePath string) error {
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(relativePath)))
+	if cleaned != relativePath || !isPrivateMediaPath(cleaned) {
+		return fmt.Errorf("invalid private media path")
+	}
+	return os.Remove(filepath.Join(root, filepath.FromSlash(cleaned)))
 }
 
 func joinURL(base, rel string) string {

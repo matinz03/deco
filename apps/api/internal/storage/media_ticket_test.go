@@ -47,6 +47,16 @@ func TestPrivateMediaPath(t *testing.T) {
 	if _, ok := PrivateMediaPath("//attacker.example/messages/images/a.png", "/api/v1/media", "https://api.example.test"); ok {
 		t.Fatal("protocol-relative attacker URL unexpectedly accepted")
 	}
+	for _, value := range []string{
+		"https://api.example.test.attacker.test/api/v1/media/messages/images/a.png",
+		"http://api.example.test/api/v1/media/messages/images/a.png",
+		"https://api.example.test:444/api/v1/media/messages/images/a.png",
+		"https://user@api.example.test/api/v1/media/messages/images/a.png",
+	} {
+		if _, ok := PrivateMediaPath(value, "/api/v1/media", "https://api.example.test"); ok {
+			t.Fatalf("untrusted legacy URL %q unexpectedly accepted", value)
+		}
+	}
 	path, ok = PrivateMediaPath("https://api.example.test/api/v1/media/messages/images/a.png", "/api/v1/media", "https://api.example.test")
 	if !ok || path != "messages/images/a.png" {
 		t.Fatalf("same-origin absolute PrivateMediaPath() = %q, %v", path, ok)

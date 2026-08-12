@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"bufio"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	appmiddleware "github.com/matinz03/deco/internal/middleware"
@@ -73,6 +75,18 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO media_objects (storage_path, owner_id, kind)
 			VALUES ($1, $2, $3)
 		`, storagePath, userID, string(kind)); err != nil {
+			var databaseError *pgconn.PgError
+			if errors.As(err, &databaseError) {
+				if cleanupErr := storage.RemovePrivate(h.cfg.UploadRoot, storagePath); cleanupErr != nil {
+					h.logger.Error("failed to remove unregistered upload", zap.Error(cleanupErr), zap.String("path", storagePath))
+				}
+			} else {
+				// Connection failures may be ambiguous: PostgreSQL could have
+				// committed before the client observed the error. Leave the file
+				// for reconciliation rather than creating a registered object that
+				// points to missing media.
+				h.logger.Warn("upload registration outcome is unknown; retaining file for reconciliation", zap.Error(err), zap.String("path", storagePath))
+			}
 			h.logger.Error("failed to register upload", zap.Error(err), zap.String("user_id", userID), zap.String("path", storagePath))
 			respondError(w, http.StatusInternalServerError, "failed to register upload")
 			return
@@ -115,11 +129,21 @@ func maxBytesForKind(kind storage.Kind) int64 {
 }
 
 func isAllowedUpload(kind storage.Kind, mimeType, filename string) bool {
-	return isAllowedMime(kind, mimeType) && isAllowedExtension(kind, filename)
+	if !isAllowedExtension(kind, filename) {
+		return false
+	}
+	if kind == storage.KindFile {
+		return isAllowedFileMime(mimeType, filename)
+	}
+	if kind == storage.KindSticker && strings.EqualFold(filepath.Ext(strings.TrimSpace(filename)), ".tgs") {
+		mimeType = normalizeMimeType(mimeType)
+		return mimeType == "application/x-tgsticker" || mimeType == "application/gzip" || mimeType == "application/x-gzip"
+	}
+	return isAllowedMime(kind, mimeType)
 }
 
 func isAllowedMime(kind storage.Kind, mimeType string) bool {
-	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	mimeType = normalizeMimeType(mimeType)
 	if strings.Contains(mimeType, "html") || strings.Contains(mimeType, "javascript") || strings.Contains(mimeType, "svg") {
 		return false
 	}
@@ -132,12 +156,56 @@ func isAllowedMime(kind storage.Kind, mimeType string) bool {
 	case storage.KindAudio:
 		return strings.HasPrefix(mimeType, "audio/") || mimeType == "video/webm" || mimeType == "application/mp4"
 	case storage.KindFile:
-		return true
+		return false
 	case storage.KindSticker:
 		return strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "video/") || mimeType == "application/x-tgsticker"
 	default:
 		return false
 	}
+}
+
+func isAllowedFileMime(mimeType, filename string) bool {
+	mimeType = normalizeMimeType(mimeType)
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
+
+	switch ext {
+	case ".pdf":
+		return mimeType == "application/pdf"
+	case ".txt":
+		return mimeType == "text/plain"
+	case ".csv":
+		return mimeType == "text/csv" || mimeType == "text/plain"
+	case ".doc":
+		return mimeType == "application/msword"
+	case ".docx":
+		return mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType == "application/zip"
+	case ".xls":
+		return mimeType == "application/vnd.ms-excel"
+	case ".xlsx":
+		return mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || mimeType == "application/zip"
+	case ".zip":
+		return mimeType == "application/zip"
+	case ".tar":
+		return mimeType == "application/x-tar"
+	case ".gz":
+		return mimeType == "application/gzip" || mimeType == "application/x-gzip"
+	case ".7z":
+		return mimeType == "application/x-7z-compressed"
+	case ".png":
+		return mimeType == "image/png"
+	case ".jpg", ".jpeg":
+		return mimeType == "image/jpeg"
+	case ".mp4":
+		return mimeType == "video/mp4"
+	case ".mp3":
+		return mimeType == "audio/mpeg"
+	default:
+		return false
+	}
+}
+
+func normalizeMimeType(mimeType string) string {
+	return strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
 }
 
 func isAllowedExtension(kind storage.Kind, filename string) bool {
