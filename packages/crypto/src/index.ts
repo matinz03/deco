@@ -9,7 +9,13 @@
  */
 
 import nacl from "tweetnacl";
-import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from "tweetnacl-util";
+// tweetnacl-util is CommonJS and assigns its exports dynamically, so named ESM
+// imports fail to link under Node's ESM loader. Bundlers tolerate it; `node --test`
+// does not. Importing the default and destructuring keeps this module loadable by
+// the test runner, so the tests exercise this file instead of a copy of it.
+import naclUtil from "tweetnacl-util";
+
+const { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } = naclUtil;
 import type { KeyBackupPayload } from "@deco/types";
 
 // ─── Key Generation ───────────────────────────────────────────────────────────

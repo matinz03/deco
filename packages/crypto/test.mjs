@@ -1,72 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import nacl from '../../node_modules/.pnpm/tweetnacl@1.0.3/node_modules/tweetnacl/nacl-fast.js';
-import naclUtil from '../../node_modules/.pnpm/tweetnacl-util@0.15.1/node_modules/tweetnacl-util/nacl-util.js';
+import nacl from 'tweetnacl';
+import naclUtil from 'tweetnacl-util';
 
-const { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } = naclUtil;
+// These tests import the REAL implementation. They previously re-declared every
+// function inline, which meant a green suite proved nothing about the shipped
+// module — the copy could drift from src/index.ts silently.
+import {
+  generateKeyPair,
+  deriveSharedSecret,
+  encryptMessage,
+  decryptMessage,
+  generateGroupKey,
+  encryptBlob,
+  decryptBlob,
+} from './src/index.ts';
 
-function generateKeyPair() {
-  const kp = nacl.box.keyPair();
-  return { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
-}
-
-function deriveSharedSecret(theirPublicKeyB64, myPrivateKeyB64) {
-  const pub = decodeBase64(theirPublicKeyB64);
-  const priv = decodeBase64(myPrivateKeyB64);
-  const shared = nacl.scalarMult(priv, pub);
-  return encodeBase64(shared);
-}
-
-function encryptMessage(plaintext, sharedSecretB64) {
-  const key = decodeBase64(sharedSecretB64);
-  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const msg = decodeUTF8(plaintext);
-  const ciphertext = nacl.secretbox(msg, nonce, key);
-
-  const combined = new Uint8Array(nonce.length + ciphertext.length);
-  combined.set(nonce);
-  combined.set(ciphertext, nonce.length);
-  return encodeBase64(combined);
-}
-
-function decryptMessage(encryptedB64, sharedSecretB64) {
-  const key = decodeBase64(sharedSecretB64);
-  const combined = decodeBase64(encryptedB64);
-  const nonce = combined.slice(0, nacl.secretbox.nonceLength);
-  const ciphertext = combined.slice(nacl.secretbox.nonceLength);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
-  if (!plaintext) throw new Error("Decryption failed — message may be corrupted or tampered with");
-  return encodeUTF8(plaintext);
-}
-
-function generateGroupKey() {
-  return encodeBase64(nacl.randomBytes(nacl.secretbox.keyLength));
-}
-
-function encryptBlob(data, keyB64) {
-  const key = decodeBase64(keyB64);
-  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(data, nonce, key);
-
-  const combined = new Uint8Array(nonce.length + ciphertext.length);
-  combined.set(nonce);
-  combined.set(ciphertext, nonce.length);
-  return combined;
-}
-
-function decryptBlob(encrypted, keyB64) {
-  const key = decodeBase64(keyB64);
-
-  if (encrypted.length < nacl.secretbox.nonceLength + nacl.secretbox.overheadLength) {
-    throw new Error("Decryption failed — attachment may be corrupted or tampered with");
-  }
-
-  const nonce = encrypted.slice(0, nacl.secretbox.nonceLength);
-  const ciphertext = encrypted.slice(nacl.secretbox.nonceLength);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
-  if (!plaintext) throw new Error("Decryption failed — attachment may be corrupted or tampered with");
-  return plaintext;
-}
+const { decodeUTF8 } = naclUtil;
 
 test('KeyPair Generation', () => {
   const kp = generateKeyPair();
