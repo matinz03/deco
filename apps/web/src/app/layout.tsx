@@ -1,4 +1,5 @@
 import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkBootstrapGate } from "@/components/auth/ClerkBootstrapGate";
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -40,6 +41,7 @@ export default function RootLayout({
             accepts the legacy auth_token cookie, so without this a Clerk
             sign-out leaves the user stuck inside the app. */}
         <ClerkProvider afterSignOutUrl="/sign-out">
+          <ClerkBootstrapGate />
           <Providers>{children}</Providers>
         </ClerkProvider>
       </body>
