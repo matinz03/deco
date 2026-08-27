@@ -487,10 +487,11 @@ func ensureClerkIdentityColumns(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 
-	// Append-only audit of every public key ever written for a user.
+	// Append-only audit of every public key ever written for a user: no UPDATE,
+	// and no direct DELETE (both enforced by triggers below).
 	// ON DELETE CASCADE so that deleting a user (users.go admin delete) still
-	// works; the append-only guarantee is about mutation, not about a user's
-	// right to be removed.
+	// works; the guarantee is that no one can rewrite or quietly erase the key
+	// history of a user who still exists, not that a user cannot be removed.
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS user_public_key_audit (
 			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -531,6 +532,41 @@ func ensureClerkIdentityColumns(ctx context.Context, pool *pgxpool.Pool) error {
 				CREATE TRIGGER trg_user_public_key_audit_append_only
 				  BEFORE UPDATE ON user_public_key_audit
 				  FOR EACH ROW EXECUTE FUNCTION deco_reject_row_update();
+			END IF;
+		END $$;
+	`); err != nil {
+		return err
+	}
+
+	// Blocking UPDATE alone left the table's own error message ("is append-only")
+	// untrue: a direct DELETE removed audit rows silently, so anyone able to
+	// rewrite a public key could also erase the evidence that they had. The
+	// depth check distinguishes a direct statement (depth 1) from the FK
+	// ON DELETE CASCADE above (depth > 1), so admin user-deletion still works
+	// while `DELETE FROM user_public_key_audit` is refused.
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION deco_reject_direct_row_delete()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			IF pg_trigger_depth() <= 1 THEN
+				RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+			END IF;
+			RETURN OLD;
+		END;
+		$$ LANGUAGE plpgsql;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger WHERE tgname = 'trg_user_public_key_audit_no_delete'
+			) THEN
+				CREATE TRIGGER trg_user_public_key_audit_no_delete
+				  BEFORE DELETE ON user_public_key_audit
+				  FOR EACH ROW EXECUTE FUNCTION deco_reject_direct_row_delete();
 			END IF;
 		END $$;
 	`); err != nil {
