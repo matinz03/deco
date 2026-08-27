@@ -35,7 +35,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
-        <ClerkProvider>
+        {/* afterSignOutUrl points at /sign-out, which clears the legacy
+            bcrypt session as well. Clerk clears only its own, and proxy.ts
+            accepts the legacy auth_token cookie, so without this a Clerk
+            sign-out leaves the user stuck inside the app. */}
+        <ClerkProvider afterSignOutUrl="/sign-out">
           <Providers>{children}</Providers>
         </ClerkProvider>
       </body>

@@ -49,6 +49,10 @@ export function ClerkAuthControls() {
               Your Deco profile is created on first use.
             </span>
           </div>
+          {/* Sign-out lands on /sign-out via ClerkProvider's afterSignOutUrl,
+              which clears the legacy session too — Clerk's own sign-out leaves
+              auth_token behind. The prop was removed from UserButton in v7, so
+              it is set once on the provider in app/layout.tsx. */}
           <UserButton />
         </div>
       </Show>
