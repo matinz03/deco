@@ -1,5 +1,12 @@
 import { LoginForm } from "@/components/auth/LoginForm";
+import { ClerkAuthControls } from "@/components/auth/ClerkAuthControls";
 import Link from "next/link";
+
+// Clerk is opt-in and mirrors the server default (CLERK_ENABLED=false in
+// internal/config/clerk.go). Without a publishable key the Clerk controls are
+// not rendered at all, so a checkout with no Clerk keys sees the login page
+// exactly as before.
+const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
 export const metadata = { title: "Sign in — Deco" };
 
@@ -16,6 +23,8 @@ export default function LoginPage() {
       </div>
 
       <LoginForm />
+
+      {clerkEnabled && <ClerkAuthControls />}
 
       <p className="text-center text-sm text-muted">
         Don&apos;t have an account?{" "}
