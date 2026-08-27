@@ -1,16 +1,22 @@
 package handlers
 
 import (
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/telegram"
 	"github.com/matinz03/deco/internal/websocket"
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
-func RegisterAuthRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+// RegisterAuthRoutes mounts the legacy password endpoints and, when the managed
+// identity path is enabled, the profile bootstrap endpoint.
+//
+// register/login/logout/refresh are deliberately left in place: there is no
+// cutover yet, and both authentication paths must coexist. Retiring bcrypt is a
+// separate, later change.
+func RegisterAuthRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &AuthHandler{pool: pool, cfg: cfg, logger: logger}
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/register", h.Register)
@@ -18,12 +24,22 @@ func RegisterAuthRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, lo
 		r.Post("/logout", h.Logout)
 		r.Post("/refresh", h.Refresh)
 	})
+
+	if auth != nil && auth.ClerkEnabled() {
+		p := NewProfileHandler(pool, cfg, logger, auth)
+		r.Group(func(r chi.Router) {
+			// RequireVerifiedToken, not Middleware: this is the one route
+			// that must be reachable before a profile row exists.
+			r.Use(auth.RequireVerifiedToken())
+			r.Post("/profile/bootstrap", p.Bootstrap)
+		})
+	}
 }
 
-func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &UserHandler{pool: pool, cfg: cfg, logger: logger}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/me", h.GetMe)
 			r.Patch("/me", h.UpdateMe)
@@ -39,10 +55,10 @@ func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, lo
 	})
 }
 
-func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &ConversationHandler{pool: pool, cfg: cfg, logger: logger}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/conversations", func(r chi.Router) {
 			r.Get("/", h.List)
 			r.Post("/", h.Create)
@@ -62,20 +78,20 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 	})
 }
 
-func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &UploadHandler{pool: pool, cfg: cfg, logger: logger}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/uploads", func(r chi.Router) {
 			r.Post("/", h.Create)
 		})
 	})
 }
 
-func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &StickerHandler{pool: pool, cfg: cfg, logger: logger, telegram: telegram.NewClient(cfg.TelegramBotToken)}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/stickers", func(r chi.Router) {
 			r.Get("/packs", h.ListPacks)
 			r.Post("/packs", h.CreatePack)
@@ -89,10 +105,10 @@ func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config,
 	})
 }
 
-func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub) {
+func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub, auth *middleware.Authenticator) {
 	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/conversations/{conversationID}/messages", func(r chi.Router) {
 			r.Get("/", h.List)
 			r.Post("/", h.Send)

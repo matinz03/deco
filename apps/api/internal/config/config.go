@@ -3,21 +3,22 @@ package config
 import "os"
 
 type Config struct {
-	Port           string
-	Env            string
-	DatabaseURL    string
-	RedisURL       string
-	JWTSecret      string
-	AllowedOrigins string
-	UploadRoot     string
+	Port             string
+	Env              string
+	DatabaseURL      string
+	RedisURL         string
+	JWTSecret        string
+	AllowedOrigins   string
+	UploadRoot       string
 	PublicUploadBase string
 	TelegramBotToken string
-	R2AccountID    string
-	R2AccessKey    string
-	R2SecretKey    string
-	R2BucketName   string
-	R2PublicURL    string
-	AnthropicKey   string
+	R2AccountID      string
+	R2AccessKey      string
+	R2SecretKey      string
+	R2BucketName     string
+	R2PublicURL      string
+	AnthropicKey     string
+	Clerk            ClerkConfig
 }
 
 func Load() *Config {
@@ -37,6 +38,7 @@ func Load() *Config {
 		R2BucketName:     getEnv("R2_BUCKET_NAME", "deco-media"),
 		R2PublicURL:      getEnv("R2_PUBLIC_URL", ""),
 		AnthropicKey:     getEnv("ANTHROPIC_API_KEY", ""),
+		Clerk:            LoadClerk(),
 	}
 
 	if cfg.Env != "development" && (cfg.JWTSecret == "" || cfg.JWTSecret == "change-me") {

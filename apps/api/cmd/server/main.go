@@ -9,16 +9,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/matinz03/deco/internal/config"
-	"github.com/matinz03/deco/internal/db"
-	"github.com/matinz03/deco/internal/handlers"
-	"github.com/matinz03/deco/internal/storage"
-	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
 	"github.com/joho/godotenv"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/db"
+	"github.com/matinz03/deco/internal/handlers"
+	appmiddleware "github.com/matinz03/deco/internal/middleware"
+	"github.com/matinz03/deco/internal/storage"
+	"github.com/matinz03/deco/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -56,6 +57,21 @@ func main() {
 	}
 	defer rdb.Close()
 
+	// Authenticator — one instance shared by the REST middleware and the
+	// WebSocket handshake. Defaults to the existing HS256 path; the RS256/JWKS
+	// path activates only when CLERK_ENABLED is set.
+	authenticator := appmiddleware.NewAuthenticator(appmiddleware.AuthenticatorOptions{
+		Clerk:     cfg.Clerk,
+		JWTSecret: cfg.JWTSecret,
+		Mapper:    appmiddleware.NewPostgresClerkUserMapper(pool),
+		Cache:     appmiddleware.NewRedisCache(rdb),
+	})
+	if cfg.Clerk.Enabled {
+		logger.Info("managed identity path enabled",
+			zap.String("issuer", cfg.Clerk.Issuer),
+			zap.String("jwks_url", cfg.Clerk.JWKSURL))
+	}
+
 	// WebSocket Hub
 	hub := websocket.NewHub(rdb, logger)
 	go hub.Run()
@@ -86,12 +102,12 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		handlers.RegisterAuthRoutes(r, pool, cfg, logger)
-		handlers.RegisterUserRoutes(r, pool, cfg, logger)
-		handlers.RegisterConversationRoutes(r, pool, cfg, logger)
-		handlers.RegisterUploadRoutes(r, pool, cfg, logger)
-		handlers.RegisterStickerRoutes(r, pool, cfg, logger)
-		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub)
+		handlers.RegisterAuthRoutes(r, pool, cfg, logger, authenticator)
+		handlers.RegisterUserRoutes(r, pool, cfg, logger, authenticator)
+		handlers.RegisterConversationRoutes(r, pool, cfg, logger, authenticator)
+		handlers.RegisterUploadRoutes(r, pool, cfg, logger, authenticator)
+		handlers.RegisterStickerRoutes(r, pool, cfg, logger, authenticator)
+		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub, authenticator)
 	})
 
 	// WebSocket endpoint — auth handled inside the handler via ?token= query param
@@ -104,7 +120,7 @@ func main() {
 	if uploadBase != "/uploads" {
 		r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadHandler))
 	}
-	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger))
+	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger, authenticator))
 
 	// Server
 	srv := &http.Server{

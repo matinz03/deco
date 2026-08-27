@@ -163,6 +163,10 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		return err
 	}
 
+	if err := ensureClerkIdentityColumns(ctx, pool); err != nil {
+		return err
+	}
+
 	if err := ensureSavedConversationUniqueness(ctx, pool); err != nil {
 		return err
 	}
@@ -456,6 +460,120 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	`)
 
 	return err
+}
+
+// ensureClerkIdentityColumns adds the external-identity column and the
+// public-key protections that the managed-auth path depends on.
+//
+// Deliberately NOT done here: anything that touches users.id. The internal UUID
+// stays the primary key and stays the target of every foreign key. clerk_user_id
+// is a nullable secondary lookup column, so rows created by the legacy
+// register/login path keep working with it set to NULL.
+func ensureClerkIdentityColumns(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS clerk_user_id TEXT
+	`); err != nil {
+		return err
+	}
+
+	// A partial-free UNIQUE index rather than a UNIQUE constraint: ALTER TABLE
+	// ... ADD CONSTRAINT has no IF NOT EXISTS, and this must be re-runnable at
+	// every boot. NULLs are not compared, so legacy rows are unaffected.
+	if _, err := pool.Exec(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS users_clerk_user_id_key
+		ON users (clerk_user_id)
+	`); err != nil {
+		return err
+	}
+
+	// Append-only audit of every public key ever written for a user.
+	// ON DELETE CASCADE so that deleting a user (users.go admin delete) still
+	// works; the append-only guarantee is about mutation, not about a user's
+	// right to be removed.
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS user_public_key_audit (
+			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			clerk_user_id TEXT,
+			public_key    TEXT NOT NULL,
+			source        TEXT NOT NULL,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_user_public_key_audit_user_id
+		ON user_public_key_audit (user_id, created_at DESC)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION deco_reject_row_update()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+		END;
+		$$ LANGUAGE plpgsql;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger WHERE tgname = 'trg_user_public_key_audit_append_only'
+			) THEN
+				CREATE TRIGGER trg_user_public_key_audit_append_only
+				  BEFORE UPDATE ON user_public_key_audit
+				  FOR EACH ROW EXECUTE FUNCTION deco_reject_row_update();
+			END IF;
+		END $$;
+	`); err != nil {
+		return err
+	}
+
+	// public_key immutability, enforced by the database rather than by
+	// convention. In an E2E product a silently swapped public key is a total
+	// compromise of every message sent afterwards, and application-level
+	// discipline does not survive the next contributor.
+	//
+	// This only fires when the value actually changes, so the existing
+	// `UPDATE users SET last_seen_at = NOW()` writes are unaffected.
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION deco_reject_public_key_update()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			IF NEW.public_key IS DISTINCT FROM OLD.public_key THEN
+				RAISE EXCEPTION 'users.public_key is immutable (user %)', OLD.id;
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger WHERE tgname = 'trg_users_public_key_immutable'
+			) THEN
+				CREATE TRIGGER trg_users_public_key_immutable
+				  BEFORE UPDATE ON users
+				  FOR EACH ROW EXECUTE FUNCTION deco_reject_public_key_update();
+			END IF;
+		END $$;
+	`); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func ensureSavedConversationUniqueness(ctx context.Context, pool *pgxpool.Pool) error {
