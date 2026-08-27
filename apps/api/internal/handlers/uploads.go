@@ -6,17 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	appmiddleware "github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/storage"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
 type UploadHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
+	pool    *pgxpool.Pool
+	cfg     *config.Config
+	logger  *zap.Logger
+	storage storage.Backend
 }
 
 func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +62,7 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved, err := storage.Save(kind, h.cfg.UploadRoot, h.cfg.PublicUploadBase, header.Filename, mimeType, reader, header.Size)
+	saved, err := storage.Save(r.Context(), h.storage, kind, header.Filename, mimeType, reader, header.Size)
 	if err != nil {
 		h.logger.Error("failed to save upload", zap.Error(err), zap.String("user_id", userID), zap.String("kind", string(kind)))
 		respondError(w, http.StatusInternalServerError, "failed to save upload")

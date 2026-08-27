@@ -50,13 +50,18 @@ docs/             Architecture, API, and database reference docs
 
 ## Local development
 
-**1. Start Postgres and Redis:**
+**1. Start Postgres, Redis and MinIO:**
 
 ```bash
 cd infra/compose
-cp .env.example .env   # fill in POSTGRES_PASSWORD / REDIS_PASSWORD / JWT_SECRET — any values are fine locally
-docker compose up -d postgres redis
+cp .env.example .env   # fill in POSTGRES_PASSWORD / REDIS_PASSWORD / JWT_SECRET / MINIO_ROOT_* — any values are fine locally
+docker compose up -d postgres redis minio
 ```
+
+MinIO is the S3-compatible object store that holds media. The API creates the
+`deco-public` and `deco-private` buckets itself on boot, so there is no console
+step. To run the API on local disk instead, leave `STORAGE_BACKEND` unset — see
+step 2.
 
 **2. Configure the API.** Copy the root `.env.example` to `.env` and point it at the containers you just started (values must match `infra/compose/.env`):
 
@@ -73,7 +78,20 @@ API_ENV=development
 ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-R2 and Anthropic keys can stay blank — they're unused placeholders (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)). `TELEGRAM_BOT_TOKEN` is only needed if you want to test Telegram sticker-pack import.
+R2 and Anthropic keys can stay blank — they're unused placeholders (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)); the storage backend never reads them. `TELEGRAM_BOT_TOKEN` is only needed if you want to test Telegram sticker-pack import.
+
+To point the API at the MinIO container instead of the local `uploads/` directory, add:
+
+```dotenv
+STORAGE_BACKEND=s3
+STORAGE_S3_ENDPOINT=http://localhost:9000
+STORAGE_S3_ACCESS_KEY_ID=<MINIO_ROOT_USER>
+STORAGE_S3_SECRET_ACCESS_KEY=<MINIO_ROOT_PASSWORD>
+STORAGE_S3_FORCE_PATH_STYLE=true
+STORAGE_PUBLIC_BASE_URL=http://localhost:9000/deco-public
+```
+
+Omitting `STORAGE_BACKEND` keeps the on-disk `local` backend, which serves every object unsigned and does not enforce the public/private split — fine for development, not for production. An unrecognised value fails at boot rather than on the first upload.
 
 **3. Configure the web app.** Next.js only reads `.env*` files from its own directory, not the repo root — create `apps/web/.env.local`:
 
@@ -123,11 +141,40 @@ go test ./...
 Tests:
 
 ```bash
-cd apps/api && go test ./...       # Go: config, handlers, middleware
+cd apps/api && go test ./...       # Go: config, handlers, middleware, storage
 pnpm --filter @deco/crypto test    # Node: E2E crypto round-trip tests
 ```
 
+The storage tests in `apps/api/internal/storage` include integration tests that
+need a real S3-compatible server. They run automatically when one is listening
+on `http://127.0.0.1:9000` (`docker compose -f infra/compose/docker-compose.yml
+up -d minio`) and skip when it is not, so `go test ./...` still passes without
+it. Set `STORAGE_TEST_S3_REQUIRE=1` to turn that skip into a failure — do that
+in CI, where a silent skip means the presign, expiry and cross-object
+assertions never ran.
+
 Coverage is early — the Go tests cover JWT/auth middleware, registration and login validation, and config resolution; the crypto tests cover X25519 key exchange, encrypt/decrypt, and tampered-ciphertext rejection. The web app itself (`apps/web`) has no tests and no runner configured yet, and the WebSocket, uploads, and group-key paths are untested.
+
+## Backups
+
+**Nothing in this repository backs up user data, and one volume now holds every
+uploaded file.**
+
+`infra/compose/docker-compose.yml` runs MinIO as the production object store.
+Its `minio_data` volume is the only copy of every avatar, sticker and message
+attachment in Deco. The database stores the URLs; it does not store the bytes.
+**If the disk holding that volume is lost or corrupted, every attachment ever
+sent is gone permanently** — and because attachments are referenced from
+message rows, the messages will survive with broken media.
+
+The same applies to `postgres_data`, but a database is the thing people
+remember to back up; a storage volume that used to be someone else's problem is
+not.
+
+There is no backup implementation here and this section does not add one. It
+records a gap that must be closed before this deployment is relied on. At
+minimum, decide on: an off-host destination, a schedule, a retention window,
+and a restore that has actually been tested.
 
 ## Production deployment
 

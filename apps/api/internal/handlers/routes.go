@@ -1,12 +1,13 @@
 package handlers
 
 import (
-	"github.com/matinz03/deco/internal/config"
-	"github.com/matinz03/deco/internal/middleware"
-	"github.com/matinz03/deco/internal/telegram"
-	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/middleware"
+	"github.com/matinz03/deco/internal/storage"
+	"github.com/matinz03/deco/internal/telegram"
+	"github.com/matinz03/deco/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -62,8 +63,8 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 	})
 }
 
-func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
-	h := &UploadHandler{pool: pool, cfg: cfg, logger: logger}
+func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, media storage.Backend) {
+	h := &UploadHandler{pool: pool, cfg: cfg, logger: logger, storage: media}
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(cfg.JWTSecret))
 		r.Route("/uploads", func(r chi.Router) {
@@ -72,8 +73,8 @@ func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, 
 	})
 }
 
-func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
-	h := &StickerHandler{pool: pool, cfg: cfg, logger: logger, telegram: telegram.NewClient(cfg.TelegramBotToken)}
+func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, media storage.Backend) {
+	h := &StickerHandler{pool: pool, cfg: cfg, logger: logger, telegram: telegram.NewClient(cfg.TelegramBotToken), storage: media}
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(cfg.JWTSecret))
 		r.Route("/stickers", func(r chi.Router) {
