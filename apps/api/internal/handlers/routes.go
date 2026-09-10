@@ -106,8 +106,8 @@ func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config,
 	})
 }
 
-func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub, auth *middleware.Authenticator) {
-	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub}
+func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub, media storage.Backend, storageCfg *config.StorageConfig, auth *middleware.Authenticator) {
+	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub, media: media, storageCfg: storageCfg}
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware())
 		r.Route("/conversations/{conversationID}/messages", func(r chi.Router) {

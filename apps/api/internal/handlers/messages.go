@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -21,10 +23,12 @@ import (
 )
 
 type MessageHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
-	hub    *websocket.Hub
+	pool       *pgxpool.Pool
+	cfg        *config.Config
+	logger     *zap.Logger
+	hub        *websocket.Hub
+	media      storage.Backend
+	storageCfg *config.StorageConfig
 }
 
 // List returns messages for a conversation, cursor-paginated (before= query param).
@@ -319,13 +323,42 @@ func (h *MessageHandler) ticketMessageMedia(ctx context.Context, msg *models.Mes
 	if msg.MediaURL == nil {
 		return
 	}
-	_, ok := storage.PrivateMediaPath(*msg.MediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
-	if !ok || !h.ownsMediaObject(ctx, msg.SenderID, *msg.MediaURL) {
+	resolved, ok, err := h.resolvePrivateMediaURL(ctx, msg.SenderID, *msg.MediaURL)
+	if err != nil {
+		h.logger.Error("failed to resolve private media URL", zap.Error(err), zap.String("sender_id", msg.SenderID))
+		msg.MediaURL = nil
 		return
 	}
-	if ticketed, ok := storage.TicketedMediaURL(*msg.MediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin, h.cfg.JWTSecret, time.Now()); ok {
-		msg.MediaURL = &ticketed
+	if ok {
+		msg.MediaURL = &resolved
 	}
+}
+
+func (h *MessageHandler) resolvePrivateMediaURL(ctx context.Context, senderID, mediaURL string) (string, bool, error) {
+	storagePath, ok := storage.PrivateMediaPath(mediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
+	if !ok || !h.ownsMediaObject(ctx, senderID, mediaURL) {
+		return "", false, nil
+	}
+
+	if h.storageCfg != nil && h.storageCfg.Backend == config.StorageBackendS3 {
+		legacyPath := filepath.Join(h.cfg.UploadRoot, filepath.FromSlash(storagePath))
+		if _, err := os.Stat(legacyPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return "", false, err
+			}
+			if h.media == nil {
+				return "", false, errors.New("private media backend is not configured")
+			}
+			presigned, err := h.media.PresignGet(ctx, storage.ObjectRef{Bucket: storage.BucketPrivate, Key: storagePath}, h.storageCfg.PresignTTL)
+			if err != nil {
+				return "", false, err
+			}
+			return presigned, true, nil
+		}
+	}
+
+	ticketed, ok := storage.TicketedMediaURL(mediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin, h.cfg.JWTSecret, time.Now())
+	return ticketed, ok, nil
 }
 
 // GetMediaTicket refreshes a browser-safe, short-lived URL for a single
@@ -356,13 +389,17 @@ func (h *MessageHandler) GetMediaTicket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	message := models.Message{SenderID: senderID, MediaURL: mediaURL}
-	h.ticketMessageMedia(r.Context(), &message)
-	if message.MediaURL == nil || *message.MediaURL == *mediaURL {
+	resolved, ok, resolveErr := h.resolvePrivateMediaURL(r.Context(), senderID, *mediaURL)
+	if resolveErr != nil {
+		h.logger.Error("failed to resolve private media URL", zap.Error(resolveErr), zap.String("message_id", messageID))
+		respondError(w, http.StatusInternalServerError, "failed to resolve media attachment")
+		return
+	}
+	if !ok {
 		respondError(w, http.StatusNotFound, "private media attachment not found")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]string{"url": *message.MediaURL})
+	respondJSON(w, http.StatusOK, map[string]string{"url": resolved})
 }
 
 func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {

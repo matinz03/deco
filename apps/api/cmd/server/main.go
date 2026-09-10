@@ -139,7 +139,7 @@ func main() {
 		handlers.RegisterConversationRoutes(r, pool, cfg, logger, authenticator)
 		handlers.RegisterUploadRoutes(r, pool, cfg, logger, media, authenticator)
 		handlers.RegisterStickerRoutes(r, pool, cfg, logger, media, authenticator)
-		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub, authenticator)
+		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub, media, storageCfg, authenticator)
 	})
 
 	registerMediaRoutes(r, cfg, time.Now)
