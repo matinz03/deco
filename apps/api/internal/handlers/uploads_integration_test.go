@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
+	appmiddleware "github.com/matinz03/deco/internal/middleware"
 	"go.uber.org/zap"
 )
 
@@ -26,12 +27,15 @@ func TestUploadIntegration(t *testing.T) {
 	root := t.TempDir()
 	setupUploadIntegrationSchema(t, pool)
 	router := chi.NewRouter()
+	authenticator := appmiddleware.NewAuthenticator(appmiddleware.AuthenticatorOptions{
+		JWTSecret: mediaTicketIntegrationSecret,
+	})
 	RegisterUploadRoutes(router, pool, &config.Config{
 		JWTSecret:          mediaTicketIntegrationSecret,
 		UploadRoot:         root,
 		PublicUploadBase:   "/api/v1/media",
 		PublicUploadOrigin: "https://api.example.test",
-	}, zap.NewNop())
+	}, zap.NewNop(), authenticator)
 
 	t.Run("requires authentication", func(t *testing.T) {
 		response := requestUpload(router, "", "image", "photo.png", pngFixture())

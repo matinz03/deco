@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	appmiddleware "github.com/matinz03/deco/internal/middleware"
-	"github.com/matinz03/deco/internal/config"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/matinz03/deco/internal/config"
+	appmiddleware "github.com/matinz03/deco/internal/middleware"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +47,16 @@ func makeCheckOrigin(cfg *config.Config) func(r *http.Request) bool {
 
 // Handler returns an http.HandlerFunc that upgrades the connection to WebSocket,
 // authenticates via JWT (query param ?token=...), and registers the client in the Hub.
-func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) http.HandlerFunc {
+//
+// The optional authenticator is the SAME instance the HTTP middleware uses, so
+// the handshake and the REST API can never drift apart on which tokens they
+// accept. It is variadic only so existing callers keep compiling; production
+// always passes one. With none supplied the legacy HS256 path is used.
+func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, authenticator ...*appmiddleware.Authenticator) http.HandlerFunc {
+	var auth *appmiddleware.Authenticator
+	if len(authenticator) > 0 {
+		auth = authenticator[0]
+	}
 	checkOriginFunc := makeCheckOrigin(cfg)
 	u := websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -71,7 +80,12 @@ func Handler(hub *Hub, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logge
 				return
 			}
 			var err error
-			userID, err = appmiddleware.ValidateToken(tokenStr, cfg.JWTSecret)
+			if auth != nil {
+				// Returns the INTERNAL UUID, exactly like the HTTP path.
+				userID, err = auth.ValidateToken(r.Context(), tokenStr)
+			} else {
+				userID, err = appmiddleware.ValidateToken(tokenStr, cfg.JWTSecret)
+			}
 			if err != nil {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
@@ -147,7 +161,7 @@ func (c *Client) readPump(conn *websocket.Conn, hub *Hub, pool *pgxpool.Pool, lo
 					isTyping = *p.IsTyping
 				}
 				outEvent := Event{
-					Type:    EventTyping,
+					Type: EventTyping,
 					Payload: mustMarshalPayload(map[string]any{
 						"user_id":         c.UserID,
 						"conversation_id": p.ConversationID,

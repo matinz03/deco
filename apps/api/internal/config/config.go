@@ -19,6 +19,7 @@ type Config struct {
 	R2BucketName       string
 	R2PublicURL        string
 	AnthropicKey       string
+	Clerk              ClerkConfig
 }
 
 func Load() *Config {
@@ -40,6 +41,7 @@ func Load() *Config {
 		R2BucketName:       getEnv("R2_BUCKET_NAME", "deco-media"),
 		R2PublicURL:        getEnv("R2_PUBLIC_URL", ""),
 		AnthropicKey:       getEnv("ANTHROPIC_API_KEY", ""),
+		Clerk:              LoadClerk(),
 	}
 
 	if cfg.Env != "development" && (cfg.JWTSecret == "" || cfg.JWTSecret == "change-me") {

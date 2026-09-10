@@ -12,7 +12,8 @@ CREATE TABLE users (
   phone_number  TEXT UNIQUE,
   display_name  TEXT NOT NULL,
   password_hash TEXT NOT NULL,
-  public_key    TEXT NOT NULL,              -- X25519 public key for E2E
+  clerk_user_id TEXT UNIQUE,                -- external identity; NULL for legacy password users
+  public_key    TEXT NOT NULL,              -- X25519 public key for E2E (immutable, see triggers below)
   avatar_url    TEXT NOT NULL DEFAULT '',
   bio           TEXT NOT NULL DEFAULT '',
   is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
@@ -221,3 +222,47 @@ CREATE TRIGGER trg_user_key_backups_updated_at
 CREATE TRIGGER trg_sticker_packs_updated_at
   BEFORE UPDATE ON sticker_packs
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── Public-key audit and immutability ────────────────────────────────────────
+-- Append-only record of every public key ever written for a user. Written in
+-- the same transaction as the key itself, so a key can never appear without a
+-- corresponding audit row.
+CREATE TABLE user_public_key_audit (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  clerk_user_id TEXT,
+  public_key    TEXT NOT NULL,
+  source        TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_user_public_key_audit_user_id
+  ON user_public_key_audit (user_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION deco_reject_row_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_user_public_key_audit_append_only
+  BEFORE UPDATE ON user_public_key_audit
+  FOR EACH ROW EXECUTE FUNCTION deco_reject_row_update();
+
+-- users.public_key is immutable. A new device means a new row in a device/key
+-- table, never a mutation of this one. Only fires when the value actually
+-- changes, so ordinary updates (last_seen_at, bio, avatar) are unaffected.
+CREATE OR REPLACE FUNCTION deco_reject_public_key_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.public_key IS DISTINCT FROM OLD.public_key THEN
+    RAISE EXCEPTION 'users.public_key is immutable (user %)', OLD.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_users_public_key_immutable
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION deco_reject_public_key_update();

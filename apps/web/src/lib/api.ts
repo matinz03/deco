@@ -29,8 +29,41 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * Supplies a Clerk session token. Registered by ClerkBootstrapGate rather than
+ * imported, so this module stays free of React and of @clerk/nextjs — it is
+ * used from stores and plain functions as well as components.
+ *
+ * Clerk tokens are short-lived (60s by default), so this is called per request
+ * rather than cached. Clerk's own SDK caches and refreshes behind getToken().
+ */
+type ClerkTokenProvider = () => Promise<string | null>;
+
+let clerkTokenProvider: ClerkTokenProvider | null = null;
+
+export function setClerkTokenProvider(provider: ClerkTokenProvider | null) {
+  clerkTokenProvider = provider;
+}
+
+/**
+ * Clerk first, legacy second. During the dual-path migration a browser can
+ * hold both; the Go API only accepts one, decided by CLERK_ENABLED, and a
+ * Clerk session is the newer intent.
+ */
+export async function resolveAuthToken(): Promise<string | null> {
+  if (clerkTokenProvider) {
+    try {
+      const token = await clerkTokenProvider();
+      if (token) return token;
+    } catch {
+      // Fall back to the legacy token rather than failing the request.
+    }
+  }
+  return typeof window !== "undefined" ? localStorage.getItem("deco_token") : null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("deco_token") : null;
+  const token = await resolveAuthToken();
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
 
   const res = await fetch(`${BASE}${path}`, {
@@ -360,6 +393,40 @@ export function mapWSEvent(event: any): WSEvent {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const api = {
+  /**
+   * Clerk identity path only. Creates the Deco `users` row for a Clerk
+   * account and binds its X25519 public key.
+   *
+   * Registration on the legacy path inserts the user and their public key in
+   * one statement. Clerk creates the identity outside the database, so this
+   * closes that gap from the client instead of from a webhook, which would
+   * race the first authenticated request and leave an account with no key.
+   *
+   * Idempotent: the same key succeeds, a different key is refused with
+   * 409 `public_key_immutable`.
+   */
+  profile: {
+    bootstrap: async (input: {
+      publicKey: string;
+      username: string;
+      displayName?: string;
+      email?: string;
+      phoneNumber?: string;
+    }) => {
+      const raw = await request<{ user: unknown }>("/api/v1/profile/bootstrap", {
+        method: "POST",
+        body: JSON.stringify({
+          public_key: input.publicKey,
+          username: input.username,
+          display_name: input.displayName ?? input.username,
+          email: input.email ?? "",
+          phone_number: input.phoneNumber ?? "",
+        }),
+      });
+      return mapUser(raw.user);
+    },
+  },
+
   auth: {
     login: async (body: { email?: string; phone?: string; password: string }) => {
       const raw = await request<{ token: string; user: unknown }>("/api/v1/auth/login", {

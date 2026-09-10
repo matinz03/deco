@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
+	appmiddleware "github.com/matinz03/deco/internal/middleware"
 	"go.uber.org/zap"
 )
 
@@ -41,11 +42,14 @@ func TestGetMediaTicketIntegration(t *testing.T) {
 	seedMediaTicketIntegrationData(t, pool)
 
 	router := chi.NewRouter()
+	authenticator := appmiddleware.NewAuthenticator(appmiddleware.AuthenticatorOptions{
+		JWTSecret: mediaTicketIntegrationSecret,
+	})
 	RegisterMessageRoutes(router, pool, &config.Config{
 		JWTSecret:          mediaTicketIntegrationSecret,
 		PublicUploadBase:   "/api/v1/media",
 		PublicUploadOrigin: "https://api.example.test",
-	}, zap.NewNop(), nil)
+	}, zap.NewNop(), nil, authenticator)
 
 	t.Run("requires authentication", func(t *testing.T) {
 		response := requestMediaTicket(router, "", mediaTicketMessageID)

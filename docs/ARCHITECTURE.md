@@ -26,7 +26,7 @@ The server never has access to plaintext message content or private keys.
 - **Groups/channels**: a single symmetric group key is generated once (`generateGroupKey`) and distributed to each member individually, encrypted to that member's public key. Clients cache resolved group keys (`groupKeyCache` in `store/conversations.ts`). Group-key distribution is done via `GET/PUT /conversations/{id}/group-key(s)`.
 - **Key backup**: because private keys live only in the browser, a lost device means lost message history unless the user opts into backup. `KeyBackupGate` (web) lets a user encrypt their private key with a passphrase (PBKDF2-SHA256, 250k iterations, AES-GCM) and store the resulting blob server-side (`user_key_backups` table, `GET/PUT/DELETE /users/me/key-backup`) for restore on a new device. The server stores only the encrypted blob — it cannot decrypt it without the passphrase.
 
-What the server *can* see: who is messaging whom, when, message metadata (type, size, reactions), and media files (uploads are not end-to-end encrypted). What it *cannot* see: message text/content, or anyone's private key.
+What the server *can* see: who is messaging whom, when, message metadata (type, size, reactions), and media files (uploads are not end-to-end encrypted — changing that is Phase D of [`PLATFORM_MIGRATION_PLAN.md`](PLATFORM_MIGRATION_PLAN.md)). What it *cannot* see: message text/content, or anyone's private key.
 
 ## Realtime (WebSocket)
 
@@ -54,7 +54,7 @@ Most chat apps treat the group creator as permanent owner. Deco instead models o
 
 ## Storage
 
-Media (avatars, message attachments, stickers) is stored on local disk under `UPLOAD_ROOT`, served back via `http.FileServer` at `PUBLIC_UPLOAD_BASE` (default `/api/v1/media`). Config fields for Cloudflare R2 (`R2_ACCOUNT_ID`, etc.) and an Anthropic API key exist in `internal/config/config.go` but aren't referenced anywhere else in the codebase — they're unused placeholders for future work, not a currently-wired integration.
+Media (avatars, message attachments, stickers) is stored on local disk under `UPLOAD_ROOT`, served back via `http.FileServer` at `PUBLIC_UPLOAD_BASE` (default `/api/v1/media`). Config fields for Cloudflare R2 (`R2_ACCOUNT_ID`, etc.) and an Anthropic API key exist in `internal/config/config.go` but aren't referenced anywhere else in the codebase — they're unused placeholders for future work, not a currently-wired integration. Adopting R2 behind a storage interface is Phase C of [`PLATFORM_MIGRATION_PLAN.md`](PLATFORM_MIGRATION_PLAN.md).
 
 ## Schema evolution
 
