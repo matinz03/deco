@@ -201,6 +201,37 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		return err
 	}
 
+	// Media objects bind an unguessable storage path to its uploader. This is
+	// the authorization anchor for private message-attachment tickets.
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS media_objects (
+			storage_path TEXT PRIMARY KEY,
+			owner_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			kind         TEXT NOT NULL,
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Preserve access to existing locally stored message attachments. New
+	// uploads are inserted by the upload handler; this only migrates rows that
+	// already reference one of the private message directories.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO media_objects (storage_path, owner_id, kind)
+		SELECT
+			regexp_replace(m.media_url, '^.*(messages/(images|videos|audio|files)/[^?]+).*$','\1'),
+			m.sender_id,
+			m.type::text
+		FROM messages m
+		WHERE m.media_url ~ 'messages/(images|videos|audio|files)/'
+		ON CONFLICT (storage_path) DO NOTHING
+	`)
+	if err != nil {
+		return err
+	}
+
 	// Group encryption keys: one encrypted copy of the group key per member.
 	// encrypted_key  = group key encrypted with ECDH(encryptor_private, member_public)
 	// encrypted_by   = user_id of the person who encrypted this copy (so recipient knows whose public key to use)

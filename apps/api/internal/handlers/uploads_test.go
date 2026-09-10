@@ -31,6 +31,36 @@ func TestIsAllowedUploadSecurity(t *testing.T) {
 		}
 	})
 
+	t.Run("Rejects allowed file extension with unknown MIME type", func(t *testing.T) {
+		if isAllowedUpload(storage.KindFile, "application/octet-stream", "document.pdf") {
+			t.Error("expected unknown bytes named document.pdf to be rejected")
+		}
+	})
+
+	t.Run("Rejects mismatched file MIME type and extension", func(t *testing.T) {
+		if isAllowedUpload(storage.KindFile, "image/png", "document.pdf") {
+			t.Error("expected PNG bytes named document.pdf to be rejected")
+		}
+	})
+
+	t.Run("Allows ZIP-detected Office documents", func(t *testing.T) {
+		if !isAllowedUpload(storage.KindFile, "application/zip", "document.docx") {
+			t.Error("expected ZIP-detected document.docx to be allowed")
+		}
+	})
+
+	t.Run("Allows gzip-detected Telegram stickers", func(t *testing.T) {
+		if !isAllowedUpload(storage.KindSticker, "application/x-gzip", "sticker.tgs") {
+			t.Error("expected gzip-detected sticker.tgs to be allowed")
+		}
+	})
+
+	t.Run("Rejects gzip bytes named as a static sticker", func(t *testing.T) {
+		if isAllowedUpload(storage.KindSticker, "application/x-gzip", "sticker.png") {
+			t.Error("expected gzip bytes named sticker.png to be rejected")
+		}
+	})
+
 	t.Run("Allows valid PNG upload with kind=image", func(t *testing.T) {
 		if !isAllowedUpload(storage.KindImage, "image/png", "photo.png") {
 			t.Error("expected photo.png with kind=image to be allowed")

@@ -9,16 +9,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/matinz03/deco/internal/config"
-	"github.com/matinz03/deco/internal/db"
-	"github.com/matinz03/deco/internal/handlers"
-	"github.com/matinz03/deco/internal/storage"
-	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
 	"github.com/joho/godotenv"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/db"
+	"github.com/matinz03/deco/internal/handlers"
+	"github.com/matinz03/deco/internal/storage"
+	"github.com/matinz03/deco/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -94,16 +94,9 @@ func main() {
 		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub)
 	})
 
+	registerMediaRoutes(r, cfg, time.Now)
+
 	// WebSocket endpoint — auth handled inside the handler via ?token= query param
-	uploadBase := cfg.PublicUploadBase
-	if uploadBase == "" {
-		uploadBase = "/api/v1/media"
-	}
-	uploadHandler := http.FileServer(http.Dir(cfg.UploadRoot))
-	r.Handle(uploadBase+"/*", http.StripPrefix(uploadBase+"/", uploadHandler))
-	if uploadBase != "/uploads" {
-		r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadHandler))
-	}
 	r.Get("/ws", websocket.Handler(hub, pool, cfg, logger))
 
 	// Server

@@ -71,6 +71,8 @@ JWT_SECRET=<any-long-random-string>
 API_PORT=8080
 API_ENV=development
 ALLOWED_ORIGINS=http://localhost:3000
+# Required outside development; must match NEXT_PUBLIC_API_URL exactly.
+PUBLIC_UPLOAD_ORIGIN=http://localhost:8080
 ```
 
 R2 and Anthropic keys can stay blank — they're unused placeholders (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)). `TELEGRAM_BOT_TOKEN` is only needed if you want to test Telegram sticker-pack import.
@@ -99,6 +101,35 @@ pnpm --filter @deco/web dev
 Open [http://localhost:3000](http://localhost:3000) and sign up — the first account created becomes an admin.
 
 Verify the API independently with `curl http://localhost:8080/health` → `{"status":"ok"}`.
+
+## Current security-program handoff (2026-08-12)
+
+This section records in-progress work that is **not yet merged**. Treat
+[`docs/TOMORROW.md`](docs/TOMORROW.md) and
+[`docs/SECURITY_PLAN.md`](docs/SECURITY_PLAN.md) as the full backlog; the
+former predates the TypeScript/runtime fixes now on `master`.
+
+- `master` includes the TypeScript 7 upgrade, the React external-store snapshot
+  fix, the local-media CSP allowance, and the Saved Messages duplicate-race
+  migration.
+- The S1-1 media-ticket change was isolated from an unrelated 2,682-line local
+  branch bundle on `codex/security-program`. Its live acceptance run established
+  private raw access `401`, authorized member tickets `200`, non-member ticket
+  requests `403`, and public avatars `200`; a real browser loaded ticketed
+  images.
+- Independent reviews found three blockers during that work: arbitrary external
+  media origins, tickets not bound to `GET`, and older same-origin absolute
+  upload URLs becoming unreadable. The working tree contains corrections for
+  all three, including `PUBLIC_UPLOAD_ORIGIN` (required outside development and
+  equal to `NEXT_PUBLIC_API_URL`) to permit only the legacy API origin. The
+  final live compatibility check and an independent review of that last change
+  remain before any commit or merge.
+- The next queued item is the `security/sessions` branch. It still needs the
+  required login/logout cookie, cross-origin credential, and no-JavaScript
+  fallback tests before integration.
+
+All temporary API/web servers used for the media checks were stopped. Docker's
+Postgres and Redis containers were intentionally left running.
 
 ## Scripts
 

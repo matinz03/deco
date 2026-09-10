@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatDistanceToNowStrict, format, isToday, isYesterday } from "date-fns";
 import type { ContactAttachment, LocationAttachment, Message } from "@deco/types";
+import { useMediaTicketUrl } from "@/lib/use-media-ticket";
 
 interface Props {
   open: boolean;
@@ -331,25 +332,26 @@ function TabButton({
 }
 
 function MediaCard({ message }: { message: Message }) {
+  const { url: mediaUrl } = useMediaTicketUrl(message.conversationId, message.id, message.mediaUrl);
   return (
     <div className="overflow-hidden rounded-2xl border border-sidebar bg-background/40">
-      {message.type === "image" && message.mediaUrl && (
-        <a href={message.mediaUrl} target="_blank" rel="noreferrer" className="block">
-          <img src={message.mediaUrl} alt={message.mediaName || "Shared image"} className="h-56 w-full object-cover" />
+      {message.type === "image" && mediaUrl && (
+        <a href={mediaUrl} target="_blank" rel="noreferrer" className="block">
+          <img src={mediaUrl} alt={message.mediaName || "Shared image"} className="h-56 w-full object-cover" />
         </a>
       )}
 
-      {message.type === "video" && message.mediaUrl && (
-        <video src={message.mediaUrl} controls className="h-56 w-full bg-black object-cover" preload="metadata" />
+      {message.type === "video" && mediaUrl && (
+        <video src={mediaUrl} controls className="h-56 w-full bg-black object-cover" preload="metadata" />
       )}
 
-      {message.type === "audio" && message.mediaUrl && (
+      {message.type === "audio" && mediaUrl && (
         <div className="flex h-56 flex-col justify-between bg-gradient-to-br from-surface to-background p-4">
           <div>
             <p className="text-sm font-semibold">{message.mediaName || "Audio message"}</p>
             <p className="mt-1 text-xs text-muted">{formatMeta(message)}</p>
           </div>
-          <audio src={message.mediaUrl} controls className="w-full" preload="metadata" />
+          <audio src={mediaUrl} controls className="w-full" preload="metadata" />
         </div>
       )}
 
@@ -359,10 +361,10 @@ function MediaCard({ message }: { message: Message }) {
           <p className="truncate text-xs text-muted">{formatMeta(message)}</p>
         </div>
         <div className="flex items-center gap-2">
-          {message.mediaUrl && (
+          {mediaUrl && (
             <>
               <a
-                href={message.mediaUrl}
+                href={mediaUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
@@ -370,7 +372,7 @@ function MediaCard({ message }: { message: Message }) {
                 Open
               </a>
               <a
-                href={message.mediaUrl}
+                href={mediaUrl}
                 download={message.mediaName || getMediaLabel(message)}
                 className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
               >
@@ -385,6 +387,7 @@ function MediaCard({ message }: { message: Message }) {
 }
 
 function FileRow({ message }: { message: Message }) {
+  const { url: mediaUrl } = useMediaTicketUrl(message.conversationId, message.id, message.mediaUrl);
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-sidebar bg-background/40 px-4 py-3">
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-muted">
@@ -397,10 +400,10 @@ function FileRow({ message }: { message: Message }) {
         <p className="truncate text-sm font-medium">{message.mediaName || "File attachment"}</p>
         <p className="truncate text-xs text-muted">{formatMeta(message)}</p>
       </div>
-      {message.mediaUrl && (
+      {mediaUrl && (
         <div className="flex shrink-0 items-center gap-2">
           <a
-            href={message.mediaUrl}
+            href={mediaUrl}
             target="_blank"
             rel="noreferrer"
             className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
@@ -408,7 +411,7 @@ function FileRow({ message }: { message: Message }) {
             Open
           </a>
           <a
-            href={message.mediaUrl}
+            href={mediaUrl}
             download={message.mediaName || "attachment"}
             className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
           >
