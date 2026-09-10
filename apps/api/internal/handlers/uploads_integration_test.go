@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	appmiddleware "github.com/matinz03/deco/internal/middleware"
+	"github.com/matinz03/deco/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -30,12 +31,16 @@ func TestUploadIntegration(t *testing.T) {
 	authenticator := appmiddleware.NewAuthenticator(appmiddleware.AuthenticatorOptions{
 		JWTSecret: mediaTicketIntegrationSecret,
 	})
+	media, err := storage.NewLocalBackend(root, "/api/v1/media")
+	if err != nil {
+		t.Fatalf("NewLocalBackend() error = %v", err)
+	}
 	RegisterUploadRoutes(router, pool, &config.Config{
 		JWTSecret:          mediaTicketIntegrationSecret,
 		UploadRoot:         root,
 		PublicUploadBase:   "/api/v1/media",
 		PublicUploadOrigin: "https://api.example.test",
-	}, zap.NewNop(), authenticator)
+	}, zap.NewNop(), media, authenticator)
 
 	t.Run("requires authentication", func(t *testing.T) {
 		response := requestUpload(router, "", "image", "photo.png", pngFixture())

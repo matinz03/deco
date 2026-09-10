@@ -16,6 +16,9 @@ Integrated work:
   mapping, profile bootstrap, immutable public-key audit, short-lived client
   token handling, and Clerk sign-in/sign-up pages. Legacy HS256 login remains
   available until production cutover evidence is complete.
+- `platform/storage-backend`: configurable local and S3-compatible storage,
+  MinIO bucket provisioning, stable object keys, and backend-aware cleanup.
+  Local storage remains the default while private S3 reads are wired.
 
 Before the Clerk merge, the following commands ran on the media integration:
 
@@ -30,7 +33,6 @@ full gate run and browser exercise.
 
 ## Work still outside this branch
 
-- `platform/storage-backend`: local/S3 storage abstraction and MinIO support.
 - `platform/blob-crypto`: binary attachment encryption primitives.
 - `security/sessions`: CSP hardening plus a legacy server-cookie change. The
   CSP work may survive Clerk; cookie ownership must not be merged blindly.
@@ -39,8 +41,8 @@ full gate run and browser exercise.
 
 1. Exercise Clerk sign-up, bootstrap, sign-in, sign-out, reconnect, and key
    recovery against a real Clerk tenant.
-2. Integrate storage and attachment encryption into one browser-tested private
-   media path. `PresignGet` is not yet connected to the media route.
+2. Connect `PresignGet`, then integrate attachment encryption into one
+   browser-tested private-media path. Do not enable S3 before that connection.
 3. Resolve group-key first-writer authority and add key epochs.
 4. Add off-host Postgres and object-storage backups, service health checks, and
    deployment rollback.

@@ -16,9 +16,10 @@ import (
 )
 
 type UploadHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
+	pool    *pgxpool.Pool
+	cfg     *config.Config
+	logger  *zap.Logger
+	storage storage.Backend
 }
 
 func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -63,21 +64,21 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved, err := storage.Save(kind, h.cfg.UploadRoot, h.cfg.PublicUploadBase, header.Filename, mimeType, reader, header.Size)
+	saved, err := storage.Save(r.Context(), h.storage, kind, header.Filename, mimeType, reader, header.Size)
 	if err != nil {
 		h.logger.Error("failed to save upload", zap.Error(err), zap.String("user_id", userID), zap.String("kind", string(kind)))
 		respondError(w, http.StatusInternalServerError, "failed to save upload")
 		return
 	}
-	storagePath, ok := storage.PrivateMediaPath(saved.URL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
-	if ok {
+	if saved.Bucket == storage.BucketPrivate {
+		storagePath := saved.Key
 		if _, err := h.pool.Exec(r.Context(), `
 			INSERT INTO media_objects (storage_path, owner_id, kind)
 			VALUES ($1, $2, $3)
 		`, storagePath, userID, string(kind)); err != nil {
 			var databaseError *pgconn.PgError
 			if errors.As(err, &databaseError) {
-				if cleanupErr := storage.RemovePrivate(h.cfg.UploadRoot, storagePath); cleanupErr != nil {
+				if cleanupErr := h.storage.Delete(r.Context(), storage.ObjectRef{Bucket: saved.Bucket, Key: saved.Key}); cleanupErr != nil {
 					h.logger.Error("failed to remove unregistered upload", zap.Error(cleanupErr), zap.String("path", storagePath))
 				}
 			} else {

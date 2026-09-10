@@ -36,8 +36,40 @@ func main() {
 
 	// Config
 	cfg := config.Load()
-	if err := storage.EnsureDirectories(cfg.UploadRoot); err != nil {
-		logger.Fatal("failed to prepare upload directories", zap.Error(err))
+
+	// Storage — an unknown backend name, a missing bucket, an unparseable
+	// presign TTL or unusable credentials must stop the process here, not on
+	// the first upload.
+	storageCfg, err := config.LoadStorage()
+	if err != nil {
+		logger.Fatal("invalid storage configuration", zap.Error(err))
+	}
+	media, err := storage.NewBackend(storageCfg)
+	if err != nil {
+		logger.Fatal("failed to initialise storage backend", zap.Error(err))
+	}
+	if provisioner, ok := media.(interface {
+		EnsureBuckets(context.Context) error
+	}); ok {
+		bucketCtx, cancelBuckets := context.WithTimeout(context.Background(), 30*time.Second)
+		err := provisioner.EnsureBuckets(bucketCtx)
+		cancelBuckets()
+		if err != nil {
+			// Fail closed: a missing bucket, an unappliable public-read
+			// policy, or a private bucket that is anonymously readable are
+			// all reasons not to accept uploads.
+			logger.Fatal("failed to provision storage buckets", zap.Error(err))
+		}
+	}
+	logger.Info("storage backend ready", zap.String("backend", string(storageCfg.Backend)))
+	if storageCfg.Backend == config.StorageBackendLocal && cfg.Env != "development" {
+		logger.Warn("storage backend is local: private media uses application tickets but remains single-host and requires an off-host backup")
+	}
+	if storageCfg.Backend == config.StorageBackendS3 && storageCfg.PublicBaseURL == "" {
+		// Avatar and sticker URLs are persisted on database rows. Derived
+		// from an internal endpoint they are unreachable from a browser and
+		// stay wrong for the lifetime of the row.
+		logger.Warn("STORAGE_PUBLIC_BASE_URL is not set: public media URLs will be derived from the internal S3 endpoint and stored on user and sticker rows")
 	}
 
 	// Database
@@ -105,8 +137,8 @@ func main() {
 		handlers.RegisterAuthRoutes(r, pool, cfg, logger, authenticator)
 		handlers.RegisterUserRoutes(r, pool, cfg, logger, authenticator)
 		handlers.RegisterConversationRoutes(r, pool, cfg, logger, authenticator)
-		handlers.RegisterUploadRoutes(r, pool, cfg, logger, authenticator)
-		handlers.RegisterStickerRoutes(r, pool, cfg, logger, authenticator)
+		handlers.RegisterUploadRoutes(r, pool, cfg, logger, media, authenticator)
+		handlers.RegisterStickerRoutes(r, pool, cfg, logger, media, authenticator)
 		handlers.RegisterMessageRoutes(r, pool, cfg, logger, hub, authenticator)
 	})
 

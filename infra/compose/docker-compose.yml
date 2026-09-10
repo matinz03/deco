@@ -36,6 +36,47 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── MinIO (object storage) ─────────────────────────────────────────────────
+  #
+  # Production object storage for all user media: avatars, stickers, and every
+  # message attachment. The API talks to it over the S3 API, so the same code
+  # path runs in development and in production.
+  #
+  # ⚠ BACKUPS: the minio_data volume below is the ONLY copy of every uploaded
+  # file. Nothing in this repository backs it up. If the disk holding this
+  # volume is lost, every attachment, avatar and sticker in Deco is gone
+  # permanently — the database keeps the URLs, not the bytes. A backup
+  # strategy for this volume is required before anyone relies on this
+  # deployment. See the "Backups" section in README.md.
+  #
+  # Buckets are created and their policies applied by the API at boot
+  # (storage.EnsureBuckets); the API refuses to start if that fails, so there
+  # is no manual console step and no window where the private bucket is
+  # unprotected.
+  minio:
+    # Pinned deliberately. `latest` would silently roll the storage server
+    # holding every attachment forward on any pull. Resolved from the `latest`
+    # tag on 2026-08-27; bump it consciously, not by accident.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      # S3 API and web console, local only — expose the S3 API through the
+      # same reverse proxy that fronts api/web if browsers must reach public
+      # objects directly, and keep 9001 off the internet entirely.
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ─── Go API ─────────────────────────────────────────────────────────────────
   api:
     build:
@@ -46,6 +87,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     environment:
       API_PORT: 8080
@@ -61,9 +104,38 @@ services:
       R2_PUBLIC_URL: ${R2_PUBLIC_URL}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       UPLOAD_ROOT: /uploads
+      # ─── Object storage ─────────────────────────────────────────────────
+      # The R2_* variables above are unused placeholders; storage is
+      # configured only through STORAGE_*.
+      #
+      # ⚠ DO NOT set this to `s3` yet. Nothing calls PresignGet: with the s3
+      # backend a message attachment lands in the private bucket while its row
+      # still records /api/v1/media/<key>, which the FileServer 404s because
+      # the bytes are in MinIO and not on disk. Public objects (avatars,
+      # stickers) would work; every private attachment would break.
+      #
+      # Flip to `s3` only after a media route performs the conversation
+      # membership check and resolves that reference into a presigned URL
+      # (Phase A/D in docs/PLATFORM_MIGRATION_PLAN.md). Everything else in
+      # this block is ready and correct for that switch.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_S3_ENDPOINT: http://minio:9000
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      STORAGE_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      STORAGE_S3_FORCE_PATH_STYLE: "true"
+      STORAGE_PUBLIC_BUCKET: ${STORAGE_PUBLIC_BUCKET:-deco-public}
+      STORAGE_PRIVATE_BUCKET: ${STORAGE_PRIVATE_BUCKET:-deco-private}
+      # Browser-reachable origin for the PUBLIC bucket, e.g.
+      # https://media.example.com. This value is written onto user and sticker
+      # rows, so it must be the public origin, never http://minio:9000.
+      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL}
+      STORAGE_PRESIGN_TTL: ${STORAGE_PRESIGN_TTL:-5m}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
+      # Legacy on-disk media from before the s3 backend. Kept mounted so old
+      # /api/v1/media/* URLs already stored on message rows keep resolving.
       - uploads_data:/uploads
 
   # ─── Next.js Web ────────────────────────────────────────────────────────────
@@ -87,3 +159,5 @@ volumes:
   postgres_data:
   redis_data:
   uploads_data:
+  # Holds every uploaded file. Unbacked-up — see the MinIO service above.
+  minio_data:
