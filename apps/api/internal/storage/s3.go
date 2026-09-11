@@ -30,6 +30,10 @@ type S3Options struct {
 	// Endpoint is the S3 API endpoint — http://minio:9000 inside the compose
 	// network, http://127.0.0.1:9000 from the host. Empty means AWS S3.
 	Endpoint string
+	// PresignEndpoint is the browser-reachable S3 endpoint used only when
+	// creating private GET URLs. It may differ from the internal Endpoint used
+	// by the API for uploads and bucket administration.
+	PresignEndpoint string
 	// Region — MinIO ignores it, but SigV4 needs some value to sign with.
 	Region string
 	// AccessKeyID / SecretAccessKey are static credentials. No ambient AWS
@@ -62,6 +66,9 @@ type S3Options struct {
 	// MaxSpoolBytes bounds unknown-length bodies. Zero means
 	// DefaultMaxSpoolBytes.
 	MaxSpoolBytes int64
+	// CORSOrigins are the web origins permitted to fetch private presigned
+	// objects for client-side decryption.
+	CORSOrigins []string
 }
 
 // S3Backend is an S3-compatible Backend. It is safe for concurrent use.
@@ -110,6 +117,15 @@ func NewS3Backend(opts S3Options) (*S3Backend, error) {
 			return nil, fmt.Errorf("storage: invalid s3 endpoint %q", opts.Endpoint)
 		}
 	}
+	if strings.TrimSpace(opts.PresignEndpoint) == "" {
+		opts.PresignEndpoint = opts.Endpoint
+	}
+	if opts.PresignEndpoint != "" {
+		parsed, err := url.Parse(opts.PresignEndpoint)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, fmt.Errorf("storage: invalid s3 presign endpoint %q", opts.PresignEndpoint)
+		}
+	}
 
 	if strings.TrimSpace(opts.PublicBaseURL) == "" {
 		derived, err := derivePublicBaseURL(opts)
@@ -144,10 +160,17 @@ func NewS3Backend(opts S3Options) (*S3Backend, error) {
 		}
 		o.UsePathStyle = opts.UsePathStyle
 	})
+	presignClient := client
+	if strings.TrimRight(opts.PresignEndpoint, "/") != strings.TrimRight(opts.Endpoint, "/") {
+		presignClient = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(strings.TrimRight(opts.PresignEndpoint, "/"))
+			o.UsePathStyle = opts.UsePathStyle
+		})
+	}
 
 	return &S3Backend{
 		client:  client,
-		presign: s3.NewPresignClient(client),
+		presign: s3.NewPresignClient(presignClient),
 		opts:    opts,
 	}, nil
 }

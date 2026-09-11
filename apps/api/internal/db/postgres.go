@@ -205,6 +205,20 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 		return err
 	}
 
+	// Message-media metadata is needed by both the media registry backfill and
+	// every message query below. Add it before reading any of those columns so
+	// databases created by older releases can upgrade in one boot.
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE messages
+		ADD COLUMN IF NOT EXISTS media_name TEXT,
+		ADD COLUMN IF NOT EXISTS media_mime_type TEXT,
+		ADD COLUMN IF NOT EXISTS media_size BIGINT,
+		ADD COLUMN IF NOT EXISTS media_encrypted BOOLEAN NOT NULL DEFAULT FALSE
+	`)
+	if err != nil {
+		return err
+	}
+
 	// Media objects bind an unguessable storage path to its uploader. This is
 	// the authorization anchor for private message-attachment tickets.
 	_, err = pool.Exec(ctx, `
@@ -212,8 +226,23 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 			storage_path TEXT PRIMARY KEY,
 			owner_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			kind         TEXT NOT NULL,
+			encrypted    BOOLEAN NOT NULL DEFAULT FALSE,
+			original_name TEXT NOT NULL DEFAULT '',
+			mime_type     TEXT NOT NULL DEFAULT 'application/octet-stream',
+			size          BIGINT NOT NULL DEFAULT 0,
 			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE media_objects
+		ADD COLUMN IF NOT EXISTS encrypted BOOLEAN NOT NULL DEFAULT FALSE,
+		ADD COLUMN IF NOT EXISTS original_name TEXT NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+		ADD COLUMN IF NOT EXISTS size BIGINT NOT NULL DEFAULT 0
 	`)
 	if err != nil {
 		return err
@@ -223,13 +252,24 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	// uploads are inserted by the upload handler; this only migrates rows that
 	// already reference one of the private message directories.
 	_, err = pool.Exec(ctx, `
+		WITH candidates AS (
+			SELECT DISTINCT ON (storage_path)
+				storage_path, sender_id, message_type
+			FROM (
+				SELECT
+					regexp_replace(m.media_url, '^.*(messages/(images|videos|audio|files)/[^?]+).*$','\1') AS storage_path,
+					m.sender_id,
+					m.type::text AS message_type,
+					m.sent_at,
+					m.id
+				FROM messages m
+				WHERE m.media_url ~ 'messages/(images|videos|audio|files)/'
+			) legacy
+			ORDER BY storage_path, sent_at, id
+		)
 		INSERT INTO media_objects (storage_path, owner_id, kind)
-		SELECT
-			regexp_replace(m.media_url, '^.*(messages/(images|videos|audio|files)/[^?]+).*$','\1'),
-			m.sender_id,
-			m.type::text
-		FROM messages m
-		WHERE m.media_url ~ 'messages/(images|videos|audio|files)/'
+		SELECT storage_path, sender_id, message_type
+		FROM candidates
 		ON CONFLICT (storage_path) DO NOTHING
 	`)
 	if err != nil {
@@ -472,14 +512,6 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 				  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 			END IF;
 		END $$;
-	`)
-	if err != nil {
-		return err
-	}
-
-	_, err = pool.Exec(ctx, `
-		ALTER TABLE messages
-		ADD COLUMN IF NOT EXISTS media_name TEXT
 	`)
 	if err != nil {
 		return err

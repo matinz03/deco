@@ -11,7 +11,11 @@ function getCspOrigin(value: string | undefined) {
 }
 
 const mediaOrigins = Array.from(
-  new Set([getCspOrigin(process.env.NEXT_PUBLIC_API_URL), getCspOrigin(process.env.R2_PUBLIC_URL)].filter(Boolean))
+  new Set([
+    getCspOrigin(process.env.NEXT_PUBLIC_API_URL),
+    getCspOrigin(process.env.NEXT_PUBLIC_MEDIA_URL),
+    getCspOrigin(process.env.R2_PUBLIC_URL),
+  ].filter(Boolean))
 );
 const imageSources = ["'self'", "blob:", "data:", ...mediaOrigins].join(" ");
 const mediaSources = ["'self'", "blob:", ...mediaOrigins].join(" ");
@@ -90,6 +94,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               [
                 `connect-src 'self' ${process.env.NEXT_PUBLIC_API_URL} ${process.env.NEXT_PUBLIC_WS_URL}`,
+                ...mediaOrigins,
                 ...clerkConnectSources,
               ].join(" "),
               [`img-src ${imageSources}`, ...clerkImageSources].join(" "),

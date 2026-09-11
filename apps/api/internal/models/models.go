@@ -5,19 +5,19 @@ import "time"
 // ─── User ─────────────────────────────────────────────────────────────────────
 
 type User struct {
-	ID          string    `json:"id" db:"id"`
-	Username    string    `json:"username" db:"username"`
-	DisplayName string    `json:"display_name" db:"display_name"`
-	Email       string    `json:"email,omitempty" db:"email"`
-	PhoneNumber string    `json:"phone_number,omitempty" db:"phone_number"`
-	AvatarURL   string    `json:"avatar_url" db:"avatar_url"`
-	PublicKey   string    `json:"public_key" db:"public_key"` // E2E: user's public key
-	Bio         string    `json:"bio" db:"bio"`
-	IsAdmin     bool      `json:"is_admin" db:"is_admin"`
-	IsOwner     bool      `json:"is_owner"`
-	RestrictedActions []string `json:"restricted_actions" db:"restricted_actions"`
-	LastSeenAt  time.Time `json:"last_seen_at" db:"last_seen_at"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	ID                string    `json:"id" db:"id"`
+	Username          string    `json:"username" db:"username"`
+	DisplayName       string    `json:"display_name" db:"display_name"`
+	Email             string    `json:"email,omitempty" db:"email"`
+	PhoneNumber       string    `json:"phone_number,omitempty" db:"phone_number"`
+	AvatarURL         string    `json:"avatar_url" db:"avatar_url"`
+	PublicKey         string    `json:"public_key" db:"public_key"` // E2E: user's public key
+	Bio               string    `json:"bio" db:"bio"`
+	IsAdmin           bool      `json:"is_admin" db:"is_admin"`
+	IsOwner           bool      `json:"is_owner"`
+	RestrictedActions []string  `json:"restricted_actions" db:"restricted_actions"`
+	LastSeenAt        time.Time `json:"last_seen_at" db:"last_seen_at"`
+	CreatedAt         time.Time `json:"created_at" db:"created_at"`
 }
 
 // ─── Conversation ─────────────────────────────────────────────────────────────
@@ -32,18 +32,18 @@ const (
 )
 
 type Conversation struct {
-	ID           string           `json:"id" db:"id"`
-	Type         ConversationType `json:"type" db:"type"`
-	Name         string           `json:"name" db:"name"`         // For groups/channels
-	AvatarURL    string           `json:"avatar_url" db:"avatar_url"`
-	Description  string           `json:"description" db:"description"`
-	CreatedByID  string           `json:"created_by_id" db:"created_by_id"`
-	LastMessage  *Message         `json:"last_message,omitempty"`
-	UnreadCount  int              `json:"unread_count"`
-	MemberCount  int              `json:"member_count"`
-	Members      []Member         `json:"members,omitempty"`
-	CreatedAt    time.Time        `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at" db:"updated_at"`
+	ID          string           `json:"id" db:"id"`
+	Type        ConversationType `json:"type" db:"type"`
+	Name        string           `json:"name" db:"name"` // For groups/channels
+	AvatarURL   string           `json:"avatar_url" db:"avatar_url"`
+	Description string           `json:"description" db:"description"`
+	CreatedByID string           `json:"created_by_id" db:"created_by_id"`
+	LastMessage *Message         `json:"last_message,omitempty"`
+	UnreadCount int              `json:"unread_count"`
+	MemberCount int              `json:"member_count"`
+	Members     []Member         `json:"members,omitempty"`
+	CreatedAt   time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at" db:"updated_at"`
 }
 
 // ─── Message ──────────────────────────────────────────────────────────────────
@@ -72,18 +72,19 @@ const (
 )
 
 type Message struct {
-	ID             string        `json:"id" db:"id"`
-	ConversationID string        `json:"conversation_id" db:"conversation_id"`
-	SenderID       string        `json:"sender_id" db:"sender_id"`
-	Sender         *User         `json:"sender,omitempty"`
-	Type           MessageType   `json:"type" db:"type"`
+	ID             string      `json:"id" db:"id"`
+	ConversationID string      `json:"conversation_id" db:"conversation_id"`
+	SenderID       string      `json:"sender_id" db:"sender_id"`
+	Sender         *User       `json:"sender,omitempty"`
+	Type           MessageType `json:"type" db:"type"`
 	// Content is the E2E-encrypted ciphertext — server never sees plaintext
-	EncryptedContent string      `json:"encrypted_content" db:"encrypted_content"`
+	EncryptedContent string `json:"encrypted_content" db:"encrypted_content"`
 	// For media messages: reference to R2 object (nullable)
 	MediaURL       *string       `json:"media_url,omitempty" db:"media_url"`
 	MediaName      *string       `json:"media_name,omitempty" db:"media_name"`
 	MediaMimeType  *string       `json:"media_mime_type,omitempty" db:"media_mime_type"`
 	MediaSize      *int64        `json:"media_size,omitempty" db:"media_size"`
+	MediaEncrypted bool          `json:"media_encrypted" db:"media_encrypted"`
 	StickerID      *string       `json:"sticker_id,omitempty" db:"sticker_id"`
 	Sticker        *Sticker      `json:"sticker,omitempty"`
 	Poll           *Poll         `json:"poll,omitempty"`
@@ -220,18 +221,18 @@ type LeadershipCandidate struct {
 }
 
 type LeadershipStatus struct {
-	ConversationID         string                `json:"conversation_id"`
-	CurrentOwnerID         string                `json:"current_owner_id"`
-	ObjectionCount         int                   `json:"objection_count"`
-	ObjectionThreshold     int                   `json:"objection_threshold"`
-	HasObjected            bool                  `json:"has_objected"`
-	CanObject              bool                  `json:"can_object"`
-	ObjectionCooldownEndsAt *time.Time           `json:"objection_cooldown_ends_at,omitempty"`
-	ElectionActive         bool                  `json:"election_active"`
-	ElectionEndsAt         *time.Time            `json:"election_ends_at,omitempty"`
-	HasVoted               bool                  `json:"has_voted"`
-	VotedForUserID         *string               `json:"voted_for_user_id,omitempty"`
-	TurnoutCount           int                   `json:"turnout_count"`
-	TurnoutThreshold       int                   `json:"turnout_threshold"`
-	Candidates             []LeadershipCandidate `json:"candidates,omitempty"`
+	ConversationID          string                `json:"conversation_id"`
+	CurrentOwnerID          string                `json:"current_owner_id"`
+	ObjectionCount          int                   `json:"objection_count"`
+	ObjectionThreshold      int                   `json:"objection_threshold"`
+	HasObjected             bool                  `json:"has_objected"`
+	CanObject               bool                  `json:"can_object"`
+	ObjectionCooldownEndsAt *time.Time            `json:"objection_cooldown_ends_at,omitempty"`
+	ElectionActive          bool                  `json:"election_active"`
+	ElectionEndsAt          *time.Time            `json:"election_ends_at,omitempty"`
+	HasVoted                bool                  `json:"has_voted"`
+	VotedForUserID          *string               `json:"voted_for_user_id,omitempty"`
+	TurnoutCount            int                   `json:"turnout_count"`
+	TurnoutThreshold        int                   `json:"turnout_threshold"`
+	Candidates              []LeadershipCandidate `json:"candidates,omitempty"`
 }

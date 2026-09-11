@@ -23,6 +23,7 @@ func NewBackend(cfg *config.StorageConfig) (Backend, error) {
 	case config.StorageBackendS3:
 		return NewS3Backend(S3Options{
 			Endpoint:        cfg.S3Endpoint,
+			PresignEndpoint: cfg.S3PresignEndpoint,
 			Region:          cfg.S3Region,
 			AccessKeyID:     cfg.S3AccessKeyID,
 			SecretAccessKey: cfg.S3SecretKey,
@@ -32,6 +33,7 @@ func NewBackend(cfg *config.StorageConfig) (Backend, error) {
 			PublicBaseURL:   cfg.PublicBaseURL,
 			PrivateRefBase:  cfg.PublicUploadBase,
 			DefaultTTL:      cfg.PresignTTL,
+			CORSOrigins:     cfg.CORSOrigins,
 		})
 
 	default:

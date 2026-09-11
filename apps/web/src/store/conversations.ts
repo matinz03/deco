@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { api, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
-import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
-import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker } from "@deco/types";
+import { decryptMessage, deriveSharedSecret, encryptBlob, loadPrivateKey } from "@deco/crypto";
+import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker, UploadResponse } from "@deco/types";
 import { useAuthStore } from "./auth";
 import { usePreferencesStore } from "./preferences";
 import { useToastStore } from "./toasts";
@@ -48,6 +48,28 @@ async function getOrFetchGroupKey(conversationId: string, conversation: Conversa
   }
 }
 
+export async function getConversationEncryptionKey(
+  conversation: Conversation | undefined,
+  userId: string
+): Promise<string | null> {
+  if (!conversation || conversation.type === "saved") return null;
+
+  // Channels do not have a distributable key protocol yet. Failing closed is
+  // safer than encrypting for one arbitrary member and hiding the upload from
+  // everyone else.
+  if (conversation.type === "channel") return null;
+
+  if (conversation.type === "group") {
+    return getOrFetchGroupKey(conversation.id, conversation);
+  }
+
+  const otherUser = conversation.members?.find((member) => member.userId !== userId)?.user;
+  if (!otherUser?.publicKey) return null;
+  const privateKey = await loadPrivateKey(userId);
+  if (!privateKey) return null;
+  return deriveSharedSecret(otherUser.publicKey, privateKey);
+}
+
 type PresenceState = {
   status: "online" | "offline" | "busy" | "away";
   lastSeenAt?: string;
@@ -65,7 +87,11 @@ type PendingMediaUpload = {
     previewUrl?: string;
     replyToId?: string;
   };
+  upload?: UploadResponse;
+  mediaEncrypted?: boolean;
 };
+
+const MAX_ENCRYPTED_ATTACHMENT_BYTES = 20 << 20;
 
 const pendingMediaUploads = new Map<string, PendingMediaUpload>();
 
@@ -1237,22 +1263,44 @@ async function uploadAndSendMediaMessage({
     const conversation = useConversationStore.getState().conversations.find((c) => c.id === conversationId);
     const encryptedContent = await encryptOutgoingContent(conversation, userId, caption);
     const uploadKind = input.type === "image" ? "image" : input.type === "video" ? "video" : input.type === "audio" ? "audio" : "file";
-    const upload = await api.uploads.create(input.file, uploadKind, input.fileName, {
-      onProgress: (progress) => {
-        useConversationStore.setState((s) => ({
-          messages: {
-            ...s.messages,
-            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
-              message.id === tempId
-                ? {
-                    ...message,
-                    uploadProgress: progress,
-                  }
-                : message
-            )),
-          },
-        }));
-      },
+    const pending = pendingMediaUploads.get(tempId);
+    let upload = pending?.upload;
+    let mediaEncrypted = pending?.mediaEncrypted ?? false;
+    if (!upload && conversation?.type !== "saved") {
+      if (input.file.size > MAX_ENCRYPTED_ATTACHMENT_BYTES) {
+        throw new EncryptionError(
+          "Encrypted attachments are limited to 20 MB for the MVP to avoid exhausting browser memory."
+        );
+      }
+      const attachmentKey = await getConversationEncryptionKey(conversation, userId);
+      if (!attachmentKey) {
+        throw new EncryptionError(
+          "Attachment encryption is unavailable on this device, so the file was not uploaded. Restore your key backup or wait for the group key."
+        );
+      }
+      const plaintext = new Uint8Array(await input.file.arrayBuffer());
+      const ciphertext = encryptBlob(plaintext, attachmentKey);
+      const uploadBody = new Blob([Uint8Array.from(ciphertext)], { type: "application/octet-stream" });
+      mediaEncrypted = true;
+
+      upload = await api.uploads.create(uploadBody, uploadKind, input.fileName, {
+        encrypted: { originalMimeType: input.mimeType, originalSize: input.file.size },
+        onProgress: updateMediaUploadProgress(conversationId, tempId),
+      });
+    }
+
+    if (!upload) {
+      upload = await api.uploads.create(input.file, uploadKind, input.fileName, {
+        onProgress: updateMediaUploadProgress(conversationId, tempId),
+      });
+    }
+
+    pendingMediaUploads.set(tempId, {
+      conversationId,
+      tempId,
+      input,
+      upload,
+      mediaEncrypted,
     });
     const confirmed = await api.messages.send(conversationId, {
       type: input.type,
@@ -1262,6 +1310,7 @@ async function uploadAndSendMediaMessage({
       mediaName: upload.name,
       mediaMimeType: upload.mimeType,
       mediaSize: upload.size,
+      mediaEncrypted,
     });
     const confirmedMessage = await hydrateMessage(confirmed, conversation);
     pendingMediaUploads.delete(tempId);
@@ -1306,6 +1355,19 @@ async function uploadAndSendMediaMessage({
       },
     }));
   }
+}
+
+function updateMediaUploadProgress(conversationId: string, tempId: string) {
+  return (progress: number) => {
+    useConversationStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+          message.id === tempId ? { ...message, uploadProgress: progress } : message
+        )),
+      },
+    }));
+  };
 }
 
 async function hydrateConversationSummaries(conversations: Conversation[]) {

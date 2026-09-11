@@ -63,6 +63,55 @@ func TestEnsureSchemaIsIdempotent(t *testing.T) {
 	}
 }
 
+// Releases before message attachment metadata shipped have none of these
+// columns. EnsureSchema must add them before any registry backfill reads the
+// messages table. This test deliberately mutates only the configured throwaway
+// database and restores the current schema during cleanup.
+func TestEnsureSchemaUpgradesLegacyMessageMediaColumns(t *testing.T) {
+	pool := testPool(t)
+	if err := EnsureSchema(pool); err != nil {
+		t.Fatalf("prepare current schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := EnsureSchema(pool); err != nil {
+			t.Errorf("restore current schema: %v", err)
+		}
+	})
+
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE messages
+		DROP COLUMN IF EXISTS media_name,
+		DROP COLUMN IF EXISTS media_mime_type,
+		DROP COLUMN IF EXISTS media_size,
+		DROP COLUMN IF EXISTS media_encrypted
+	`); err != nil {
+		t.Fatalf("simulate legacy messages table: %v", err)
+	}
+
+	if err := EnsureSchema(pool); err != nil {
+		t.Fatalf("EnsureSchema on legacy messages table: %v", err)
+	}
+
+	for _, column := range []string{"media_name", "media_mime_type", "media_size", "media_encrypted"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = current_schema()
+				  AND table_name = 'messages'
+				  AND column_name = $1
+			)
+		`, column).Scan(&exists); err != nil {
+			t.Fatalf("inspect messages.%s: %v", column, err)
+		}
+		if !exists {
+			t.Errorf("messages.%s was not restored", column)
+		}
+	}
+}
+
 // A public key that can be rewritten defeats end-to-end encryption: swap the
 // key, receive everything sent afterwards. The database must refuse it even
 // when the caller is the application itself.

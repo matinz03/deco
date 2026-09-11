@@ -157,7 +157,12 @@ func setupMediaTicketIntegrationSchema(t *testing.T, pool *pgxpool.Pool) {
 		)`,
 		`CREATE TABLE media_objects (
 			storage_path TEXT PRIMARY KEY,
-			owner_id UUID NOT NULL REFERENCES users(id)
+			owner_id UUID NOT NULL REFERENCES users(id),
+			kind TEXT NOT NULL DEFAULT 'image',
+			encrypted BOOLEAN NOT NULL DEFAULT FALSE,
+			original_name TEXT NOT NULL DEFAULT '',
+			mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+			size BIGINT NOT NULL DEFAULT 0
 		)`,
 	} {
 		if _, err := pool.Exec(context.Background(), statement); err != nil {

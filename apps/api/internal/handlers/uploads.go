@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,6 +23,14 @@ type UploadHandler struct {
 	storage storage.Backend
 }
 
+const (
+	encryptedAttachmentOverhead int64 = 24 + 16
+	maxUploadBodyBytes                = (100 << 20) + (1 << 20)
+	multipartMemoryBytes              = 8 << 20
+)
+
+var errUploadRequestTooLarge = errors.New("upload request is too large")
+
 func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := appmiddleware.GetUserID(r)
 	if userID == "" {
@@ -29,9 +38,16 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(128 << 20); err != nil {
+	if err := parseUploadMultipartForm(w, r, maxUploadBodyBytes, multipartMemoryBytes); err != nil {
+		if errors.Is(err, errUploadRequestTooLarge) {
+			respondError(w, http.StatusRequestEntityTooLarge, "upload request is too large")
+			return
+		}
 		respondError(w, http.StatusBadRequest, "failed to parse upload")
 		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
 	}
 
 	kind := storage.Kind(strings.TrimSpace(r.FormValue("kind")))
@@ -51,17 +67,38 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "empty file")
 		return
 	}
-	if header.Size > maxBytesForKind(kind) {
-		respondError(w, http.StatusBadRequest, "file is too large")
-		return
-	}
-
 	reader := bufio.NewReader(file)
-	headerBytes, _ := reader.Peek(512)
-	mimeType := storage.DetectMimeType(headerBytes, header.Header.Get("Content-Type"))
-	if !isAllowedUpload(kind, mimeType, header.Filename) {
-		respondError(w, http.StatusBadRequest, "file type is not allowed")
-		return
+	encrypted := strings.EqualFold(strings.TrimSpace(r.FormValue("encrypted")), "true")
+	mimeType := ""
+	responseMimeType := ""
+	responseSize := header.Size
+	if encrypted {
+		originalSize, parseErr := strconv.ParseInt(strings.TrimSpace(r.FormValue("original_size")), 10, 64)
+		originalMimeType := normalizeMimeType(r.FormValue("original_mime_type"))
+		if parseErr != nil {
+			respondError(w, http.StatusBadRequest, "invalid original file size")
+			return
+		}
+		if validationErr := validateEncryptedUpload(kind, header.Filename, originalMimeType, originalSize, header.Size); validationErr != nil {
+			respondError(w, http.StatusBadRequest, validationErr.Error())
+			return
+		}
+
+		mimeType = "application/octet-stream"
+		responseMimeType = originalMimeType
+		responseSize = originalSize
+	} else {
+		if header.Size > maxBytesForKind(kind) {
+			respondError(w, http.StatusBadRequest, "file is too large")
+			return
+		}
+		headerBytes, _ := reader.Peek(512)
+		mimeType = storage.DetectMimeType(headerBytes, header.Header.Get("Content-Type"))
+		if !isAllowedUpload(kind, mimeType, header.Filename) {
+			respondError(w, http.StatusBadRequest, "file type is not allowed")
+			return
+		}
+		responseMimeType = mimeType
 	}
 
 	saved, err := storage.Save(r.Context(), h.storage, kind, header.Filename, mimeType, reader, header.Size)
@@ -73,9 +110,9 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if saved.Bucket == storage.BucketPrivate {
 		storagePath := saved.Key
 		if _, err := h.pool.Exec(r.Context(), `
-			INSERT INTO media_objects (storage_path, owner_id, kind)
-			VALUES ($1, $2, $3)
-		`, storagePath, userID, string(kind)); err != nil {
+			INSERT INTO media_objects (storage_path, owner_id, kind, encrypted, original_name, mime_type, size)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, storagePath, userID, string(kind), encrypted, saved.Name, responseMimeType, responseSize); err != nil {
 			var databaseError *pgconn.PgError
 			if errors.As(err, &databaseError) {
 				if cleanupErr := h.storage.Delete(r.Context(), storage.ObjectRef{Bucket: saved.Bucket, Key: saved.Key}); cleanupErr != nil {
@@ -96,11 +133,47 @@ func (h *UploadHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusCreated, map[string]any{
 		"url":       saved.URL,
-		"mime_type": saved.MimeType,
-		"size":      saved.Size,
+		"mime_type": responseMimeType,
+		"size":      responseSize,
 		"name":      saved.Name,
 		"kind":      kind,
+		"encrypted": encrypted,
 	})
+}
+
+func parseUploadMultipartForm(w http.ResponseWriter, r *http.Request, maxBodyBytes, maxMemoryBytes int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	if err := r.ParseMultipartForm(maxMemoryBytes); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return errUploadRequestTooLarge
+		}
+		return err
+	}
+	return nil
+}
+
+func validateEncryptedUpload(kind storage.Kind, filename, originalMimeType string, originalSize, encryptedSize int64) error {
+	if kind == storage.KindAvatar || kind == storage.KindSticker {
+		return errors.New("public uploads cannot be encrypted")
+	}
+	if originalSize <= 0 || originalSize > maxEncryptedBytesForKind(kind) {
+		return errors.New("invalid original file size")
+	}
+	if encryptedSize != originalSize+encryptedAttachmentOverhead {
+		return errors.New("invalid encrypted attachment size")
+	}
+	if !isAllowedUpload(kind, originalMimeType, filename) {
+		return errors.New("original file type is not allowed")
+	}
+	return nil
+}
+
+func maxEncryptedBytesForKind(kind storage.Kind) int64 {
+	if kind == storage.KindImage {
+		return 10 << 20
+	}
+	return 20 << 20
 }
 
 func isAllowedUploadKind(kind storage.Kind) bool {

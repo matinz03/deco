@@ -332,9 +332,9 @@ function TabButton({
 }
 
 function MediaCard({ message }: { message: Message }) {
-  const { url: mediaUrl } = useMediaTicketUrl(message.conversationId, message.id, message.mediaUrl);
+  const { url: mediaUrl, observe, load, loading, error } = useMediaTicketUrl(message);
   return (
-    <div className="overflow-hidden rounded-2xl border border-sidebar bg-background/40">
+    <div ref={observe} className="overflow-hidden rounded-2xl border border-sidebar bg-background/40">
       {message.type === "image" && mediaUrl && (
         <a href={mediaUrl} target="_blank" rel="noreferrer" className="block">
           <img src={mediaUrl} alt={message.mediaName || "Shared image"} className="h-56 w-full object-cover" />
@@ -361,6 +361,17 @@ function MediaCard({ message }: { message: Message }) {
           <p className="truncate text-xs text-muted">{formatMeta(message)}</p>
         </div>
         <div className="flex items-center gap-2">
+          {message.mediaEncrypted && !mediaUrl && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={load}
+              title={error || undefined}
+              className="rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+            >
+              {loading ? "Decrypting…" : error ? "Retry" : "Load"}
+            </button>
+          )}
           {mediaUrl && (
             <>
               <a
@@ -387,9 +398,9 @@ function MediaCard({ message }: { message: Message }) {
 }
 
 function FileRow({ message }: { message: Message }) {
-  const { url: mediaUrl } = useMediaTicketUrl(message.conversationId, message.id, message.mediaUrl);
+  const { url: mediaUrl, observe, load, loading, error } = useMediaTicketUrl(message);
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-sidebar bg-background/40 px-4 py-3">
+    <div ref={observe} className="flex items-center gap-3 rounded-2xl border border-sidebar bg-background/40 px-4 py-3">
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-muted">
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15A2.25 2.25 0 0 0 6.75 21.75h10.5A2.25 2.25 0 0 0 19.5 19.5v-5.25Z" />
@@ -400,6 +411,17 @@ function FileRow({ message }: { message: Message }) {
         <p className="truncate text-sm font-medium">{message.mediaName || "File attachment"}</p>
         <p className="truncate text-xs text-muted">{formatMeta(message)}</p>
       </div>
+      {message.mediaEncrypted && !mediaUrl && (
+        <button
+          type="button"
+          disabled={loading}
+          onClick={load}
+          title={error || undefined}
+          className="shrink-0 rounded-xl border border-sidebar px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+        >
+          {loading ? "Decrypting…" : error ? "Retry" : "Load"}
+        </button>
+      )}
       {mediaUrl && (
         <div className="flex shrink-0 items-center gap-2">
           <a

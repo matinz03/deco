@@ -148,6 +148,7 @@ export interface Message {
   mediaName?: string;
   mediaMimeType?: string;
   mediaSize?: number;
+  mediaEncrypted?: boolean;
   sticker?: Sticker;
   poll?: Poll;
   replyToId?: string;
@@ -258,6 +259,7 @@ export interface UploadResponse {
   size: number;
   name: string;
   kind: UploadKind;
+  encrypted?: boolean;
 }
 
 export interface CreatePollInput {

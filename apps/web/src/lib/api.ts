@@ -120,6 +120,7 @@ export function mapMessage(r: any): Message {
     mediaName: r.media_name ?? r.mediaName,
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
+    mediaEncrypted: Boolean(r.media_encrypted ?? r.mediaEncrypted ?? false),
     sticker: r.sticker ? mapSticker(r.sticker) : undefined,
     poll: r.poll ? mapPoll(r.poll) : undefined,
     replyToId: r.reply_to_id ?? r.replyToId,
@@ -197,6 +198,7 @@ function mapUploadResponse(r: any): UploadResponse {
     size: r.size ?? 0,
     name: r.name ?? "",
     kind: r.kind ?? "file",
+    encrypted: Boolean(r.encrypted ?? false),
   };
 }
 
@@ -593,6 +595,7 @@ export const api = {
         mediaName?: string;
         mediaMimeType?: string;
         mediaSize?: number;
+        mediaEncrypted?: boolean;
         stickerId?: string;
         poll?: CreatePollInput;
       }
@@ -607,6 +610,7 @@ export const api = {
           media_name: body.mediaName,
           media_mime_type: body.mediaMimeType,
           media_size: body.mediaSize,
+          media_encrypted: body.mediaEncrypted,
           sticker_id: body.stickerId,
           poll: body.poll ? {
             question: body.poll.question,
@@ -757,19 +761,27 @@ export const api = {
       file: File | Blob,
       kind: UploadKind,
       name?: string,
-      options?: { onProgress?: (progress: number) => void }
+      options?: {
+        onProgress?: (progress: number) => void;
+        encrypted?: { originalMimeType: string; originalSize: number };
+      }
     ) => {
       const form = new FormData();
       const filename = name ?? (file instanceof File ? file.name : `${kind}-${Date.now()}`);
       form.append("file", file, filename);
       form.append("kind", kind);
+      if (options?.encrypted) {
+        form.append("encrypted", "true");
+        form.append("original_mime_type", options.encrypted.originalMimeType);
+        form.append("original_size", String(options.encrypted.originalSize));
+      }
 
       if (typeof window !== "undefined" && options?.onProgress) {
-        const token = localStorage.getItem("deco_token");
+        const token = await resolveAuthToken();
         const xhrResult = await new Promise<unknown>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${BASE}/api/v1/uploads`);
-          xhr.setRequestHeader("Authorization", token ? `Bearer ${token}` : "");
+          if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
           xhr.upload.onprogress = (event) => {
             if (!event.lengthComputable) return;
             options.onProgress?.(Math.round((event.loaded / event.total) * 100));

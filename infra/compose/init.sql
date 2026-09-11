@@ -74,6 +74,7 @@ CREATE TABLE messages (
   media_name        TEXT,
   media_mime_type   TEXT,
   media_size        BIGINT,
+  media_encrypted   BOOLEAN NOT NULL DEFAULT FALSE,
   sticker_id        UUID,
   reply_to_id       UUID REFERENCES messages(id),
   status            message_status NOT NULL DEFAULT 'sent',

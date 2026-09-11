@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -21,20 +22,44 @@ func validS3Options() S3Options {
 	}
 }
 
+func TestS3PresignGetUsesBrowserEndpoint(t *testing.T) {
+	opts := validS3Options()
+	opts.PresignEndpoint = "https://objects.example.test"
+	backend, err := NewS3Backend(opts)
+	if err != nil {
+		t.Fatalf("NewS3Backend() error = %v", err)
+	}
+
+	presigned, err := backend.PresignGet(context.Background(), ObjectRef{
+		Bucket: BucketPrivate,
+		Key:    "messages/images/private.png",
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGet() error = %v", err)
+	}
+	if !strings.HasPrefix(presigned, "https://objects.example.test/deco-private/messages/images/private.png?") {
+		t.Fatalf("PresignGet() URL = %q", presigned)
+	}
+	if !strings.Contains(presigned, "X-Amz-Signature=") {
+		t.Fatalf("PresignGet() URL carries no signature: %q", presigned)
+	}
+}
+
 // Misconfiguration must surface when the backend is built — at boot — not on
 // the first upload.
 func TestNewS3BackendRejectsBadOptions(t *testing.T) {
 	cases := map[string]func(*S3Options){
-		"no access key":            func(o *S3Options) { o.AccessKeyID = "" },
-		"no secret key":            func(o *S3Options) { o.SecretAccessKey = "" },
-		"same bucket twice":        func(o *S3Options) { o.PrivateBucket = o.PublicBucket },
-		"empty public bucket":      func(o *S3Options) { o.PublicBucket = "" },
-		"bucket with a slash":      func(o *S3Options) { o.PublicBucket = "deco/public" },
-		"bucket with an at sign":   func(o *S3Options) { o.PrivateBucket = "deco@private" },
-		"uppercase bucket":         func(o *S3Options) { o.PrivateBucket = "DecoPrivate" },
-		"endpoint with no scheme":  func(o *S3Options) { o.Endpoint = "127.0.0.1:9000" },
-		"ttl beyond the maximum":   func(o *S3Options) { o.DefaultTTL = MaxPresignTTL + time.Minute },
-		"no endpoint and no base ": func(o *S3Options) { o.Endpoint = ""; o.PublicBaseURL = "" },
+		"no access key":                   func(o *S3Options) { o.AccessKeyID = "" },
+		"no secret key":                   func(o *S3Options) { o.SecretAccessKey = "" },
+		"same bucket twice":               func(o *S3Options) { o.PrivateBucket = o.PublicBucket },
+		"empty public bucket":             func(o *S3Options) { o.PublicBucket = "" },
+		"bucket with a slash":             func(o *S3Options) { o.PublicBucket = "deco/public" },
+		"bucket with an at sign":          func(o *S3Options) { o.PrivateBucket = "deco@private" },
+		"uppercase bucket":                func(o *S3Options) { o.PrivateBucket = "DecoPrivate" },
+		"endpoint with no scheme":         func(o *S3Options) { o.Endpoint = "127.0.0.1:9000" },
+		"presign endpoint with no scheme": func(o *S3Options) { o.PresignEndpoint = "objects.example.test" },
+		"ttl beyond the maximum":          func(o *S3Options) { o.DefaultTTL = MaxPresignTTL + time.Minute },
+		"no endpoint and no base ":        func(o *S3Options) { o.Endpoint = ""; o.PublicBaseURL = "" },
 	}
 
 	for name, mutate := range cases {

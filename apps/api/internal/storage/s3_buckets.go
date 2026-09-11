@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -44,6 +45,20 @@ func (b *S3Backend) EnsureBuckets(ctx context.Context) error {
 	// start and names the bucket.
 	if err := b.assertNotAnonymouslyReadable(ctx, b.opts.PrivateBucket); err != nil {
 		return err
+	}
+	if len(b.opts.CORSOrigins) > 0 {
+		if _, err := b.client.PutBucketCors(ctx, &s3.PutBucketCorsInput{
+			Bucket: aws.String(b.opts.PrivateBucket),
+			CORSConfiguration: &types.CORSConfiguration{CORSRules: []types.CORSRule{{
+				AllowedHeaders: []string{"*"},
+				AllowedMethods: []string{http.MethodGet, http.MethodHead},
+				AllowedOrigins: b.opts.CORSOrigins,
+				ExposeHeaders:  []string{"ETag", "Content-Length", "Content-Type"},
+				MaxAgeSeconds:  aws.Int32(300),
+			}}},
+		}); err != nil {
+			return fmt.Errorf("storage: applying private-bucket CORS to %q failed: %w", b.opts.PrivateBucket, err)
+		}
 	}
 
 	return nil

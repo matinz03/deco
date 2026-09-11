@@ -126,7 +126,13 @@ interface Props {
 }
 
 export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isLastInGroup, replyCount = 0, onReply, onOpenThread }: Props) {
-	const { url: mediaUrl } = useMediaTicketUrl(msg.conversationId, msg.id, msg.mediaUrl);
+	const {
+	  url: mediaUrl,
+	  observe: observeMedia,
+	  load: loadMedia,
+	  loading: mediaLoading,
+	  error: mediaError,
+	} = useMediaTicketUrl(msg);
   if (msg.isDeleted) return null;
 
   const text = getMessageText(msg);
@@ -157,6 +163,11 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const readers = getReadersForMessage(msg, conversation?.members, currentUserId);
   const readReceiptLabel = getReadReceiptLabel(msg, conversation?.type, readers);
   const readReceiptTitle = getReadReceiptTitle(readers);
+	const encryptedAttachmentPending = Boolean(
+	  msg.mediaEncrypted &&
+	  !mediaUrl &&
+	  (msg.type === "image" || msg.type === "video" || msg.type === "audio" || msg.type === "file")
+	);
 
   const swipeX = useMotionValue(0);
   const replyIconOpacity = useTransform(swipeX, [0, 30, 70], [0, 0.6, 1]);
@@ -237,6 +248,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   return (
     <>
       <div
+		ref={observeMedia}
         data-message-id={msg.id}
         className={`relative ${isGrouped ? "mt-0.5" : "mt-3"}`}
         onContextMenu={handleContextMenu}
@@ -302,6 +314,20 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
               transition={{ type: "spring", stiffness: 500, damping: 30 }}
               onClick={handleBubbleClick}
             >
+			  {encryptedAttachmentPending && (
+				<button
+				  type="button"
+				  disabled={mediaLoading}
+				  className="mb-2 rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-70"
+				  onClick={(event) => {
+					event.stopPropagation();
+					loadMedia();
+				  }}
+				  title={mediaError || undefined}
+				>
+				  {mediaLoading ? "Decrypting attachment…" : mediaError ? "Retry attachment" : "Load attachment"}
+				</button>
+			  )}
 			  {msg.type === "image" && mediaUrl && (
                 <>
                   <img

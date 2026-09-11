@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +77,49 @@ func TestUploadIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("registers encrypted attachment metadata without inspecting plaintext", func(t *testing.T) {
+		ciphertext := make([]byte, len(pngFixture())+int(encryptedAttachmentOverhead))
+		response := requestEncryptedUpload(
+			router,
+			uploadIntegrationUserID,
+			"image",
+			"private.png",
+			"image/png",
+			int64(len(pngFixture())),
+			ciphertext,
+		)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d; body = %q", response.Code, http.StatusCreated, response.Body.String())
+		}
+		var body struct {
+			URL       string `json:"url"`
+			MimeType  string `json:"mime_type"`
+			Size      int64  `json:"size"`
+			Encrypted bool   `json:"encrypted"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		if body.MimeType != "image/png" || body.Size != int64(len(pngFixture())) || !body.Encrypted {
+			t.Fatalf("unexpected encrypted upload metadata: %#v", body)
+		}
+		storagePath := strings.TrimPrefix(body.URL, "/api/v1/media/")
+		var encrypted bool
+		if err := pool.QueryRow(context.Background(), `SELECT encrypted FROM media_objects WHERE storage_path = $1`, storagePath).Scan(&encrypted); err != nil {
+			t.Fatalf("QueryRow() error = %v", err)
+		}
+		if !encrypted {
+			t.Fatal("media object was not marked encrypted")
+		}
+	})
+
+	t.Run("rejects encrypted attachment with inconsistent size", func(t *testing.T) {
+		response := requestEncryptedUpload(router, uploadIntegrationUserID, "image", "private.png", "image/png", 8, make([]byte, 49))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d; body = %q", response.Code, http.StatusBadRequest, response.Body.String())
+		}
+	})
+
 	t.Run("rejects HTML bytes despite a safe filename", func(t *testing.T) {
 		response := requestUpload(router, uploadIntegrationUserID, "file", "report.pdf", []byte("<script>alert(1)</script>"))
 		if response.Code != http.StatusBadRequest {
@@ -101,8 +145,8 @@ func TestUploadIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadDir() error = %v", err)
 		}
-		if len(entries) != 1 {
-			t.Fatalf("private upload directory has %d file(s), want only the successful upload", len(entries))
+		if len(entries) != 2 {
+			t.Fatalf("private upload directory has %d file(s), want only the two successful uploads", len(entries))
 		}
 	})
 }
@@ -114,7 +158,11 @@ func setupUploadIntegrationSchema(t *testing.T, pool *pgxpool.Pool) {
 		`CREATE TABLE media_objects (
 			storage_path TEXT PRIMARY KEY,
 			owner_id UUID NOT NULL REFERENCES users(id),
-			kind TEXT NOT NULL
+			kind TEXT NOT NULL,
+			encrypted BOOLEAN NOT NULL DEFAULT FALSE,
+			original_name TEXT NOT NULL DEFAULT '',
+			mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+			size BIGINT NOT NULL DEFAULT 0
 		)`,
 		`INSERT INTO users (id) VALUES ('20000000-0000-0000-0000-000000000001')`,
 	} {
@@ -125,6 +173,18 @@ func setupUploadIntegrationSchema(t *testing.T, pool *pgxpool.Pool) {
 }
 
 func requestUpload(router http.Handler, userID, kind, filename string, contents []byte) *httptest.ResponseRecorder {
+	return requestUploadWithFields(router, userID, kind, filename, contents, nil)
+}
+
+func requestEncryptedUpload(router http.Handler, userID, kind, filename, originalMimeType string, originalSize int64, contents []byte) *httptest.ResponseRecorder {
+	return requestUploadWithFields(router, userID, kind, filename, contents, map[string]string{
+		"encrypted":          "true",
+		"original_mime_type": originalMimeType,
+		"original_size":      fmt.Sprintf("%d", originalSize),
+	})
+}
+
+func requestUploadWithFields(router http.Handler, userID, kind, filename string, contents []byte, fields map[string]string) *httptest.ResponseRecorder {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("file", filename)
@@ -136,6 +196,11 @@ func requestUpload(router http.Handler, userID, kind, filename string, contents 
 	}
 	if err := writer.WriteField("kind", kind); err != nil {
 		panic(err)
+	}
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			panic(err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		panic(err)

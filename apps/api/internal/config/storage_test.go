@@ -11,6 +11,7 @@ import (
 var storageEnvKeys = []string{
 	"STORAGE_BACKEND",
 	"STORAGE_S3_ENDPOINT",
+	"STORAGE_S3_PRESIGN_ENDPOINT",
 	"STORAGE_S3_REGION",
 	"STORAGE_S3_ACCESS_KEY_ID",
 	"STORAGE_S3_SECRET_ACCESS_KEY",
@@ -21,11 +22,33 @@ var storageEnvKeys = []string{
 	"STORAGE_PRESIGN_TTL",
 	"UPLOAD_ROOT",
 	"PUBLIC_UPLOAD_BASE",
+	"ALLOWED_ORIGINS",
 	"R2_ENDPOINT",
 	"R2_ACCOUNT_ID",
 	"R2_ACCESS_KEY_ID",
 	"R2_SECRET_ACCESS_KEY",
 	"R2_PUBLIC_URL",
+}
+
+func TestLoadStorageSeparatesInternalAndBrowserEndpoints(t *testing.T) {
+	clearStorageEnv(t)
+	t.Setenv("STORAGE_BACKEND", "s3")
+	t.Setenv("STORAGE_S3_ENDPOINT", "http://minio:9000")
+	t.Setenv("STORAGE_S3_PRESIGN_ENDPOINT", "https://objects.example.test")
+	t.Setenv("STORAGE_S3_ACCESS_KEY_ID", "key")
+	t.Setenv("STORAGE_S3_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("ALLOWED_ORIGINS", "https://app.example.test, https://admin.example.test")
+
+	cfg, err := LoadStorage()
+	if err != nil {
+		t.Fatalf("LoadStorage() error = %v", err)
+	}
+	if cfg.S3Endpoint != "http://minio:9000" || cfg.S3PresignEndpoint != "https://objects.example.test" {
+		t.Fatalf("endpoints = %q / %q", cfg.S3Endpoint, cfg.S3PresignEndpoint)
+	}
+	if len(cfg.CORSOrigins) != 2 || cfg.CORSOrigins[0] != "https://app.example.test" || cfg.CORSOrigins[1] != "https://admin.example.test" {
+		t.Fatalf("CORSOrigins = %#v", cfg.CORSOrigins)
+	}
 }
 
 func clearStorageEnv(t *testing.T) {

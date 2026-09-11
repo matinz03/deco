@@ -87,19 +87,27 @@ To point the API at the MinIO container instead of the local `uploads/` director
 ```dotenv
 STORAGE_BACKEND=s3
 STORAGE_S3_ENDPOINT=http://localhost:9000
+STORAGE_S3_PRESIGN_ENDPOINT=http://localhost:9000
 STORAGE_S3_ACCESS_KEY_ID=<MINIO_ROOT_USER>
 STORAGE_S3_SECRET_ACCESS_KEY=<MINIO_ROOT_PASSWORD>
 STORAGE_S3_FORCE_PATH_STYLE=true
 STORAGE_PUBLIC_BASE_URL=http://localhost:9000/deco-public
 ```
 
-Omitting `STORAGE_BACKEND` keeps the on-disk `local` backend, which serves every object unsigned and does not enforce the public/private split — fine for development, not for production. An unrecognised value fails at boot rather than on the first upload.
+`STORAGE_S3_PRESIGN_ENDPOINT` must be reachable from user browsers; it may
+differ from the API-only `STORAGE_S3_ENDPOINT`. The API installs private-bucket
+CORS for `ALLOWED_ORIGINS` so encrypted objects can be fetched and decrypted in
+the browser. Omitting `STORAGE_BACKEND` keeps the secured on-disk local backend,
+which is suitable for single-host development but still needs off-host backups
+before production. An unrecognised value fails at boot rather than on the first
+upload.
 
 **3. Configure the web app.** Next.js only reads `.env*` files from its own directory, not the repo root — create `apps/web/.env.local`:
 
 ```dotenv
 NEXT_PUBLIC_API_URL=http://localhost:8080
 NEXT_PUBLIC_WS_URL=ws://localhost:8080
+NEXT_PUBLIC_MEDIA_URL=http://localhost:9000
 ```
 
 Skipping this breaks the app in a confusing way: the CSP header in `next.config.ts` interpolates these vars, so if they're undefined every API/WebSocket request gets blocked client-side with a generic "Failed to fetch."

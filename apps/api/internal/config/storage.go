@@ -51,15 +51,17 @@ type StorageConfig struct {
 	PublicUploadBase string
 
 	// S3-compatible backend.
-	S3Endpoint     string
-	S3Region       string
-	S3AccessKeyID  string
-	S3SecretKey    string
-	S3UsePathStyle bool
-	PublicBucket   string
-	PrivateBucket  string
-	PublicBaseURL  string
-	PresignTTL     time.Duration
+	S3Endpoint        string
+	S3PresignEndpoint string
+	S3Region          string
+	S3AccessKeyID     string
+	S3SecretKey       string
+	S3UsePathStyle    bool
+	PublicBucket      string
+	PrivateBucket     string
+	PublicBaseURL     string
+	PresignTTL        time.Duration
+	CORSOrigins       []string
 }
 
 // LoadStorage reads the storage configuration from the environment and
@@ -103,6 +105,18 @@ func LoadStorage() (*StorageConfig, error) {
 	}
 	if !strings.HasPrefix(cfg.S3Endpoint, "http://") && !strings.HasPrefix(cfg.S3Endpoint, "https://") {
 		return nil, fmt.Errorf("STORAGE_S3_ENDPOINT=%q must start with http:// or https://", cfg.S3Endpoint)
+	}
+	cfg.S3PresignEndpoint = strings.TrimRight(strings.TrimSpace(getEnv("STORAGE_S3_PRESIGN_ENDPOINT", cfg.S3Endpoint)), "/")
+	if !strings.HasPrefix(cfg.S3PresignEndpoint, "http://") && !strings.HasPrefix(cfg.S3PresignEndpoint, "https://") {
+		return nil, fmt.Errorf("STORAGE_S3_PRESIGN_ENDPOINT=%q must start with http:// or https://", cfg.S3PresignEndpoint)
+	}
+	for _, origin := range strings.Split(getEnv("ALLOWED_ORIGINS", "http://localhost:3000"), ",") {
+		if trimmed := strings.TrimSpace(origin); trimmed != "" {
+			cfg.CORSOrigins = append(cfg.CORSOrigins, trimmed)
+		}
+	}
+	if len(cfg.CORSOrigins) == 0 {
+		return nil, fmt.Errorf("ALLOWED_ORIGINS must contain at least one browser origin when STORAGE_BACKEND=s3")
 	}
 
 	// MinIO validates the CreateBucket location constraint; us-east-1 is the
