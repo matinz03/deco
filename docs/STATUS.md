@@ -28,6 +28,9 @@ Integrated work:
   authorized fetch; Saved Messages retain their existing plaintext behavior.
   The media registry binds encryption, type, name, MIME, and size metadata so
   message JSON cannot substitute unsafe rendering metadata.
+- Production CSP no longer permits `unsafe-eval`, fails the build when API/WS
+  origins are absent, and includes Clerk's documented protection origins.
+  App Router/Clerk `unsafe-inline` remains until nonce-based CSP is introduced.
 
 After integrating security, Clerk, storage, blob primitives, and private S3
 reads, the following commands exited successfully on this branch:
@@ -37,7 +40,7 @@ reads, the following commands exited successfully on this branch:
 - `go test ./... -count=1` — 227 tests across 9 packages
 - `pnpm --filter @deco/crypto test` — 12 tests
 - `pnpm type-check`
-- `pnpm build`
+- `pnpm build` with the required API, WebSocket, and media origins set
 
 These results describe this authored integration tree and are not independent
 certification. Clerk still requires a real-tenant browser exercise.
