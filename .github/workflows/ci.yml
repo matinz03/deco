@@ -8,6 +8,23 @@ jobs:
   go:
     name: Go (apps/api)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: deco
+          POSTGRES_PASSWORD: testpw
+          POSTGRES_DB: deco_s1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U deco"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DECO_TEST_DATABASE_URL: postgres://deco:testpw@127.0.0.1:5432/deco_schema_test?sslmode=disable
+      TEST_DATABASE_URL: postgres://deco:testpw@127.0.0.1:5432/deco_s1_test?sslmode=disable
     defaults:
       run:
         working-directory: apps/api
@@ -19,6 +36,14 @@ jobs:
           go-version-file: apps/api/go.mod
           cache: true
           cache-dependency-path: apps/api/go.sum
+
+      - name: Initialize integration database
+        working-directory: .
+        env:
+          PGPASSWORD: testpw
+        run: |
+          psql -h 127.0.0.1 -U deco -d deco_s1_test -c 'CREATE DATABASE deco_schema_test'
+          psql "$DECO_TEST_DATABASE_URL" -f infra/compose/init.sql
 
       - name: go build
         run: go build ./...
@@ -63,3 +88,10 @@ jobs:
 
       - name: Type check
         run: pnpm type-check
+
+      - name: Production build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8080
+          NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
+        run: pnpm build --force
