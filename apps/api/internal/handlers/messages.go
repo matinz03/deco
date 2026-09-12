@@ -58,7 +58,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.pool.Query(r.Context(), `
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-				m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted,
+				m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted, m.group_key_epoch,
 				m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
@@ -73,7 +73,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.pool.Query(r.Context(), `
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-				m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted,
+				m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted, m.group_key_epoch,
 				m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
@@ -97,7 +97,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var sender models.User
 		if err := rows.Scan(
 			&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-			&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted,
+			&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 			&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 			&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 		); err != nil {
@@ -165,12 +165,13 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var conversationType string
+	var currentGroupKeyEpoch int64
 	if err := h.pool.QueryRow(r.Context(), `
-		SELECT c.type::text
+		SELECT c.type::text, c.current_group_key_epoch
 		FROM conversations c
 		JOIN members m ON m.conversation_id = c.id
 		WHERE c.id = $1 AND m.user_id = $2
-	`, convID, userID).Scan(&conversationType); errors.Is(err, pgx.ErrNoRows) {
+	`, convID, userID).Scan(&conversationType, &currentGroupKeyEpoch); errors.Is(err, pgx.ErrNoRows) {
 		respondError(w, http.StatusForbidden, "not a member of this conversation")
 		return
 	} else if err != nil {
@@ -186,6 +187,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		MediaMimeType    string  `json:"media_mime_type"`
 		MediaSize        *int64  `json:"media_size"`
 		MediaEncrypted   bool    `json:"media_encrypted"`
+		GroupKeyEpoch    *int64  `json:"group_key_epoch"`
 		StickerID        *string `json:"sticker_id"`
 		ReplyToID        *string `json:"reply_to_id,omitempty"`
 		Poll             *struct {
@@ -230,6 +232,28 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "sticker_id is required for sticker messages")
 		return
 	}
+	if conversationType == string(models.ConversationTypeGroup) && messageUsesGroupKey(req.Type) {
+		if currentGroupKeyEpoch == 0 {
+			respondError(w, http.StatusConflict, "group encryption key is not initialized")
+			return
+		}
+		if req.GroupKeyEpoch == nil {
+			// Epoch 1 is the compatibility window for clients deployed before
+			// versioned keys. Once a group rotates, an explicit epoch is required.
+			if currentGroupKeyEpoch != 1 {
+				respondError(w, http.StatusConflict, "group key epoch is required")
+				return
+			}
+			req.GroupKeyEpoch = &currentGroupKeyEpoch
+		}
+		if *req.GroupKeyEpoch != currentGroupKeyEpoch {
+			respondError(w, http.StatusConflict, "group key epoch is stale")
+			return
+		}
+	} else if req.GroupKeyEpoch != nil {
+		respondError(w, http.StatusBadRequest, "group_key_epoch is only valid for encrypted group messages")
+		return
+	}
 	if isPrivateMediaMessage(req.Type) {
 		mediaObject, owned := h.mediaObjectOwnedBy(r.Context(), userID, req.MediaURL)
 		if !owned {
@@ -253,18 +277,44 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
+	// Re-check membership and the epoch while holding row locks through the
+	// insert. Otherwise a rotation could commit after the preflight query and a
+	// removed member could append ciphertext under the retired key.
+	var lockedConversationType string
+	var lockedGroupKeyEpoch int64
+	err = tx.QueryRow(r.Context(), `
+		SELECT c.type::text, c.current_group_key_epoch
+		FROM conversations c
+		JOIN members m ON m.conversation_id = c.id AND m.user_id = $2
+		WHERE c.id = $1
+		FOR SHARE OF c, m
+	`, convID, userID).Scan(&lockedConversationType, &lockedGroupKeyEpoch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to lock conversation membership")
+		return
+	}
+	if lockedConversationType == string(models.ConversationTypeGroup) && messageUsesGroupKey(req.Type) &&
+		(req.GroupKeyEpoch == nil || *req.GroupKeyEpoch != lockedGroupKeyEpoch) {
+		respondError(w, http.StatusConflict, "group key epoch is stale")
+		return
+	}
+
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO messages (
 			conversation_id, sender_id, type, encrypted_content,
-			media_url, media_name, media_mime_type, media_size, media_encrypted, sticker_id, reply_to_id
+			media_url, media_name, media_mime_type, media_size, media_encrypted, group_key_epoch, sticker_id, reply_to_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_name, media_mime_type, media_size, media_encrypted, sticker_id,
+		          media_url, media_name, media_mime_type, media_size, media_encrypted, group_key_epoch, sticker_id,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
-	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.MediaEncrypted, req.StickerID, req.ReplyToID).Scan(
+	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.MediaEncrypted, req.GroupKeyEpoch, req.StickerID, req.ReplyToID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
@@ -316,6 +366,16 @@ func isPrivateMediaMessage(messageType string) bool {
 		messageType == string(models.MessageTypeVideo) ||
 		messageType == string(models.MessageTypeAudio) ||
 		messageType == string(models.MessageTypeFile)
+}
+
+func messageUsesGroupKey(messageType string) bool {
+	return messageType == string(models.MessageTypeText) ||
+		messageType == string(models.MessageTypeImage) ||
+		messageType == string(models.MessageTypeVideo) ||
+		messageType == string(models.MessageTypeAudio) ||
+		messageType == string(models.MessageTypeFile) ||
+		messageType == string(models.MessageTypeLocation) ||
+		messageType == string(models.MessageTypeContact)
 }
 
 func (h *MessageHandler) ownsMediaObject(ctx context.Context, userID, mediaURL string) bool {
@@ -517,7 +577,7 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `
 		SELECT
 			m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-			m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted,
+			m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted, m.group_key_epoch,
 			m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 			u.id, u.username, u.display_name, u.avatar_url, u.public_key
 		FROM messages m
@@ -525,7 +585,7 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 		WHERE m.id = $1
 	`, msgID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 		&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 	)
@@ -573,11 +633,11 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		SET encrypted_content = $1, is_edited = true, edited_at = NOW()
 		WHERE id = $2 AND conversation_id = $3 AND sender_id = $4 AND is_deleted = false
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_name, media_mime_type, media_size, media_encrypted, sticker_id,
+		          media_url, media_name, media_mime_type, media_size, media_encrypted, group_key_epoch, sticker_id,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
 	`, req.EncryptedContent, msgID, convID, userID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {

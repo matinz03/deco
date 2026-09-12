@@ -108,7 +108,7 @@ async function fetchEncryptedAttachment(
 // gets a short-lived ticket; encrypted media is fetched, decrypted in a
 // two-item queue, and exposed only as an in-memory Blob URL while visible.
 export function useMediaTicketUrl(
-  message: Pick<Message, "conversationId" | "id" | "type" | "mediaUrl" | "mediaMimeType" | "mediaEncrypted">
+  message: Pick<Message, "conversationId" | "id" | "type" | "mediaUrl" | "mediaMimeType" | "mediaEncrypted" | "groupKeyEpoch">
 ) {
   const {
     conversationId,
@@ -117,6 +117,7 @@ export function useMediaTicketUrl(
     mediaUrl: initialUrl,
     mediaMimeType,
     mediaEncrypted,
+    groupKeyEpoch,
   } = message;
   const userId = useAuthStore((state) => state.user?.id);
   const conversation = useConversationStore((state) => state.conversations.find((item) => item.id === conversationId));
@@ -214,7 +215,7 @@ export function useMediaTicketUrl(
       try {
         await withDecryptSlot(async () => {
           if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
-          const key = await getConversationEncryptionKey(conversation, userId);
+          const key = await getConversationEncryptionKey(conversation, userId, groupKeyEpoch);
           if (!key) throw new Error("attachment key unavailable");
           const response = await fetchEncryptedAttachment(sourceUrl, controller.signal, refresh);
           const plaintext = decryptBlob(new Uint8Array(await response.arrayBuffer()), key);
@@ -247,7 +248,7 @@ export function useMediaTicketUrl(
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [conversation, loadVersion, mediaEncrypted, mediaMimeType, refresh, shouldLoad, sourceUrl, userId]);
+  }, [conversation, groupKeyEpoch, loadVersion, mediaEncrypted, mediaMimeType, refresh, shouldLoad, sourceUrl, userId]);
 
   return { url, refresh, observe, load, loading, error };
 }

@@ -112,6 +112,240 @@ func TestEnsureSchemaUpgradesLegacyMessageMediaColumns(t *testing.T) {
 	}
 }
 
+// A legacy group has one mutable key row per member and no epoch metadata.
+// Migration must preserve those copies as immutable epoch 1 and tag existing
+// encrypted messages so clients can keep decrypting them after later rotation.
+func TestEnsureSchemaMigratesCompleteLegacyGroupKeys(t *testing.T) {
+	pool := testPool(t)
+	if err := EnsureSchema(pool); err != nil {
+		t.Fatalf("prepare current schema: %v", err)
+	}
+	ctx := context.Background()
+	ownerID := seedUser(t, pool, "schema_group_epoch_owner")
+	memberID := seedUser(t, pool, "schema_group_epoch_member")
+
+	var conversationID, messageID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO conversations (type, name, created_by_id)
+		VALUES ('group', 'Epoch migration', $1) RETURNING id
+	`, ownerID).Scan(&conversationID); err != nil {
+		t.Fatalf("seed conversation: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM conversations WHERE id=$1`, conversationID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO members (conversation_id, user_id, role)
+		VALUES ($1, $2, 'owner'), ($1, $3, 'member')
+	`, conversationID, ownerID, memberID); err != nil {
+		t.Fatalf("seed members: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO group_keys (conversation_id, user_id, encrypted_by, encrypted_key)
+		VALUES ($1, $2, $2, 'owner-copy'), ($1, $3, $2, 'member-copy')
+	`, conversationID, ownerID, memberID); err != nil {
+		t.Fatalf("seed legacy key copies: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO messages (conversation_id, sender_id, type, encrypted_content)
+		VALUES ($1, $2, 'text', 'ciphertext') RETURNING id
+	`, conversationID, ownerID).Scan(&messageID); err != nil {
+		t.Fatalf("seed legacy message: %v", err)
+	}
+
+	t.Setenv("DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION", "0")
+	if err := EnsureSchema(pool); err == nil || !strings.Contains(err.Error(), "drained deployment") {
+		t.Fatalf("unguarded legacy migration error = %v, want drained-deployment gate", err)
+	}
+	t.Setenv("DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION", "1")
+	if err := EnsureSchema(pool); err != nil {
+		t.Fatalf("migrate legacy group keys: %v", err)
+	}
+
+	var currentEpoch int64
+	if err := pool.QueryRow(ctx, `
+		SELECT current_group_key_epoch FROM conversations WHERE id=$1
+	`, conversationID).Scan(&currentEpoch); err != nil {
+		t.Fatalf("read current epoch: %v", err)
+	}
+	if currentEpoch != 1 {
+		t.Fatalf("current epoch = %d, want 1", currentEpoch)
+	}
+
+	var copyCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM group_key_copies
+		WHERE conversation_id=$1 AND epoch=1 AND encryptor_public_key='ORIGINALKEY'
+	`, conversationID).Scan(&copyCount); err != nil {
+		t.Fatalf("count migrated key copies: %v", err)
+	}
+	if copyCount != 2 {
+		t.Fatalf("migrated key copies = %d, want 2", copyCount)
+	}
+
+	var messageEpoch *int64
+	if err := pool.QueryRow(ctx, `
+		SELECT group_key_epoch FROM messages WHERE id=$1
+	`, messageID).Scan(&messageEpoch); err != nil {
+		t.Fatalf("read migrated message epoch: %v", err)
+	}
+	if messageEpoch == nil || *messageEpoch != 1 {
+		t.Fatalf("message epoch = %v, want 1", messageEpoch)
+	}
+
+	// Simulate an epoch-2 add and its legacy current-key projection, then boot
+	// again. The migration must never copy epoch-2 ciphertext backward into the
+	// immutable epoch-1 history.
+	newMemberID := seedUser(t, pool, "schema_group_epoch_new_member")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO members (conversation_id, user_id, role) VALUES ($1, $2, 'member')`,
+		conversationID, newMemberID); err != nil {
+		t.Fatalf("seed epoch-2 member: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO group_key_epochs (conversation_id, epoch, created_by) VALUES ($1, 2, $2)`,
+		conversationID, ownerID); err != nil {
+		t.Fatalf("seed epoch-2 record: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO group_key_copies (
+			conversation_id, epoch, user_id, encrypted_by, encryptor_public_key, encrypted_key
+		) VALUES
+			($1, 2, $2, $2, 'ORIGINALKEY', 'owner-v2'),
+			($1, 2, $3, $2, 'ORIGINALKEY', 'member-v2'),
+			($1, 2, $4, $2, 'ORIGINALKEY', 'new-member-v2')
+	`, conversationID, ownerID, memberID, newMemberID); err != nil {
+		t.Fatalf("seed epoch-2 copies: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM group_keys WHERE conversation_id=$1`, conversationID); err != nil {
+		t.Fatalf("replace legacy projection: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO group_keys (conversation_id, user_id, encrypted_by, encrypted_key) VALUES
+			($1, $2, $2, 'owner-v2'),
+			($1, $3, $2, 'member-v2'),
+			($1, $4, $2, 'new-member-v2')
+	`, conversationID, ownerID, memberID, newMemberID); err != nil {
+		t.Fatalf("seed epoch-2 legacy projection: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE conversations SET current_group_key_epoch=2 WHERE id=$1`, conversationID); err != nil {
+		t.Fatalf("activate epoch 2: %v", err)
+	}
+
+	var postRotationLegacyMessageID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO messages (conversation_id, sender_id, type, encrypted_content)
+		VALUES ($1, $2, 'text', 'legacy-after-rotation') RETURNING id
+	`, conversationID, ownerID).Scan(&postRotationLegacyMessageID); err != nil {
+		t.Fatalf("seed post-rotation legacy message: %v", err)
+	}
+	if err := EnsureSchema(pool); err != nil {
+		t.Fatalf("EnsureSchema after epoch 2: %v", err)
+	}
+
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM group_key_copies WHERE conversation_id=$1 AND epoch=1
+	`, conversationID).Scan(&copyCount); err != nil {
+		t.Fatalf("count epoch-1 copies after restart: %v", err)
+	}
+	if copyCount != 2 {
+		t.Fatalf("epoch-1 copies after restart = %d, want 2", copyCount)
+	}
+	messageEpoch = nil
+	if err := pool.QueryRow(ctx, `
+		SELECT group_key_epoch FROM messages WHERE id=$1
+	`, postRotationLegacyMessageID).Scan(&messageEpoch); err != nil {
+		t.Fatalf("read post-rotation legacy message epoch: %v", err)
+	}
+	if messageEpoch != nil {
+		t.Fatalf("post-rotation legacy message was mislabeled epoch %d", *messageEpoch)
+	}
+}
+
+func TestGroupKeyEpochTablesRejectDirectMutation(t *testing.T) {
+	pool := testPool(t)
+	if err := EnsureSchema(pool); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+	ctx := context.Background()
+	ownerID := seedUser(t, pool, "schema_group_immutable_owner")
+	distributorID := seedUser(t, pool, "schema_group_immutable_distributor")
+
+	var conversationID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO conversations (type, name, created_by_id, current_group_key_epoch)
+		VALUES ('group', 'Immutable epoch', $1, 1) RETURNING id
+	`, ownerID).Scan(&conversationID); err != nil {
+		t.Fatalf("seed conversation: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM conversations WHERE id=$1`, conversationID)
+	})
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO members (conversation_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		conversationID, ownerID); err != nil {
+		t.Fatalf("seed owner membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO group_key_epochs (conversation_id, epoch, created_by) VALUES ($1, 1, $2)`,
+		conversationID, distributorID); err != nil {
+		t.Fatalf("seed epoch: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO group_key_copies (
+			conversation_id, epoch, user_id, encrypted_by, encryptor_public_key, encrypted_key
+		) VALUES ($1, 1, $2, $3, 'ORIGINALKEY', 'ciphertext')
+	`, conversationID, ownerID, distributorID); err != nil {
+		t.Fatalf("seed epoch copy: %v", err)
+	}
+
+	for name, statement := range map[string]string{
+		"update epoch": `UPDATE group_key_epochs SET created_at=NOW() WHERE conversation_id=$1 AND epoch=1`,
+		"delete epoch": `DELETE FROM group_key_epochs WHERE conversation_id=$1 AND epoch=1`,
+		"update copy":  `UPDATE group_key_copies SET encrypted_key='tampered' WHERE conversation_id=$1 AND epoch=1`,
+		"delete copy":  `DELETE FROM group_key_copies WHERE conversation_id=$1 AND epoch=1`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, statement, conversationID); err == nil {
+				t.Fatalf("direct mutation succeeded: %s", statement)
+			}
+		})
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, distributorID); err != nil {
+		t.Fatalf("FK nulling was blocked by append-only guards: %v", err)
+	}
+	var epochCreatorCleared, copyEncryptorCleared bool
+	if err := pool.QueryRow(ctx, `
+		SELECT e.created_by IS NULL, c.encrypted_by IS NULL
+		FROM group_key_epochs e
+		JOIN group_key_copies c
+		  ON c.conversation_id=e.conversation_id AND c.epoch=e.epoch
+		WHERE e.conversation_id=$1 AND e.epoch=1
+	`, conversationID).Scan(&epochCreatorCleared, &copyEncryptorCleared); err != nil {
+		t.Fatalf("read FK-nulled key records: %v", err)
+	}
+	if !epochCreatorCleared || !copyEncryptorCleared {
+		t.Fatalf("FK nulling incomplete: epoch creator=%v copy encryptor=%v", epochCreatorCleared, copyEncryptorCleared)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM conversations WHERE id=$1`, conversationID); err != nil {
+		t.Fatalf("conversation cascade was blocked by append-only guards: %v", err)
+	}
+	var remainingEpochs, remainingCopies int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM group_key_epochs WHERE conversation_id=$1),
+		  (SELECT count(*) FROM group_key_copies WHERE conversation_id=$1)
+	`, conversationID).Scan(&remainingEpochs, &remainingCopies); err != nil {
+		t.Fatalf("count cascaded key records: %v", err)
+	}
+	if remainingEpochs != 0 || remainingCopies != 0 {
+		t.Fatalf("cascade left epochs=%d copies=%d", remainingEpochs, remainingCopies)
+	}
+}
+
 // A public key that can be rewritten defeats end-to-end encryption: swap the
 // key, receive everything sent afterwards. The database must refuse it even
 // when the caller is the application itself.

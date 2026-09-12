@@ -75,6 +75,7 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 			r.Delete("/{conversationID}/members/{userID}", h.RemoveMember)
 			r.Get("/{conversationID}/group-key", h.GetGroupKey)
 			r.Put("/{conversationID}/group-keys", h.PutGroupKeys)
+			r.Post("/{conversationID}/group-key-epochs", h.CreateGroupKeyEpoch)
 		})
 	})
 }

@@ -31,13 +31,20 @@ Integrated work:
 - Production CSP no longer permits `unsafe-eval`, fails the build when API/WS
   origins are absent, and includes Clerk's documented protection origins.
   App Router/Clerk `unsafe-inline` remains until nonce-based CSP is introduced.
+- Group encryption uses immutable key epochs. Group creation requires a
+  complete epoch-1 distribution; add/remove membership and key rotation commit
+  atomically behind an expected-epoch compare; messages and encrypted
+  attachments record their exact epoch so old history remains decryptable.
+  Legacy key rows are retained as a rollback projection. Direct epoch/copy
+  mutation is blocked at the database layer; account deletion now refuses to
+  bypass rotation for users who still belong to encrypted groups.
 
 After integrating security, Clerk, storage, blob primitives, and private S3
 reads, the following commands exited successfully on this branch:
 
 - `go build ./...`
 - `go vet ./...`
-- `go test ./... -count=1` — 227 tests across 9 packages
+- `go test ./... -count=1` — 234 tests across 9 packages
 - `pnpm --filter @deco/crypto test` — 12 tests
 - `pnpm type-check`
 - `pnpm build` with the required API, WebSocket, and media origins set
@@ -47,8 +54,9 @@ certification. Clerk still requires a real-tenant browser exercise.
 
 ## Work still outside this branch
 
-- `security/sessions`: CSP hardening plus a legacy server-cookie change. The
-  CSP work may survive Clerk; cookie ownership must not be merged blindly.
+- `security/sessions`: the legacy server-cookie change remains intentionally
+  unmerged because Clerk owns the production session. Its compatible CSP work
+  was integrated separately.
 
 ## Launch blockers
 
@@ -58,7 +66,15 @@ certification. Clerk still requires a real-tenant browser exercise.
    object store. S3 now has a separate browser-facing signing endpoint, private
    bucket CORS, and CSP support; deployment values still need real-environment
    proof.
-3. Resolve group-key first-writer authority and add key epochs.
+3. Exercise group creation, concurrent admin rotation, member add/remove, stale
+   send recovery, and old-message/media decryption against live Postgres in two
+   browsers. The real-Postgres migration test exists but skips unless
+   `DECO_TEST_DATABASE_URL` is configured. Self-service group leave is hidden:
+   an owner/admin must remove the member while generating the next key; a safe
+   asynchronous leave/handoff protocol is future work. Existing deployments
+   with legacy key rows must stop all old API instances, set
+   `DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION=1` for one boot, then unset it; the
+   server refuses to migrate without this explicit drained-deployment gate.
 4. Add off-host Postgres and object-storage backups, service health checks, and
    deployment rollback.
 5. Add browser coverage for auth, encrypted media, realtime reconnect, and

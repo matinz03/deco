@@ -218,3 +218,13 @@ and a restore that has actually been tested.
 ## Production deployment
 
 The app ships with Dockerfiles for both `api` and `web`, and an nginx + Certbot + Docker Compose setup for a single VPS. See [`SETUP.md`](SETUP.md) for the full walkthrough (DNS, SSL, `docker compose up`), and [`deploy.sh`](deploy.sh) / [`watch-deploy.sh`](watch-deploy.sh) for the update/auto-deploy scripts used on the VPS.
+
+### One-time legacy group-key cutover
+
+Fresh databases need no special step. If `group_keys` already contains rows,
+stop every old API instance before deploying the epoch-aware API. Set
+`DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION=1` for the first new API boot, wait for
+it to finish, then unset the flag (or return it to `0`) before starting the
+remaining instances. The API intentionally refuses this migration without the
+explicit gate because old binaries write a multi-recipient key batch as
+separate database transactions.

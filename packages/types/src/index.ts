@@ -149,6 +149,7 @@ export interface Message {
   mediaMimeType?: string;
   mediaSize?: number;
   mediaEncrypted?: boolean;
+  groupKeyEpoch?: number;
   sticker?: Sticker;
   poll?: Poll;
   replyToId?: string;

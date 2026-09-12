@@ -23,7 +23,7 @@ import type {
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const PUBLIC_UPLOAD_BASE = process.env.NEXT_PUBLIC_UPLOAD_BASE ?? "/api/v1/media";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
@@ -121,6 +121,7 @@ export function mapMessage(r: any): Message {
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
     mediaEncrypted: Boolean(r.media_encrypted ?? r.mediaEncrypted ?? false),
+    groupKeyEpoch: r.group_key_epoch ?? r.groupKeyEpoch,
     sticker: r.sticker ? mapSticker(r.sticker) : undefined,
     poll: r.poll ? mapPoll(r.poll) : undefined,
     replyToId: r.reply_to_id ?? r.replyToId,
@@ -533,20 +534,42 @@ export const api = {
       });
     },
 
-    getGroupKey: async (id: string): Promise<{ encryptedKey: string; encryptedBy: string }> => {
-      const raw = await request<Record<string, string>>(`/api/v1/conversations/${id}/group-key`);
-      return { encryptedKey: raw["encrypted_key"] ?? "", encryptedBy: raw["encrypted_by"] ?? "" };
+    getGroupKey: async (
+      id: string,
+      epoch?: number
+    ): Promise<{ epoch: number; encryptedKey: string; encryptedBy?: string; encryptorPublicKey: string }> => {
+      const query = epoch ? `?epoch=${encodeURIComponent(epoch)}` : "";
+      const raw = await request<Record<string, unknown>>(`/api/v1/conversations/${id}/group-key${query}`);
+      return {
+        epoch: Number(raw["epoch"] ?? 0),
+        encryptedKey: String(raw["encrypted_key"] ?? ""),
+        encryptedBy: raw["encrypted_by"] ? String(raw["encrypted_by"]) : undefined,
+        encryptorPublicKey: String(raw["encryptor_public_key"] ?? ""),
+      };
     },
 
-    putGroupKeys: async (id: string, entries: { userId: string; encryptedKey: string; encryptedBy: string }[]) => {
-      await request(`/api/v1/conversations/${id}/group-keys`, {
-        method: "PUT",
-        body: JSON.stringify(entries.map((e) => ({
-          user_id: e.userId,
-          encrypted_key: e.encryptedKey,
-          encrypted_by: e.encryptedBy,
-        }))),
+    createGroupKeyEpoch: async (
+      id: string,
+      body: {
+        expectedEpoch: number;
+        membershipChange?: { action: "add" | "remove"; userId: string };
+        copies: { userId: string; encryptedKey: string }[];
+      }
+    ) => {
+      const raw = await request<{ epoch: number }>(`/api/v1/conversations/${id}/group-key-epochs`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_epoch: body.expectedEpoch,
+          membership_change: body.membershipChange
+            ? { action: body.membershipChange.action, user_id: body.membershipChange.userId }
+            : undefined,
+          copies: body.copies.map((copy) => ({
+            user_id: copy.userId,
+            encrypted_key: copy.encryptedKey,
+          })),
+        }),
       });
+      return raw.epoch;
     },
 
     getLeadership: async (id: string) => {
@@ -596,6 +619,7 @@ export const api = {
         mediaMimeType?: string;
         mediaSize?: number;
         mediaEncrypted?: boolean;
+        groupKeyEpoch?: number;
         stickerId?: string;
         poll?: CreatePollInput;
       }
@@ -611,6 +635,7 @@ export const api = {
           media_mime_type: body.mediaMimeType,
           media_size: body.mediaSize,
           media_encrypted: body.mediaEncrypted,
+          group_key_epoch: body.groupKeyEpoch,
           sticker_id: body.stickerId,
           poll: body.poll ? {
             question: body.poll.question,
@@ -672,6 +697,11 @@ export const api = {
     search: async (q: string) => {
       const raw = await request<unknown[]>(`/api/v1/users/search?q=${encodeURIComponent(q)}`);
       return raw.map(mapUser);
+    },
+
+    get: async (id: string) => {
+      const raw = await request<unknown>(`/api/v1/users/${id}`);
+      return mapUser(raw);
     },
 
     getMe: async () => {

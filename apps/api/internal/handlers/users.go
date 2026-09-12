@@ -3,15 +3,16 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -21,6 +22,8 @@ type UserHandler struct {
 	cfg    *config.Config
 	logger *zap.Logger
 }
+
+var errUserBelongsToEncryptedGroup = errors.New("user belongs to an encrypted group")
 
 func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
@@ -280,6 +283,10 @@ func (h *UserHandler) DeleteAdminUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.deleteUserAccount(r, targetUserID); err != nil {
+		if errors.Is(err, errUserBelongsToEncryptedGroup) {
+			respondError(w, http.StatusConflict, "remove the user from every encrypted group with key rotation before deleting the account")
+			return
+		}
 		respondError(w, http.StatusInternalServerError, "failed to delete user")
 		return
 	}
@@ -410,6 +417,32 @@ func (h *UserHandler) deleteUserAccount(r *http.Request, targetUserID string) er
 		return err
 	}
 	defer tx.Rollback(r.Context())
+
+	// Account deletion used to bypass group-key rotation by cascading member
+	// rows. Freeze conversation/member writers during the check so a concurrent
+	// add cannot slip between authorization and deletion.
+	if _, err := tx.Exec(r.Context(), `
+		LOCK TABLE conversations IN ACCESS EXCLUSIVE MODE;
+		LOCK TABLE members IN SHARE MODE;
+	`); err != nil {
+		return err
+	}
+	var belongsToEncryptedGroup bool
+	if err := tx.QueryRow(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1
+			FROM members m
+			JOIN conversations c ON c.id = m.conversation_id
+			WHERE m.user_id = $1
+			  AND c.type = 'group'
+			  AND c.current_group_key_epoch > 0
+		)
+	`, targetUserID).Scan(&belongsToEncryptedGroup); err != nil {
+		return err
+	}
+	if belongsToEncryptedGroup {
+		return errUserBelongsToEncryptedGroup
+	}
 
 	_, err = tx.Exec(r.Context(), `
 		DELETE FROM reactions

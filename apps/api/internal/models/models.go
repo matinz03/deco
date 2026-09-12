@@ -85,6 +85,7 @@ type Message struct {
 	MediaMimeType  *string       `json:"media_mime_type,omitempty" db:"media_mime_type"`
 	MediaSize      *int64        `json:"media_size,omitempty" db:"media_size"`
 	MediaEncrypted bool          `json:"media_encrypted" db:"media_encrypted"`
+	GroupKeyEpoch  *int64        `json:"group_key_epoch,omitempty" db:"group_key_epoch"`
 	StickerID      *string       `json:"sticker_id,omitempty" db:"sticker_id"`
 	Sticker        *Sticker      `json:"sticker,omitempty"`
 	Poll           *Poll         `json:"poll,omitempty"`
@@ -207,7 +208,9 @@ type KeyBackup struct {
 type GroupKey struct {
 	ConversationID string    `json:"conversation_id" db:"conversation_id"`
 	UserID         string    `json:"user_id" db:"user_id"`
-	EncryptedBy    string    `json:"encrypted_by" db:"encrypted_by"`
+	Epoch          int64     `json:"epoch" db:"epoch"`
+	EncryptedBy    *string   `json:"encrypted_by,omitempty" db:"encrypted_by"`
+	EncryptorKey   string    `json:"encryptor_public_key" db:"encryptor_public_key"`
 	EncryptedKey   string    `json:"encrypted_key" db:"encrypted_key"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 }

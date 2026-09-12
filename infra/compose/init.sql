@@ -37,6 +37,7 @@ CREATE TABLE conversations (
   description   TEXT NOT NULL DEFAULT '',
   created_by_id UUID NOT NULL REFERENCES users(id),
   saved_for_user_id UUID UNIQUE REFERENCES users(id),
+  current_group_key_epoch BIGINT NOT NULL DEFAULT 0 CHECK (current_group_key_epoch >= 0),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -75,6 +76,7 @@ CREATE TABLE messages (
   media_mime_type   TEXT,
   media_size        BIGINT,
   media_encrypted   BOOLEAN NOT NULL DEFAULT FALSE,
+  group_key_epoch   BIGINT CHECK (group_key_epoch > 0),
   sticker_id        UUID,
   reply_to_id       UUID REFERENCES messages(id),
   status            message_status NOT NULL DEFAULT 'sent',
@@ -87,6 +89,41 @@ CREATE TABLE messages (
 -- Critical indexes for chat performance
 CREATE INDEX idx_messages_conversation_sent ON messages(conversation_id, sent_at DESC);
 CREATE INDEX idx_messages_sender ON messages(sender_id);
+
+-- ─── Versioned group encryption keys ─────────────────────────────────────────
+-- The legacy table remains the current-key compatibility projection. The
+-- immutable epoch tables preserve historical keys across membership rotation.
+CREATE TABLE group_keys (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  encrypted_by    UUID NOT NULL REFERENCES users(id),
+  encrypted_key   TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE TABLE group_key_epochs (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  epoch           BIGINT NOT NULL CHECK (epoch > 0),
+  created_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, epoch)
+);
+
+CREATE TABLE group_key_copies (
+  conversation_id     UUID NOT NULL,
+  epoch               BIGINT NOT NULL,
+  user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  encrypted_by        UUID REFERENCES users(id) ON DELETE SET NULL,
+  encryptor_public_key TEXT NOT NULL,
+  encrypted_key       TEXT NOT NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, epoch, user_id),
+  FOREIGN KEY (conversation_id, epoch)
+    REFERENCES group_key_epochs(conversation_id, epoch) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_group_key_copies_user ON group_key_copies(user_id, conversation_id, epoch);
 
 -- ─── Reactions ───────────────────────────────────────────────────────────────
 CREATE TABLE reactions (
@@ -247,9 +284,71 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION deco_reject_direct_row_delete()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF pg_trigger_depth() <= 1 THEN
+    RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION deco_guard_group_key_copy_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF pg_trigger_depth() > 1
+     AND OLD.encrypted_by IS NOT NULL
+     AND NEW.encrypted_by IS NULL
+     AND ROW(NEW.conversation_id, NEW.epoch, NEW.user_id,
+             NEW.encryptor_public_key, NEW.encrypted_key, NEW.created_at)
+         IS NOT DISTINCT FROM
+         ROW(OLD.conversation_id, OLD.epoch, OLD.user_id,
+             OLD.encryptor_public_key, OLD.encrypted_key, OLD.created_at) THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION deco_guard_group_key_epoch_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF pg_trigger_depth() > 1
+     AND OLD.created_by IS NOT NULL
+     AND NEW.created_by IS NULL
+     AND ROW(NEW.conversation_id, NEW.epoch, NEW.created_at)
+         IS NOT DISTINCT FROM
+         ROW(OLD.conversation_id, OLD.epoch, OLD.created_at) THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER trg_user_public_key_audit_append_only
   BEFORE UPDATE ON user_public_key_audit
   FOR EACH ROW EXECUTE FUNCTION deco_reject_row_update();
+
+CREATE TRIGGER trg_user_public_key_audit_no_delete
+  BEFORE DELETE ON user_public_key_audit
+  FOR EACH ROW EXECUTE FUNCTION deco_reject_direct_row_delete();
+
+CREATE TRIGGER trg_group_key_epochs_append_only
+  BEFORE UPDATE ON group_key_epochs
+  FOR EACH ROW EXECUTE FUNCTION deco_guard_group_key_epoch_update();
+
+CREATE TRIGGER trg_group_key_epochs_no_direct_delete
+  BEFORE DELETE ON group_key_epochs
+  FOR EACH ROW EXECUTE FUNCTION deco_reject_direct_row_delete();
+
+CREATE TRIGGER trg_group_key_copies_append_only
+  BEFORE UPDATE ON group_key_copies
+  FOR EACH ROW EXECUTE FUNCTION deco_guard_group_key_copy_update();
+
+CREATE TRIGGER trg_group_key_copies_no_direct_delete
+  BEFORE DELETE ON group_key_copies
+  FOR EACH ROW EXECUTE FUNCTION deco_reject_direct_row_delete();
 
 -- users.public_key is immutable. A new device means a new row in a device/key
 -- table, never a mutation of this one. Only fires when the value actually

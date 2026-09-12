@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,21 +47,21 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 			COUNT(DISTINCT m2.id) FILTER (WHERE m2.sent_at > mb.last_read_at AND m2.sender_id <> $1) AS unread_count,
 			COUNT(DISTINCT m3.user_id) AS member_count,
 			-- Last message fields
-			lm.id, lm.conversation_id, lm.sender_id, lm.type, lm.encrypted_content,
+			lm.id, lm.conversation_id, lm.sender_id, lm.type, lm.encrypted_content, lm.group_key_epoch,
 			lm.is_deleted, lm.sent_at
 		FROM conversations c
 		JOIN members mb ON mb.conversation_id = c.id AND mb.user_id = $1
 		LEFT JOIN messages m2 ON m2.conversation_id = c.id AND m2.is_deleted = false
 		LEFT JOIN members m3 ON m3.conversation_id = c.id
 		LEFT JOIN LATERAL (
-			SELECT id, conversation_id, sender_id, type, encrypted_content, is_deleted, sent_at
+			SELECT id, conversation_id, sender_id, type, encrypted_content, group_key_epoch, is_deleted, sent_at
 			FROM messages
 			WHERE conversation_id = c.id
 			ORDER BY sent_at DESC
 			LIMIT 1
 		) lm ON true
 		GROUP BY c.id, mb.last_read_at, lm.id, lm.conversation_id, lm.sender_id, lm.type,
-		         lm.encrypted_content, lm.is_deleted, lm.sent_at
+		         lm.encrypted_content, lm.group_key_epoch, lm.is_deleted, lm.sent_at
 		ORDER BY COALESCE(lm.sent_at, c.updated_at) DESC
 	`, userID)
 
@@ -76,6 +77,7 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 		var c models.Conversation
 		var lastMsg models.Message
 		var lastMsgID, lastMsgConversationID, lastMsgSenderID, lastMsgType, lastMsgContent *string
+		var lastMsgGroupKeyEpoch *int64
 		var lastMsgDeleted *bool
 		var lastMsgSentAt *time.Time
 
@@ -83,7 +85,7 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.ID, &c.Type, &c.Name, &c.AvatarURL, &c.Description,
 			&c.CreatedByID, &c.CreatedAt, &c.UpdatedAt,
 			&c.UnreadCount, &c.MemberCount,
-			&lastMsgID, &lastMsgConversationID, &lastMsgSenderID, &lastMsgType, &lastMsgContent,
+			&lastMsgID, &lastMsgConversationID, &lastMsgSenderID, &lastMsgType, &lastMsgContent, &lastMsgGroupKeyEpoch,
 			&lastMsgDeleted, &lastMsgSentAt,
 		)
 		if err != nil {
@@ -97,6 +99,7 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 			lastMsg.SenderID = *lastMsgSenderID
 			lastMsg.Type = models.MessageType(*lastMsgType)
 			lastMsg.EncryptedContent = *lastMsgContent
+			lastMsg.GroupKeyEpoch = lastMsgGroupKeyEpoch
 			lastMsg.IsDeleted = *lastMsgDeleted
 			if lastMsgSentAt != nil {
 				lastMsg.SentAt = *lastMsgSentAt
@@ -383,6 +386,15 @@ func (h *ConversationHandler) AddMember(w http.ResponseWriter, r *http.Request) 
 		respondError(w, http.StatusForbidden, "insufficient permissions")
 		return
 	}
+	isGroup, err := h.isGroupConversation(r.Context(), convID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to inspect conversation")
+		return
+	}
+	if isGroup {
+		respondError(w, http.StatusConflict, "group membership changes require an atomic key rotation")
+		return
+	}
 
 	var req struct {
 		UserID string `json:"user_id"`
@@ -392,7 +404,7 @@ func (h *ConversationHandler) AddMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	_, err := h.pool.Exec(r.Context(), `
+	_, err = h.pool.Exec(r.Context(), `
 		INSERT INTO members (conversation_id, user_id, role)
 		VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING
 	`, convID, req.UserID)
@@ -459,6 +471,15 @@ func (h *ConversationHandler) RemoveMember(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusForbidden, "insufficient permissions")
 		return
 	}
+	isGroup, err := h.isGroupConversation(r.Context(), convID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to inspect conversation")
+		return
+	}
+	if isGroup {
+		respondError(w, http.StatusConflict, "group membership changes require an atomic key rotation")
+		return
+	}
 
 	var actorRole string
 	if err := h.pool.QueryRow(r.Context(), `
@@ -469,7 +490,7 @@ func (h *ConversationHandler) RemoveMember(w http.ResponseWriter, r *http.Reques
 	}
 
 	var targetRole string
-	err := h.pool.QueryRow(r.Context(), `
+	err = h.pool.QueryRow(r.Context(), `
 		SELECT role FROM members WHERE conversation_id = $1 AND user_id = $2
 	`, convID, targetUserID).Scan(&targetRole)
 	if err != nil {
@@ -652,25 +673,44 @@ func (h *ConversationHandler) canManageRoles(r *http.Request, convID, userID str
 	return role == "owner"
 }
 
-// PutGroupKeys stores encrypted group key copies for one or more members.
-// Each entry contains the group key encrypted for a specific member.
-// Body: [{ "user_id": "...", "encrypted_key": "...", "encrypted_by": "..." }]
+type groupKeyCopyInput struct {
+	UserID       string `json:"user_id"`
+	EncryptedKey string `json:"encrypted_key"`
+}
+
+type groupKeyMembershipChange struct {
+	Action string `json:"action"`
+	UserID string `json:"user_id"`
+}
+
+type createGroupKeyEpochRequest struct {
+	ExpectedEpoch    int64                     `json:"expected_epoch"`
+	MembershipChange *groupKeyMembershipChange `json:"membership_change,omitempty"`
+	Copies           []groupKeyCopyInput       `json:"copies"`
+}
+
+type groupKeyEpochFailure struct {
+	status  int
+	message string
+}
+
+func (h *ConversationHandler) isGroupConversation(ctx context.Context, convID string) (bool, error) {
+	var isGroup bool
+	if err := h.pool.QueryRow(ctx, `
+		SELECT type = 'group' FROM conversations WHERE id = $1
+	`, convID).Scan(&isGroup); err != nil {
+		return false, err
+	}
+	return isGroup, nil
+}
+
+// PutGroupKeys is the legacy epoch-1 initializer. It remains for rollback and
+// old clients, but can no longer overwrite an initialized group or write a
+// partial recipient set.
 func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "conversationID")
-	callerID := r.Context().Value(middleware.UserIDKey).(string)
-
-	if !h.isConversationMember(r, convID, callerID) {
-		respondError(w, http.StatusForbidden, "not a member")
-		return
-	}
-	// A group key is the authority for all future group ciphertext.  Only the
-	// current group administrators may establish the first copy or rotate an
-	// existing copy; tying an update to the previous encrypted_by value lets a
-	// former regular member retain authority indefinitely.
-	if !h.canManageMembers(r, convID, callerID) {
-		respondError(w, http.StatusForbidden, "only group administrators can distribute keys")
-		return
-	}
+	callerID := middleware.GetUserID(r)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var entries []struct {
 		UserID       string `json:"user_id"`
@@ -682,6 +722,7 @@ func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	copies := make([]groupKeyCopyInput, 0, len(entries))
 	for _, entry := range entries {
 		if entry.UserID == "" || entry.EncryptedKey == "" || entry.EncryptedBy == "" {
 			respondError(w, http.StatusBadRequest, "missing fields")
@@ -691,47 +732,273 @@ func (h *ConversationHandler) PutGroupKeys(w http.ResponseWriter, r *http.Reques
 			respondError(w, http.StatusForbidden, "cannot forge key author")
 			return
 		}
-		if !h.isConversationMember(r, convID, entry.UserID) {
-			respondError(w, http.StatusForbidden, "recipient is not a member of conversation")
-			return
-		}
-		res, err := h.pool.Exec(r.Context(), `
-			INSERT INTO group_keys (conversation_id, user_id, encrypted_by, encrypted_key)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (conversation_id, user_id) DO UPDATE
-			  SET encrypted_key = EXCLUDED.encrypted_key,
-			      encrypted_by  = EXCLUDED.encrypted_by,
-			      created_at    = NOW()
-		`, convID, entry.UserID, entry.EncryptedBy, entry.EncryptedKey)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to store key")
-			return
-		}
-		if res.RowsAffected() != 1 {
-			respondError(w, http.StatusInternalServerError, "failed to store key")
-			return
-		}
+		copies = append(copies, groupKeyCopyInput{UserID: entry.UserID, EncryptedKey: entry.EncryptedKey})
+	}
+
+	if _, failure := h.createGroupKeyEpoch(r.Context(), convID, callerID, 0, nil, copies); failure != nil {
+		respondError(w, failure.status, failure.message)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// CreateGroupKeyEpoch atomically applies an optional membership change and
+// rotates the group to a complete, immutable set of encrypted key copies.
+func (h *ConversationHandler) CreateGroupKeyEpoch(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	callerID := middleware.GetUserID(r)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var req createGroupKeyEpochRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ExpectedEpoch < 0 || len(req.Copies) == 0 {
+		respondError(w, http.StatusBadRequest, "invalid group key epoch request")
+		return
+	}
+
+	epoch, failure := h.createGroupKeyEpoch(
+		r.Context(), convID, callerID, req.ExpectedEpoch, req.MembershipChange, req.Copies,
+	)
+	if failure != nil {
+		respondError(w, failure.status, failure.message)
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]int64{"epoch": epoch})
+}
+
+func (h *ConversationHandler) createGroupKeyEpoch(
+	ctx context.Context,
+	convID, callerID string,
+	expectedEpoch int64,
+	change *groupKeyMembershipChange,
+	copies []groupKeyCopyInput,
+) (int64, *groupKeyEpochFailure) {
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to start key rotation"}
+	}
+	defer tx.Rollback(ctx)
+
+	var conversationType, callerRole, encryptorPublicKey string
+	var currentEpoch int64
+	if err := tx.QueryRow(ctx, `
+		SELECT c.type::text, c.current_group_key_epoch, m.role::text, u.public_key
+		FROM conversations c
+		JOIN members m ON m.conversation_id = c.id AND m.user_id = $2
+		JOIN users u ON u.id = m.user_id
+		WHERE c.id = $1
+		FOR UPDATE OF c, m
+	`, convID, callerID).Scan(&conversationType, &currentEpoch, &callerRole, &encryptorPublicKey); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, &groupKeyEpochFailure{http.StatusForbidden, "not a member"}
+		}
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to authorize key rotation"}
+	}
+	if conversationType != string(models.ConversationTypeGroup) {
+		return 0, &groupKeyEpochFailure{http.StatusBadRequest, "key epochs are only available for groups"}
+	}
+	if callerRole != "owner" && callerRole != "admin" {
+		return 0, &groupKeyEpochFailure{http.StatusForbidden, "only group administrators can rotate keys"}
+	}
+	if currentEpoch != expectedEpoch {
+		return 0, &groupKeyEpochFailure{http.StatusConflict, "group key epoch is stale"}
+	}
+	if strings.TrimSpace(encryptorPublicKey) == "" {
+		return 0, &groupKeyEpochFailure{http.StatusConflict, "key distributor has no public key"}
+	}
+
+	if failure := applyGroupKeyMembershipChange(ctx, tx, convID, callerRole, change); failure != nil {
+		return 0, failure
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT user_id::text FROM members WHERE conversation_id = $1 ORDER BY user_id
+	`, convID)
+	if err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to load group members"}
+	}
+	memberIDs := make([]string, 0)
+	for rows.Next() {
+		var memberID string
+		if err := rows.Scan(&memberID); err != nil {
+			rows.Close()
+			return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to load group members"}
+		}
+		memberIDs = append(memberIDs, memberID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to load group members"}
+	}
+	if err := validateCompleteGroupKeyCopies(copies, memberIDs); err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusBadRequest, err.Error()}
+	}
+
+	newEpoch := expectedEpoch + 1
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO group_key_epochs (conversation_id, epoch, created_by)
+		VALUES ($1, $2, $3)
+	`, convID, newEpoch, callerID); err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to create key epoch"}
+	}
+	for _, copy := range copies {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO group_key_copies (
+				conversation_id, epoch, user_id, encrypted_by,
+				encryptor_public_key, encrypted_key
+			)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, convID, newEpoch, copy.UserID, callerID, encryptorPublicKey, copy.EncryptedKey); err != nil {
+			return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to store key copies"}
+		}
+	}
+
+	// Keep the legacy table as a current-key projection. Old readers can still
+	// decrypt the newest epoch during rollback, but old writers cannot mutate an
+	// initialized group through PutGroupKeys.
+	if _, err := tx.Exec(ctx, `DELETE FROM group_keys WHERE conversation_id = $1`, convID); err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to update key projection"}
+	}
+	for _, copy := range copies {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO group_keys (conversation_id, user_id, encrypted_by, encrypted_key)
+			VALUES ($1, $2, $3, $4)
+		`, convID, copy.UserID, callerID, copy.EncryptedKey); err != nil {
+			return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to update key projection"}
+		}
+	}
+	result, err := tx.Exec(ctx, `
+		UPDATE conversations SET current_group_key_epoch = $2, updated_at = NOW()
+		WHERE id = $1 AND current_group_key_epoch = $3
+	`, convID, newEpoch, expectedEpoch)
+	if err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to advance key epoch"}
+	}
+	if result.RowsAffected() != 1 {
+		return 0, &groupKeyEpochFailure{http.StatusConflict, "group key epoch is stale"}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, &groupKeyEpochFailure{http.StatusInternalServerError, "failed to commit key rotation"}
+	}
+	return newEpoch, nil
+}
+
+func applyGroupKeyMembershipChange(
+	ctx context.Context,
+	tx pgx.Tx,
+	convID, callerRole string,
+	change *groupKeyMembershipChange,
+) *groupKeyEpochFailure {
+	if change == nil || strings.TrimSpace(change.Action) == "" {
+		return nil
+	}
+	change.Action = strings.ToLower(strings.TrimSpace(change.Action))
+	change.UserID = strings.TrimSpace(change.UserID)
+	if change.UserID == "" {
+		return &groupKeyEpochFailure{http.StatusBadRequest, "membership change requires user_id"}
+	}
+
+	switch change.Action {
+	case "add":
+		result, err := tx.Exec(ctx, `
+			INSERT INTO members (conversation_id, user_id, role)
+			VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING
+		`, convID, change.UserID)
+		if err != nil {
+			return &groupKeyEpochFailure{http.StatusBadRequest, "failed to add member"}
+		}
+		if result.RowsAffected() != 1 {
+			return &groupKeyEpochFailure{http.StatusConflict, "member already belongs to group"}
+		}
+	case "remove":
+		var targetRole string
+		if err := tx.QueryRow(ctx, `
+			SELECT role::text FROM members
+			WHERE conversation_id = $1 AND user_id = $2
+			FOR UPDATE
+		`, convID, change.UserID).Scan(&targetRole); err != nil {
+			return &groupKeyEpochFailure{http.StatusNotFound, "member not found"}
+		}
+		if targetRole == "owner" {
+			return &groupKeyEpochFailure{http.StatusBadRequest, "owner cannot be removed"}
+		}
+		if callerRole != "owner" && targetRole != "member" {
+			return &groupKeyEpochFailure{http.StatusForbidden, "admins can only remove regular members"}
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM members WHERE conversation_id = $1 AND user_id = $2
+		`, convID, change.UserID); err != nil {
+			return &groupKeyEpochFailure{http.StatusInternalServerError, "failed to remove member"}
+		}
+	default:
+		return &groupKeyEpochFailure{http.StatusBadRequest, "membership action must be add or remove"}
+	}
+	return nil
+}
+
+func validateCompleteGroupKeyCopies(copies []groupKeyCopyInput, memberIDs []string) error {
+	if len(copies) != len(memberIDs) {
+		return errors.New("key rotation requires one copy for every group member")
+	}
+	members := make(map[string]struct{}, len(memberIDs))
+	for _, memberID := range memberIDs {
+		members[memberID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(copies))
+	for _, copy := range copies {
+		if strings.TrimSpace(copy.UserID) == "" || strings.TrimSpace(copy.EncryptedKey) == "" {
+			return errors.New("key copies require user_id and encrypted_key")
+		}
+		if _, ok := members[copy.UserID]; !ok {
+			return errors.New("key copy recipient is not a group member")
+		}
+		if _, duplicate := seen[copy.UserID]; duplicate {
+			return errors.New("duplicate key copy recipient")
+		}
+		seen[copy.UserID] = struct{}{}
+	}
+	return nil
+}
+
 // GetGroupKey returns the caller's encrypted copy of the group key.
 func (h *ConversationHandler) GetGroupKey(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "conversationID")
-	callerID := r.Context().Value(middleware.UserIDKey).(string)
+	callerID := middleware.GetUserID(r)
 
 	if !h.isConversationMember(r, convID, callerID) {
 		respondError(w, http.StatusForbidden, "not a member")
 		return
 	}
 
+	var currentEpoch int64
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT current_group_key_epoch FROM conversations WHERE id = $1
+	`, convID).Scan(&currentEpoch); err != nil || currentEpoch == 0 {
+		respondError(w, http.StatusNotFound, "group key not found")
+		return
+	}
+
+	epoch := currentEpoch
+	if rawEpoch := strings.TrimSpace(r.URL.Query().Get("epoch")); rawEpoch != "" {
+		parsedEpoch, err := strconv.ParseInt(rawEpoch, 10, 64)
+		if err != nil || parsedEpoch <= 0 {
+			respondError(w, http.StatusBadRequest, "invalid key epoch")
+			return
+		}
+		epoch = parsedEpoch
+	}
+
 	var gk models.GroupKey
 	err := h.pool.QueryRow(r.Context(), `
-		SELECT conversation_id, user_id, encrypted_by, encrypted_key, created_at
-		FROM group_keys
-		WHERE conversation_id = $1 AND user_id = $2
-	`, convID, callerID).Scan(&gk.ConversationID, &gk.UserID, &gk.EncryptedBy, &gk.EncryptedKey, &gk.CreatedAt)
+		SELECT conversation_id, user_id, epoch, encrypted_by,
+		       encryptor_public_key, encrypted_key, created_at
+		FROM group_key_copies
+		WHERE conversation_id = $1 AND user_id = $2 AND epoch = $3
+	`, convID, callerID, epoch).Scan(
+		&gk.ConversationID, &gk.UserID, &gk.Epoch, &gk.EncryptedBy,
+		&gk.EncryptorKey, &gk.EncryptedKey, &gk.CreatedAt,
+	)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "group key not found")
 		return

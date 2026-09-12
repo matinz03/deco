@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"errors"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -209,11 +211,46 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	// every message query below. Add it before reading any of those columns so
 	// databases created by older releases can upgrade in one boot.
 	_, err = pool.Exec(ctx, `
+		ALTER TABLE conversations
+		ADD COLUMN IF NOT EXISTS current_group_key_epoch BIGINT NOT NULL DEFAULT 0
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx, `
+		DO $$ BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint WHERE conname = 'conversations_group_key_epoch_nonnegative'
+			) THEN
+				ALTER TABLE conversations ADD CONSTRAINT conversations_group_key_epoch_nonnegative
+				CHECK (current_group_key_epoch >= 0);
+			END IF;
+		END $$
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
 		ALTER TABLE messages
 		ADD COLUMN IF NOT EXISTS media_name TEXT,
 		ADD COLUMN IF NOT EXISTS media_mime_type TEXT,
 		ADD COLUMN IF NOT EXISTS media_size BIGINT,
-		ADD COLUMN IF NOT EXISTS media_encrypted BOOLEAN NOT NULL DEFAULT FALSE
+		ADD COLUMN IF NOT EXISTS media_encrypted BOOLEAN NOT NULL DEFAULT FALSE,
+		ADD COLUMN IF NOT EXISTS group_key_epoch BIGINT
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx, `
+		DO $$ BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint WHERE conname = 'messages_group_key_epoch_positive'
+			) THEN
+				ALTER TABLE messages ADD CONSTRAINT messages_group_key_epoch_positive
+				CHECK (group_key_epoch > 0);
+			END IF;
+		END $$
 	`)
 	if err != nil {
 		return err
@@ -232,6 +269,48 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 			size          BIGINT NOT NULL DEFAULT 0,
 			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Versioned, immutable group-key copies preserve historical decryption and
+	// make rotations atomic. The legacy group_keys table remains below as a
+	// current-key projection for rollback and old readers.
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_key_epochs (
+			conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			epoch           BIGINT NOT NULL CHECK (epoch > 0),
+			created_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (conversation_id, epoch)
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_key_copies (
+			conversation_id      UUID NOT NULL,
+			epoch                BIGINT NOT NULL,
+			user_id              UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			encrypted_by         UUID REFERENCES users(id) ON DELETE SET NULL,
+			encryptor_public_key TEXT NOT NULL,
+			encrypted_key        TEXT NOT NULL,
+			created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (conversation_id, epoch, user_id),
+			FOREIGN KEY (conversation_id, epoch)
+				REFERENCES group_key_epochs(conversation_id, epoch) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_group_key_copies_user
+		ON group_key_copies(user_id, conversation_id, epoch)
 	`)
 	if err != nil {
 		return err
@@ -291,6 +370,126 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	`)
 
 	if err != nil {
+		return err
+	}
+
+	// Migrate the mutable legacy projection into immutable epoch 1. Take the
+	// conversation lock first and wait for in-flight rotations before locking
+	// legacy writes, so no binary can change a copy between snapshot/activation.
+	var needsLegacyGroupKeyMigration bool
+	if err = pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM conversations c
+			JOIN group_keys gk ON gk.conversation_id = c.id
+			WHERE c.current_group_key_epoch = 0
+		)
+	`).Scan(&needsLegacyGroupKeyMigration); err != nil {
+		return err
+	}
+	if needsLegacyGroupKeyMigration {
+		if os.Getenv("DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION") != "1" {
+			return errors.New("legacy group keys require a drained deployment; stop old API instances, set DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION=1 for one boot, then unset it")
+		}
+		migrationTx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer migrationTx.Rollback(ctx)
+		if _, err = migrationTx.Exec(ctx, `
+		LOCK TABLE conversations IN ACCESS EXCLUSIVE MODE;
+		LOCK TABLE group_keys IN SHARE MODE;
+	`); err != nil {
+			return err
+		}
+		_, err = migrationTx.Exec(ctx, `
+		INSERT INTO group_key_epochs (conversation_id, epoch, created_by, created_at)
+		SELECT DISTINCT ON (c.id)
+			c.id, 1, gk.encrypted_by, gk.created_at
+		FROM conversations c
+		JOIN group_keys gk ON gk.conversation_id = c.id
+		JOIN users distributor ON distributor.id = gk.encrypted_by
+		WHERE c.type = 'group'
+		  AND c.current_group_key_epoch = 0
+		  AND distributor.public_key <> ''
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM members m
+			LEFT JOIN group_keys member_key
+			  ON member_key.conversation_id = m.conversation_id
+			 AND member_key.user_id = m.user_id
+			LEFT JOIN users member_distributor ON member_distributor.id = member_key.encrypted_by
+			WHERE m.conversation_id = c.id
+			  AND (member_key.user_id IS NULL OR member_distributor.public_key = '')
+		  )
+		ORDER BY c.id, gk.created_at, gk.user_id
+		ON CONFLICT (conversation_id, epoch) DO NOTHING
+	`)
+		if err != nil {
+			return err
+		}
+
+		_, err = migrationTx.Exec(ctx, `
+		INSERT INTO group_key_copies (
+			conversation_id, epoch, user_id, encrypted_by,
+			encryptor_public_key, encrypted_key, created_at
+		)
+		SELECT gk.conversation_id, 1, gk.user_id, gk.encrypted_by,
+			u.public_key, gk.encrypted_key, gk.created_at
+		FROM group_keys gk
+		JOIN conversations c
+		  ON c.id = gk.conversation_id AND c.current_group_key_epoch = 0
+		JOIN members m
+		  ON m.conversation_id = gk.conversation_id AND m.user_id = gk.user_id
+		JOIN group_key_epochs e
+		  ON e.conversation_id = gk.conversation_id AND e.epoch = 1
+		JOIN users u ON u.id = gk.encrypted_by
+		ON CONFLICT (conversation_id, epoch, user_id) DO NOTHING
+	`)
+		if err != nil {
+			return err
+		}
+
+		_, err = migrationTx.Exec(ctx, `
+		UPDATE conversations c
+		SET current_group_key_epoch = 1
+		WHERE current_group_key_epoch = 0
+		  AND EXISTS (
+			SELECT 1 FROM group_key_epochs e
+			WHERE e.conversation_id = c.id AND e.epoch = 1
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM members m
+			LEFT JOIN group_key_copies copy
+			  ON copy.conversation_id = m.conversation_id
+			 AND copy.epoch = 1
+			 AND copy.user_id = m.user_id
+			WHERE m.conversation_id = c.id AND copy.user_id IS NULL
+		  )
+	`)
+		if err != nil {
+			return err
+		}
+
+		_, err = migrationTx.Exec(ctx, `
+		UPDATE messages m
+		SET group_key_epoch = 1
+		FROM conversations c
+		WHERE c.id = m.conversation_id
+		  AND c.type = 'group'
+		  AND c.current_group_key_epoch = 1
+		  AND m.type IN ('text', 'image', 'video', 'audio', 'file', 'location', 'contact')
+		  AND m.group_key_epoch IS NULL
+	`)
+		if err != nil {
+			return err
+		}
+		if err = migrationTx.Commit(ctx); err != nil {
+			return err
+		}
+	}
+	if err := ensureGroupKeyImmutability(ctx, pool); err != nil {
 		return err
 	}
 
@@ -532,6 +731,73 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 // stays the primary key and stays the target of every foreign key. clerk_user_id
 // is a nullable secondary lookup column, so rows created by the legacy
 // register/login path keep working with it set to NULL.
+func ensureGroupKeyImmutability(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION deco_guard_group_key_epoch_update()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			IF pg_trigger_depth() > 1
+			   AND OLD.created_by IS NOT NULL
+			   AND NEW.created_by IS NULL
+			   AND ROW(NEW.conversation_id, NEW.epoch, NEW.created_at)
+			       IS NOT DISTINCT FROM
+			       ROW(OLD.conversation_id, OLD.epoch, OLD.created_at) THEN
+				RETURN NEW;
+			END IF;
+			RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+		END;
+		$$ LANGUAGE plpgsql;
+
+		CREATE OR REPLACE FUNCTION deco_guard_group_key_copy_update()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			IF pg_trigger_depth() > 1
+			   AND OLD.encrypted_by IS NOT NULL
+			   AND NEW.encrypted_by IS NULL
+			   AND ROW(NEW.conversation_id, NEW.epoch, NEW.user_id,
+			           NEW.encryptor_public_key, NEW.encrypted_key, NEW.created_at)
+			       IS NOT DISTINCT FROM
+			       ROW(OLD.conversation_id, OLD.epoch, OLD.user_id,
+			           OLD.encryptor_public_key, OLD.encrypted_key, OLD.created_at) THEN
+				RETURN NEW;
+			END IF;
+			RAISE EXCEPTION 'table % is append-only', TG_TABLE_NAME;
+		END;
+		$$ LANGUAGE plpgsql;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_group_key_epochs_append_only') THEN
+				CREATE TRIGGER trg_group_key_epochs_append_only
+				  BEFORE UPDATE ON group_key_epochs
+				  FOR EACH ROW EXECUTE FUNCTION deco_guard_group_key_epoch_update();
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_group_key_epochs_no_direct_delete') THEN
+				CREATE TRIGGER trg_group_key_epochs_no_direct_delete
+				  BEFORE DELETE ON group_key_epochs
+				  FOR EACH ROW EXECUTE FUNCTION deco_reject_direct_row_delete();
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_group_key_copies_append_only') THEN
+				CREATE TRIGGER trg_group_key_copies_append_only
+				  BEFORE UPDATE ON group_key_copies
+				  FOR EACH ROW EXECUTE FUNCTION deco_guard_group_key_copy_update();
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_group_key_copies_no_direct_delete') THEN
+				CREATE TRIGGER trg_group_key_copies_no_direct_delete
+				  BEFORE DELETE ON group_key_copies
+				  FOR EACH ROW EXECUTE FUNCTION deco_reject_direct_row_delete();
+			END IF;
+		END $$;
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
 func ensureClerkIdentityColumns(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, `
 		ALTER TABLE users
@@ -585,7 +851,6 @@ func ensureClerkIdentityColumns(ctx context.Context, pool *pgxpool.Pool) error {
 	`); err != nil {
 		return err
 	}
-
 	if _, err := pool.Exec(ctx, `
 		DO $$
 		BEGIN
