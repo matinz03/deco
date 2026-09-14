@@ -42,12 +42,8 @@ services:
   # message attachment. The API talks to it over the S3 API, so the same code
   # path runs in development and in production.
   #
-  # ⚠ BACKUPS: the minio_data volume below is the ONLY copy of every uploaded
-  # file. Nothing in this repository backs it up. If the disk holding this
-  # volume is lost, every attachment, avatar and sticker in Deco is gone
-  # permanently — the database keeps the URLs, not the bytes. A backup
-  # strategy for this volume is required before anyone relies on this
-  # deployment. See the "Backups" section in README.md.
+  # backup.sh snapshots both buckets to separately configured off-host S3.
+  # Keep its daily systemd timer enabled and rehearse restore.sh before launch.
   #
   # Buckets are created and their policies applied by the API at boot
   # (storage.EnsureBuckets); the API refuses to start if that fails, so there
@@ -96,23 +92,18 @@ services:
       DATABASE_URL: postgres://deco:${POSTGRES_PASSWORD}@postgres:5432/deco
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET}
+      CLERK_ENABLED: ${CLERK_ENABLED:-true}
+      CLERK_ISSUER: ${CLERK_ISSUER:?set the Clerk issuer URL}
+      CLERK_AUDIENCE: ${CLERK_AUDIENCE:-}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
       DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION: ${DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION:-0}
       ALLOWED_ORIGINS: ${APP_URL}
-      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
-      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
-      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
-      R2_BUCKET_NAME: ${R2_BUCKET_NAME}
-      R2_PUBLIC_URL: ${R2_PUBLIC_URL}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       UPLOAD_ROOT: /uploads
       # ─── Object storage ─────────────────────────────────────────────────
-      # The R2_* variables above are unused placeholders; storage is
-      # configured only through STORAGE_*.
-      #
       # Use `s3` in production after setting browser-reachable public/presign
       # URLs. Private attachment reads use short-lived presigned URLs; legacy
       # local media remains available through the uploads_data mount below.
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       STORAGE_S3_ENDPOINT: http://minio:9000
       STORAGE_S3_PRESIGN_ENDPOINT: ${STORAGE_S3_PRESIGN_ENDPOINT:?set a browser-reachable S3 endpoint}
       STORAGE_S3_REGION: us-east-1
@@ -121,10 +112,11 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: "true"
       STORAGE_PUBLIC_BUCKET: ${STORAGE_PUBLIC_BUCKET:-deco-public}
       STORAGE_PRIVATE_BUCKET: ${STORAGE_PRIVATE_BUCKET:-deco-private}
-      # Browser-reachable origin for the PUBLIC bucket, e.g.
-      # https://media.example.com. This value is written onto user and sticker
-      # rows, so it must be the public origin, never http://minio:9000.
-      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL}
+      # Browser-reachable prefix for the PUBLIC bucket, e.g.
+      # https://media.example.com/deco-public. This value is written onto user
+      # and sticker rows, so it must include the path-style bucket name and
+      # must never use the internal http://minio:9000 hostname.
+      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:?set the browser-reachable public media URL}
       STORAGE_PRESIGN_TTL: ${STORAGE_PRESIGN_TTL:-5m}
     ports:
       - "127.0.0.1:8080:8080"
@@ -148,6 +140,7 @@ services:
         NEXT_PUBLIC_API_URL: ${APP_URL}
         NEXT_PUBLIC_WS_URL: ${APP_URL_WS}
         NEXT_PUBLIC_MEDIA_URL: ${STORAGE_S3_PRESIGN_ENDPOINT:?set a browser-reachable S3 endpoint}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set the Clerk publishable key}
     restart: unless-stopped
     depends_on:
       api:
@@ -156,6 +149,8 @@ services:
       NEXT_PUBLIC_API_URL: ${APP_URL}
       NEXT_PUBLIC_WS_URL: ${APP_URL_WS}
       NEXT_PUBLIC_MEDIA_URL: ${STORAGE_S3_PRESIGN_ENDPOINT:?set a browser-reachable S3 endpoint}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set the Clerk publishable key}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?set the Clerk secret key}
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:
@@ -169,5 +164,5 @@ volumes:
   postgres_data:
   redis_data:
   uploads_data:
-  # Holds every uploaded file. Unbacked-up — see the MinIO service above.
+  # Holds every uploaded file. See backup.sh and restore.sh.
   minio_data:

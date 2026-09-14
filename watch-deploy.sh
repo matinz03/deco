@@ -1,29 +1,31 @@
-#!/bin/bash
-# Polls GitHub every 30s and runs deploy.sh when new commits appear on master.
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-REPO_DIR=~/deco
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANCH=master
-INTERVAL=5
-
-echo "Watching $BRANCH for changes every ${INTERVAL}s... (Ctrl+C to stop)"
+INTERVAL=30
 
 cd "$REPO_DIR"
-LAST=$(git rev-parse origin/$BRANCH)
+LAST="$(git rev-parse HEAD)"
+FAILED=""
+echo "Watching $BRANCH every ${INTERVAL}s; deployed commit is $LAST."
 
 while true; do
-  git fetch origin $BRANCH --quiet 2>/dev/null
-  CURRENT=$(git rev-parse origin/$BRANCH)
-
-  if [ "$CURRENT" != "$LAST" ]; then
-    echo "[$(date '+%H:%M:%S')] New commit detected: $CURRENT — deploying..."
-    if bash ~/deco/deploy.sh; then
-      echo "[$(date '+%H:%M:%S')] Deploy succeeded."
-    else
-      echo "[$(date '+%H:%M:%S')] Deploy FAILED — check logs above."
+  if git fetch origin "$BRANCH" --quiet; then
+    CURRENT="$(git rev-parse "origin/$BRANCH")"
+    if [[ "$CURRENT" != "$LAST" && "$CURRENT" != "$FAILED" ]]; then
+      echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Deploying $CURRENT..."
+      if "$REPO_DIR/deploy.sh" "$CURRENT"; then
+        echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Deployment succeeded."
+        LAST="$CURRENT"
+        FAILED=""
+      else
+        echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Deployment failed and rollback was attempted." >&2
+        FAILED="$CURRENT"
+      fi
     fi
-    LAST=$CURRENT
-    echo "[$(date '+%H:%M:%S')] Watching for next change..."
+  else
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Fetch failed; keeping current deployment." >&2
   fi
-
-  sleep $INTERVAL
+  sleep "$INTERVAL"
 done

@@ -1,0 +1,14 @@
+.git
+.worktrees
+.agents
+.claude
+.opencode
+**/node_modules
+**/.next
+**/.turbo
+.env
+**/.env
+**/.env.local
+infra/compose/.env
+apps/api/uploads
+*.log

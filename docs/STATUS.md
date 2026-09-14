@@ -20,8 +20,8 @@ Integrated work:
   MinIO bucket provisioning, stable object keys, backend-aware cleanup, and
   membership-gated private-object presigning through a browser-facing endpoint.
   Private-bucket CORS is provisioned from `ALLOWED_ORIGINS`; legacy local
-  attachments keep working during an S3 migration. Local storage remains the
-  default.
+  attachments keep working during an S3 migration. Native development defaults
+  to local storage; production Compose defaults to S3/MinIO.
 - `platform/blob-crypto`: binary attachment encryption and decryption
   primitives with tamper-detection tests. DM and group attachments are now
   encrypted before upload and decrypted into browser-local Blob URLs after an
@@ -38,13 +38,21 @@ Integrated work:
   Legacy key rows are retained as a rollback projection. Direct epoch/copy
   mutation is blocked at the database layer; account deletion now refuses to
   bypass rotation for users who still belong to encrypted groups.
+- CI builds and tests Go against live Postgres and MinIO, runs crypto/type
+  gates, and creates a production web build. API/web containers have application-level
+  healthchecks. Production Nginx routes the app, API health, WebSocket, and the
+  separate MinIO media origin through loopback-only container bindings.
+- Deployments are serialized, take off-host PostgreSQL/MinIO/legacy-upload
+  snapshots, wait for health, and rebuild the previous commit on failure. A
+  daily systemd timer and checksum-gated destructive restore command are
+  included.
 
 After integrating security, Clerk, storage, blob primitives, and private S3
 reads, the following commands exited successfully on this branch:
 
 - `go build ./...`
 - `go vet ./...`
-- `go test ./... -count=1` — 234 tests across 9 packages
+- `go test ./... -count=1` — 236 tests across 9 packages
 - `pnpm --filter @deco/crypto test` — 12 tests
 - `pnpm type-check`
 - `pnpm build` with the required API, WebSocket, and media origins set
@@ -60,13 +68,18 @@ certification. Clerk still requires a real-tenant browser exercise.
 
 ## Launch blockers
 
-1. Exercise Clerk sign-up, bootstrap, sign-in, sign-out, reconnect, and key
-   recovery against a real Clerk tenant.
-2. Exercise encrypted upload/download in two real browsers against the deployed
+1. Complete the Clerk-to-Deco session bridge: bootstrap must populate the auth
+   store, initialize key-backup state, reconnect WebSocket with fresh Clerk
+   tokens, and surface blocking errors. Then exercise sign-up, sign-in,
+   sign-out, reconnect, and key recovery against a real Clerk tenant. Disable
+   legacy auth routes/forms when Clerk mode is active.
+2. Replace first-public-user admin/owner assignment with an explicitly
+   configured Clerk owner identity before opening registration.
+3. Exercise encrypted upload/download in two real browsers against the deployed
    object store. S3 now has a separate browser-facing signing endpoint, private
    bucket CORS, and CSP support; deployment values still need real-environment
    proof.
-3. Exercise group creation, concurrent admin rotation, member add/remove, stale
+4. Exercise group creation, concurrent admin rotation, member add/remove, stale
    send recovery, and old-message/media decryption against live Postgres in two
    browsers. The real-Postgres migration test exists but skips unless
    `DECO_TEST_DATABASE_URL` is configured. Self-service group leave is hidden:
@@ -75,9 +88,10 @@ certification. Clerk still requires a real-tenant browser exercise.
    with legacy key rows must stop all old API instances, set
    `DECO_ALLOW_LEGACY_GROUP_KEY_MIGRATION=1` for one boot, then unset it; the
    server refuses to migrate without this explicit drained-deployment gate.
-4. Add off-host Postgres and object-storage backups, service health checks, and
-   deployment rollback.
-5. Add browser coverage for auth, encrypted media, realtime reconnect, and
+5. Configure the off-host backup destination, run the first snapshot, and
+   rehearse `restore.sh` on a disposable VPS. The implementation is present;
+   operator credentials and disaster-recovery proof are not.
+6. Add browser coverage for auth, encrypted media, realtime reconnect, and
    unauthorized access.
 
 See [`PLATFORM_MIGRATION_PLAN.md`](PLATFORM_MIGRATION_PLAN.md) and

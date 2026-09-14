@@ -192,32 +192,43 @@ it. Set `STORAGE_TEST_S3_REQUIRE=1` to turn that skip into a failure — do that
 in CI, where a silent skip means the presign, expiry and cross-object
 assertions never ran.
 
-Coverage is early — the Go tests cover JWT/auth middleware, registration and login validation, and config resolution; the crypto tests cover X25519 key exchange, encrypt/decrypt, and tampered-ciphertext rejection. The web app itself (`apps/web`) has no tests and no runner configured yet, and the WebSocket, uploads, and group-key paths are untested.
+Coverage is still early. Go tests now cover auth, config, WebSocket handshake and
+events, media access, storage, and group-key schema invariants; database-backed
+tests run when their test URLs are configured. Crypto tests cover message and
+binary attachment encryption, including tamper and wrong-key rejection. The web
+app itself (`apps/web`) still has no test runner.
 
 ## Backups
 
-**Nothing in this repository backs up user data, and one volume now holds every
-uploaded file.**
+`backup.sh` creates one timestamped off-host snapshot containing a custom-format
+PostgreSQL dump, both MinIO buckets, the legacy local-upload volume, and a
+checksum manifest. It defaults to 30 days of retention. `deploy.sh` requires a
+successful backup before updating an existing installation, and
+`infra/systemd/deco-backup.timer` runs it daily.
 
-`infra/compose/docker-compose.yml` runs MinIO as the production object store.
-Its `minio_data` volume is the only copy of every avatar, sticker and message
-attachment in Deco. The database stores the URLs; it does not store the bytes.
-**If the disk holding that volume is lost or corrupted, every attachment ever
-sent is gone permanently** — and because attachments are referenced from
-message rows, the messages will survive with broken media.
+Configure the `BACKUP_S3_*` values in `infra/compose/.env` for an S3-compatible
+destination on a different host/provider, then run `./backup.sh` once and check
+that the reported snapshot exists remotely. A same-disk bucket is not a backup.
 
-The same applies to `postgres_data`, but a database is the thing people
-remember to back up; a storage volume that used to be someone else's problem is
-not.
+Restore is intentionally explicit and destructive. Start Postgres and MinIO,
+then name the exact snapshot (the directory after the `deco/` prefix):
 
-There is no backup implementation here and this section does not add one. It
-records a gap that must be closed before this deployment is relied on. At
-minimum, decide on: an off-host destination, a schedule, a retention window,
-and a restore that has actually been tested.
+```bash
+docker compose --env-file infra/compose/.env -f infra/compose/docker-compose.yml up -d postgres minio
+CONFIRM_RESTORE=<snapshot> ./restore.sh <snapshot>
+```
+
+The script verifies the database checksum before stopping the app, replaces the
+database and both buckets, then requires all services to become healthy. Rehearse
+this on a disposable VPS before launch and after any backup-format change.
 
 ## Production deployment
 
-The app ships with Dockerfiles for both `api` and `web`, and an nginx + Certbot + Docker Compose setup for a single VPS. See [`SETUP.md`](SETUP.md) for the full walkthrough (DNS, SSL, `docker compose up`), and [`deploy.sh`](deploy.sh) / [`watch-deploy.sh`](watch-deploy.sh) for the update/auto-deploy scripts used on the VPS.
+The app ships with Dockerfiles for both `api` and `web`, and an nginx + Certbot
++ Docker Compose setup for a single VPS. See [`SETUP.md`](SETUP.md) for the full
+walkthrough. `deploy.sh` locks concurrent deploys, backs up existing data,
+checks container health, and rebuilds the previous commit if an update fails.
+`watch-deploy.sh` polls `master` and calls that same guarded path.
 
 ### One-time legacy group-key cutover
 
