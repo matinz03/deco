@@ -71,8 +71,6 @@ STAGING="$(mktemp -d)"
 REMOTE_ROOT="offsite/$BACKUP_S3_BUCKET/$BACKUP_PREFIX/$SNAPSHOT"
 
 APP_STOPPED=0
-OLD_DB_RENAMED=0
-DB_SWAPPED=0
 MEDIA_MUTATED=0
 
 compose() {
@@ -106,6 +104,12 @@ replace_bucket() {
   local target_bucket="$2"
   compose exec -T minio mc rm --recursive --force "local/$target_bucket/" >/dev/null
   copy_bucket "$source_bucket" "$target_bucket"
+}
+
+database_exists() {
+  local database_name="$1"
+  compose exec -T postgres psql -U deco -d postgres -Atc \
+    "SELECT 1 FROM pg_database WHERE datname='$database_name'" | grep -qx 1
 }
 
 remove_temp_resources() {
@@ -143,12 +147,10 @@ rollback() {
     compose exec -T minio mc rm --force "local/$PUBLIC_BUCKET/.deco-restore-marker" >/dev/null 2>&1
     compose exec -T minio mc rm --force "local/$PRIVATE_BUCKET/.deco-restore-marker" >/dev/null 2>&1
   fi
-  if [[ "$DB_SWAPPED" == "1" ]]; then
+  if database_exists "$OLD_DB"; then
     compose exec -T postgres psql -U deco -d postgres \
       -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='deco' AND pid <> pg_backend_pid()" >/dev/null
     compose exec -T postgres dropdb -U deco --if-exists deco
-  fi
-  if [[ "$OLD_DB_RENAMED" == "1" ]]; then
     compose exec -T postgres psql -U deco -d postgres -v ON_ERROR_STOP=1 \
       -c "ALTER DATABASE $OLD_DB RENAME TO deco"
   fi
@@ -258,10 +260,8 @@ compose exec -T postgres psql -U deco -d postgres -v ON_ERROR_STOP=1 \
   -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='deco' AND pid <> pg_backend_pid()" >/dev/null
 compose exec -T postgres psql -U deco -d postgres -v ON_ERROR_STOP=1 \
   -c "ALTER DATABASE deco RENAME TO $OLD_DB"
-OLD_DB_RENAMED=1
 compose exec -T postgres psql -U deco -d postgres -v ON_ERROR_STOP=1 \
   -c "ALTER DATABASE $RESTORE_DB RENAME TO deco"
-DB_SWAPPED=1
 
 MEDIA_MUTATED=1
 replace_volume "$NEW_UPLOADS_VOLUME" deco_uploads_data
@@ -275,7 +275,6 @@ APP_STOPPED=0
 trap - ERR TERM HUP INT
 
 compose exec -T postgres dropdb -U deco --if-exists "$OLD_DB"
-OLD_DB_RENAMED=0
 compose exec -T postgres dropdb -U deco --if-exists "$RESTORE_DB"
 remove_temp_resources
 cleanup_files
