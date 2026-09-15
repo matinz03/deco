@@ -3,6 +3,15 @@ import type { NextConfig } from "next";
 const isDev = process.env.NODE_ENV !== "production";
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? (isDev ? "http://localhost:8080" : "");
 const wsUrl = process.env.NEXT_PUBLIC_WS_URL ?? (isDev ? "ws://localhost:8080" : "");
+const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "legacy";
+
+if (authMode !== "legacy" && authMode !== "clerk") {
+  throw new Error("NEXT_PUBLIC_AUTH_MODE must be either legacy or clerk.");
+}
+
+if (authMode === "clerk" && !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+  throw new Error("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required when NEXT_PUBLIC_AUTH_MODE=clerk.");
+}
 
 if (!isDev && (!process.env.NEXT_PUBLIC_API_URL || !process.env.NEXT_PUBLIC_WS_URL)) {
   throw new Error(

@@ -233,10 +233,33 @@ Required sequence:
 The call must be idempotent: a repeat with the same key succeeds, a repeat with
 a *different* key is rejected (see below).
 
-Note the ownership rule this interacts with: `handlers/auth.go` grants
-`is_admin` to the first registered user, and `admin_helpers.go` computes
-`is_owner` as the oldest-created user. Bootstrap must preserve both, and the
-"first user" test must run against the `users` table, not against Clerk.
+Ownership is persisted in `users.is_owner`. Migration preserves an existing
+installation by marking its oldest `(created_at, id)` user, matching the former
+computed rule exactly. After Clerk cutover, only the verified subject equal to
+`CLERK_OWNER_USER_ID` can bootstrap as owner/admin; signup order grants no
+privilege. Startup fails closed if configured and persisted owners disagree.
+
+For an existing legacy installation, bind the migrated owner before enabling
+Clerk and while every API instance is stopped. First identify the exact internal
+owner UUID and intended Clerk subject, then run this transaction directly on
+Postgres (substitute both values and retain the UUID predicate):
+
+```sql
+BEGIN;
+LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+UPDATE users
+SET clerk_user_id = 'user_intended_clerk_subject'
+WHERE id = 'verified-internal-owner-uuid'
+  AND is_owner
+  AND clerk_user_id IS NULL;
+COMMIT;
+```
+
+Require exactly one updated row, then set the same subject in
+`CLERK_OWNER_USER_ID`, drain old binaries, and enable Clerk. A zero-row result is
+a failed precondition; do not enable Clerk or broaden the predicate. The owner
+must bootstrap with the existing X25519 key because key immutability remains in
+force.
 
 ### Mandatory security requirements
 

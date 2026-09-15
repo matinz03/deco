@@ -12,6 +12,7 @@ import { useToastStore } from "./toasts";
 // stale write.
 const groupKeyCache = new Map<string, string>();
 const currentGroupKeyEpoch = new Map<string, number>();
+let conversationSessionGeneration = 0;
 
 function groupConversationCacheKey(userId: string, conversationId: string) {
   return `${userId}:${conversationId}`;
@@ -186,6 +187,23 @@ const MAX_ENCRYPTED_ATTACHMENT_BYTES = 20 << 20;
 
 const pendingMediaUploads = new Map<string, PendingMediaUpload>();
 
+export function resetConversationSession() {
+  conversationSessionGeneration += 1;
+  groupKeyCache.clear();
+  currentGroupKeyEpoch.clear();
+  pendingMediaUploads.clear();
+  useConversationStore.setState((state) => ({
+    conversations: [],
+    messages: {},
+    activeConversationId: null,
+    presence: {},
+    typing: {},
+    messagesHasMore: {},
+    messagesLoadingMore: {},
+    mutedIds: state.mutedIds,
+  }));
+}
+
 interface ConversationState {
   conversations: Conversation[];
   messages: Record<string, Message[]>;
@@ -320,17 +338,22 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async fetchConversations() {
+      const generation = conversationSessionGeneration;
       const rawConversations = await api.conversations.list();
       const conversations = await hydrateConversationSummaries(rawConversations);
+      if (generation !== conversationSessionGeneration) return;
       const existingMessages = get().messages;
       const hydratedMessages = await rehydrateConversationMessages(existingMessages, conversations);
+      if (generation !== conversationSessionGeneration) return;
       set({ conversations, messages: hydratedMessages });
     },
 
     async fetchMessages(conversationId) {
+      const generation = conversationSessionGeneration;
       const rawMessages = await api.messages.list(conversationId);
       const conversation = get().conversations.find((c) => c.id === conversationId);
       const decrypted = await hydrateMessages(rawMessages, conversation);
+      if (generation !== conversationSessionGeneration) return;
       set((s) => ({
         messages: { ...s.messages, [conversationId]: withReplyLinks(decrypted) },
         messagesHasMore: { ...s.messagesHasMore, [conversationId]: rawMessages.length === 50 },
@@ -339,6 +362,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async loadMoreMessages(conversationId) {
+      const generation = conversationSessionGeneration;
       const state = get();
       if (!state.messagesHasMore[conversationId] || state.messagesLoadingMore[conversationId]) return;
       const existingMessages = state.messages[conversationId] ?? [];
@@ -349,6 +373,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const rawMessages = await api.messages.list(conversationId, before);
         const conversation = get().conversations.find((c) => c.id === conversationId);
         const decrypted = await hydrateMessages(rawMessages, conversation);
+        if (generation !== conversationSessionGeneration) return;
         set((s) => ({
           messages: {
             ...s.messages,

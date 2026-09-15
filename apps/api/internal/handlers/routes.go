@@ -11,20 +11,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// RegisterAuthRoutes mounts the legacy password endpoints and, when the managed
-// identity path is enabled, the profile bootstrap endpoint.
-//
-// register/login/logout/refresh are deliberately left in place: there is no
-// cutover yet, and both authentication paths must coexist. Retiring bcrypt is a
-// separate, later change.
+// RegisterAuthRoutes exposes exactly one identity path. Clerk mode removes all
+// legacy password/session endpoints; legacy mode keeps them for compatibility.
 func RegisterAuthRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &AuthHandler{pool: pool, cfg: cfg, logger: logger}
-	r.Route("/auth", func(r chi.Router) {
-		r.Post("/register", h.Register)
-		r.Post("/login", h.Login)
-		r.Post("/logout", h.Logout)
-		r.Post("/refresh", h.Refresh)
-	})
+	if !cfg.Clerk.Enabled {
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/register", h.Register)
+			r.Post("/login", h.Login)
+			r.Post("/logout", h.Logout)
+			r.Post("/refresh", h.Refresh)
+		})
+	}
 
 	if auth != nil && auth.ClerkEnabled() {
 		p := NewProfileHandler(pool, cfg, logger, auth)

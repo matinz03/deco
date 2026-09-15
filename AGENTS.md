@@ -92,7 +92,7 @@ Everything else is untested. There is still **no test runner under `apps/web`** 
 
 ### Backend (`apps/api/internal`)
 
-- `handlers/` — one file per resource (`auth`, `users`, `conversations`, `messages`, `stickers`, `uploads`), all mounted under `/api/v1` except `/health` and `/ws`. `admin_helpers.go` holds `userSelectColumns`/`scanUser` (the canonical user-row projection, incl. a computed `is_owner` subquery = oldest-created user) and the `restricted_actions` permission check used across handlers.
+- `handlers/` — one file per resource (`auth`, `users`, `conversations`, `messages`, `stickers`, `uploads`), all mounted under `/api/v1` except `/health` and `/ws`. `admin_helpers.go` holds `userSelectColumns`/`scanUser` (the canonical user-row projection, including persisted `is_owner`) and the `restricted_actions` permission check used across handlers.
 - `middleware/auth.go` — JWT (HS256) via `Authorization: Bearer` header; the WebSocket handshake can't set headers, so `/ws` instead validates the token from a `?token=` query param using the same `ValidateToken`.
 - `db/postgres.go` `EnsureSchema` — runs idempotent `ALTER TYPE`/`CREATE TABLE IF NOT EXISTS` at boot. Schema is defined by **both** `infra/compose/init.sql` (initial container bootstrap) **and** this Go function (incremental migrations) — check both when reasoning about the current schema.
 - `websocket/hub.go` — realtime fanout uses Redis pub/sub (`deco:events` channel) so events reach clients connected to any API instance; each connected client has a buffered (256) send channel that disconnects the client on backpressure rather than blocking.

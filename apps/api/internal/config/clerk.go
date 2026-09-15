@@ -11,11 +11,15 @@ import (
 // ClerkConfig holds the settings for the RS256/JWKS authentication path.
 //
 // The path is OFF by default: with CLERK_ENABLED unset the API keeps using the
-// existing HS256 tokens minted by handlers/auth.go, so nothing changes for an
-// existing deployment. Both paths coexist until an explicit cutover.
+// existing HS256 tokens minted by handlers/auth.go. Enabling Clerk is an
+// explicit cutover: legacy password routes are no longer mounted.
 type ClerkConfig struct {
 	// Enabled selects the RS256/JWKS verification path instead of HS256.
 	Enabled bool
+
+	// OwnerUserID is the exact verified Clerk subject that receives the
+	// persisted platform owner role. It is required whenever Clerk is enabled.
+	OwnerUserID string
 
 	// Issuer is the exact `iss` claim value that tokens must carry.
 	Issuer string
@@ -51,6 +55,7 @@ type ClerkConfig struct {
 func LoadClerk() ClerkConfig {
 	cfg := ClerkConfig{
 		Enabled:                getEnvBool("CLERK_ENABLED", false),
+		OwnerUserID:            strings.TrimSpace(getEnv("CLERK_OWNER_USER_ID", "")),
 		Issuer:                 strings.TrimRight(strings.TrimSpace(getEnv("CLERK_ISSUER", "")), "/"),
 		Audience:               strings.TrimSpace(getEnv("CLERK_AUDIENCE", "")),
 		JWKSURL:                strings.TrimSpace(getEnv("CLERK_JWKS_URL", "")),
@@ -66,6 +71,9 @@ func LoadClerk() ClerkConfig {
 
 	if cfg.Issuer == "" {
 		panic("CLERK_ISSUER must be set when CLERK_ENABLED is true")
+	}
+	if cfg.OwnerUserID == "" {
+		panic("CLERK_OWNER_USER_ID must be set when CLERK_ENABLED is true")
 	}
 	if cfg.JWKSURL == "" {
 		cfg.JWKSURL = cfg.Issuer + "/.well-known/jwks.json"

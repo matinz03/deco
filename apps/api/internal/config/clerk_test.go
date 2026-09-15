@@ -9,7 +9,7 @@ import (
 func clearClerkEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"CLERK_ENABLED", "CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL",
+		"CLERK_ENABLED", "CLERK_OWNER_USER_ID", "CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL",
 		"CLERK_JWKS_CACHE_TTL", "CLERK_JWKS_MIN_REFRESH_INTERVAL",
 		"CLERK_JWKS_REQUEST_TIMEOUT", "CLERK_USER_MAP_CACHE_TTL",
 	} {
@@ -17,7 +17,7 @@ func clearClerkEnv(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, k := range []string{
-			"CLERK_ENABLED", "CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL",
+			"CLERK_ENABLED", "CLERK_OWNER_USER_ID", "CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL",
 			"CLERK_JWKS_CACHE_TTL", "CLERK_JWKS_MIN_REFRESH_INTERVAL",
 			"CLERK_JWKS_REQUEST_TIMEOUT", "CLERK_USER_MAP_CACHE_TTL",
 		} {
@@ -51,6 +51,7 @@ func TestClerkDerivesJWKSURLFromIssuer(t *testing.T) {
 	clearClerkEnv(t)
 	os.Setenv("CLERK_ENABLED", "true")
 	os.Setenv("CLERK_ISSUER", "https://example.clerk.accounts.dev/")
+	os.Setenv("CLERK_OWNER_USER_ID", "user_owner")
 
 	cfg := LoadClerk()
 
@@ -82,6 +83,7 @@ func TestClerkRejectsNonAbsoluteJWKSURL(t *testing.T) {
 	clearClerkEnv(t)
 	os.Setenv("CLERK_ENABLED", "true")
 	os.Setenv("CLERK_ISSUER", "https://example.clerk.accounts.dev")
+	os.Setenv("CLERK_OWNER_USER_ID", "user_owner")
 	os.Setenv("CLERK_JWKS_URL", "/.well-known/jwks.json")
 
 	defer func() {
@@ -91,6 +93,32 @@ func TestClerkRejectsNonAbsoluteJWKSURL(t *testing.T) {
 	}()
 
 	LoadClerk()
+}
+
+func TestClerkEnabledWithoutOwnerUserIDPanicsAtLoad(t *testing.T) {
+	clearClerkEnv(t)
+	os.Setenv("CLERK_ENABLED", "true")
+	os.Setenv("CLERK_ISSUER", "https://example.clerk.accounts.dev")
+
+	defer func() {
+		if recover() == nil {
+			t.Error("expected LoadClerk to panic when enabled without an owner user ID")
+		}
+	}()
+
+	LoadClerk()
+}
+
+func TestClerkOwnerUserIDIsTrimmed(t *testing.T) {
+	clearClerkEnv(t)
+	os.Setenv("CLERK_ENABLED", "true")
+	os.Setenv("CLERK_ISSUER", "https://example.clerk.accounts.dev")
+	os.Setenv("CLERK_OWNER_USER_ID", "  user_owner  ")
+
+	cfg := LoadClerk()
+	if cfg.OwnerUserID != "user_owner" {
+		t.Fatalf("OwnerUserID = %q, want user_owner", cfg.OwnerUserID)
+	}
 }
 
 func TestClerkRejectsMalformedDurations(t *testing.T) {

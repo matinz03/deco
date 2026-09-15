@@ -1,6 +1,6 @@
 # API Reference
 
-Base URL: `{API_URL}/api/v1` (e.g. `http://localhost:8080/api/v1`). All routes except `POST /auth/register` and `POST /auth/login` require `Authorization: Bearer <jwt>`.
+Base URL: `{API_URL}/api/v1` (e.g. `http://localhost:8080/api/v1`). Authentication mode is exclusive: Clerk mode exposes verified `POST /profile/bootstrap` and removes every legacy `/auth/*` route; legacy mode exposes password registration/login.
 
 Two routes live outside `/api/v1`:
 - `GET /health` → `{"status":"ok"}`
@@ -10,14 +10,16 @@ Media is served (not under `/api/v1`) at `PUBLIC_UPLOAD_BASE` (default `/api/v1/
 
 Route definitions live in `apps/api/internal/handlers/routes.go`; this doc mirrors that file.
 
-## Auth — `/auth` (public)
+## Legacy auth — `/auth` (public; only when `CLERK_ENABLED=false`)
 
 | Method | Path | Handler |
 |---|---|---|
-| POST | `/auth/register` | `AuthHandler.Register` — creates a user; the first user ever registered becomes admin. Requires `username`, `password` (≥8 chars), `display_name`, `public_key`; `email` or `phone_number` optional. |
+| POST | `/auth/register` | `AuthHandler.Register` — creates a user; the first persisted legacy owner becomes admin/owner under a serialized transaction. Requires `username`, `password` (≥8 chars), `display_name`, `public_key`; `email` or `phone_number` optional. |
 | POST | `/auth/login` | `AuthHandler.Login` — by `email` or `phone_number` + `password`. |
 | POST | `/auth/logout` | `AuthHandler.Logout` |
 | POST | `/auth/refresh` | `AuthHandler.Refresh` — **returns 501 Not Implemented**; no refresh-token flow exists yet. |
+
+In Clerk mode, `POST /profile/bootstrap` requires a verified Clerk token. Only the exact `CLERK_OWNER_USER_ID` subject receives persisted `is_owner=true` and `is_admin=true`; signup order grants no privilege.
 
 ## Users — `/users` (authenticated)
 

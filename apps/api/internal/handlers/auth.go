@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matinz03/deco/internal/config"
-	"github.com/matinz03/deco/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/models"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -64,19 +64,33 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var existingUsers int
-	if err := h.pool.QueryRow(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&existingUsers); err != nil {
-		h.logger.Error("failed to count users", zap.Error(err))
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		h.logger.Error("failed to begin registration", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	defer tx.Rollback(r.Context())
 
-	isFirstUser := existingUsers == 0
+	// Legacy mode preserves first-user ownership, but serializes that decision
+	// so concurrent registrations cannot both become owner/admin.
+	if _, err := tx.Exec(r.Context(), ownerBootstrapLockSQL); err != nil {
+		h.logger.Error("failed to lock owner bootstrap", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var ownerExists bool
+	if err := tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM users WHERE is_owner)`).Scan(&ownerExists); err != nil {
+		h.logger.Error("failed to inspect platform owner", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	isFirstOwner := !ownerExists
 
 	var user models.User
-	err = h.pool.QueryRow(r.Context(), `
-		INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key, is_admin)
-		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6, $7)
+	err = tx.QueryRow(r.Context(), `
+		INSERT INTO users (username, email, phone_number, display_name, password_hash, public_key, is_admin, is_owner)
+		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6, $7, $7)
 		RETURNING
 			id,
 			username,
@@ -86,10 +100,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			avatar_url,
 			bio,
 			is_admin,
+			is_owner,
 			COALESCE(restricted_actions, '{}'::text[]),
 			last_seen_at,
 			created_at
-	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey, isFirstUser).Scan(
+	`, req.Username, req.Email, req.Phone, req.DisplayName, string(hash), req.PublicKey, isFirstOwner).Scan(
 		&user.ID,
 		&user.Username,
 		&user.Email,
@@ -98,6 +113,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		&user.AvatarURL,
 		&user.Bio,
 		&user.IsAdmin,
+		&user.IsOwner,
 		&user.RestrictedActions,
 		&user.LastSeenAt,
 		&user.CreatedAt,
@@ -108,7 +124,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusConflict, "username or email already taken")
 		return
 	}
-	user.IsOwner = isFirstUser
+	if err := tx.Commit(r.Context()); err != nil {
+		h.logger.Error("failed to commit registration", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	token, err := h.generateToken(user.ID)
 	if err != nil {

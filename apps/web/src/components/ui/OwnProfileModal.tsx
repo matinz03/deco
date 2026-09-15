@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 
 interface Props {
   open: boolean;
@@ -263,6 +264,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
                     </span>
                   </div>
                 </div>
+                {!clerkAuthEnabled && (
                 <div className="rounded-xl border border-sidebar/70 bg-background/40 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -339,6 +341,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
                     <p className="mt-3 text-sm text-muted">No other saved accounts on this browser yet.</p>
                   )}
                 </div>
+                )}
               </div>
             )}
           </motion.div>

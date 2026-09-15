@@ -19,6 +19,7 @@ import type {
   CreateStickerPackInput,
   UserRestriction,
 } from "@deco/types";
+import { clerkAuthEnabled } from "./auth-mode";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const PUBLIC_UPLOAD_BASE = process.env.NEXT_PUBLIC_UPLOAD_BASE ?? "/api/v1/media";
@@ -45,25 +46,21 @@ export function setClerkTokenProvider(provider: ClerkTokenProvider | null) {
   clerkTokenProvider = provider;
 }
 
-/**
- * Clerk first, legacy second. During the dual-path migration a browser can
- * hold both; the Go API only accepts one, decided by CLERK_ENABLED, and a
- * Clerk session is the newer intent.
- */
 export async function resolveAuthToken(): Promise<string | null> {
-  if (clerkTokenProvider) {
+  if (clerkAuthEnabled) {
+    if (!clerkTokenProvider) return null;
     try {
-      const token = await clerkTokenProvider();
-      if (token) return token;
+      return await clerkTokenProvider();
     } catch {
-      // Fall back to the legacy token rather than failing the request.
+      return null;
     }
   }
+
   return typeof window !== "undefined" ? localStorage.getItem("deco_token") : null;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = await resolveAuthToken();
+async function request<T>(path: string, init?: RequestInit, explicitToken?: string): Promise<T> {
+  const token = explicitToken ?? await resolveAuthToken();
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
 
   const res = await fetch(`${BASE}${path}`, {
@@ -415,9 +412,10 @@ export const api = {
       displayName?: string;
       email?: string;
       phoneNumber?: string;
-    }) => {
+    }, explicitToken?: string, signal?: AbortSignal) => {
       const raw = await request<{ user: unknown }>("/api/v1/profile/bootstrap", {
         method: "POST",
+        signal,
         body: JSON.stringify({
           public_key: input.publicKey,
           username: input.username,
@@ -425,7 +423,7 @@ export const api = {
           email: input.email ?? "",
           phone_number: input.phoneNumber ?? "",
         }),
-      });
+      }, explicitToken);
       return mapUser(raw.user);
     },
   },
@@ -704,8 +702,8 @@ export const api = {
       return mapUser(raw);
     },
 
-    getMe: async () => {
-      const raw = await request<unknown>("/api/v1/users/me");
+    getMe: async (explicitToken?: string, signal?: AbortSignal) => {
+      const raw = await request<unknown>("/api/v1/users/me", { signal }, explicitToken);
       return mapUser(raw);
     },
 

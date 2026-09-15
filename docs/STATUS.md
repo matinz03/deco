@@ -1,6 +1,6 @@
 # Current engineering status
 
-Updated 2026-09-12. This is a working integration handoff, not independent
+Updated 2026-09-15. This is a working integration handoff, not independent
 certification.
 
 ## MVP integration branch
@@ -12,10 +12,11 @@ Integrated work:
 - `codex/security-program`: private-media tickets, conversation-membership
   checks, protected media routes, upload hardening, and focused integration
   tests.
-- `platform/clerk-auth`: opt-in Clerk RS256/JWKS authentication, internal UUID
-  mapping, profile bootstrap, immutable public-key audit, short-lived client
-  token handling, and Clerk sign-in/sign-up pages. Legacy HS256 login remains
-  available until production cutover evidence is complete.
+- `platform/clerk-auth`: exclusive Clerk RS256/JWKS authentication in managed
+  mode, internal UUID mapping, explicit persisted owner identity, durable
+  profile/key bootstrap, fresh-token REST/WebSocket sessions, blocking key
+  recovery, and Clerk sign-in/sign-up pages. Legacy HS256 login remains only
+  when Clerk mode is disabled.
 - `platform/storage-backend`: configurable local and S3-compatible storage,
   MinIO bucket provisioning, stable object keys, backend-aware cleanup, and
   membership-gated private-object presigning through a browser-facing endpoint.
@@ -68,13 +69,15 @@ certification. Clerk still requires a real-tenant browser exercise.
 
 ## Launch blockers
 
-1. Complete the Clerk-to-Deco session bridge: bootstrap must populate the auth
-   store, initialize key-backup state, reconnect WebSocket with fresh Clerk
-   tokens, and surface blocking errors. Then exercise sign-up, sign-in,
-   sign-out, reconnect, and key recovery against a real Clerk tenant. Disable
-   legacy auth routes/forms when Clerk mode is active.
-2. Replace first-public-user admin/owner assignment with an explicitly
-   configured Clerk owner identity before opening registration.
+1. Exercise the implemented Clerk-to-Deco session bridge against a real tenant:
+   sign-up, sign-in, sign-out, token rotation/reconnect, account switch, and
+   cross-device key recovery. Managed mode now removes legacy routes/forms,
+   captures subject-specific bootstrap tokens, and blocks app content until the
+   local encryption key exists.
+2. Configure `CLERK_OWNER_USER_ID` to the intended verified Clerk subject. On a
+   legacy deployment, stop all API instances and bind the migrated persisted
+   owner using the transaction in `PLATFORM_MIGRATION_PLAN.md` before enabling
+   Clerk. Signup order no longer grants managed-mode privilege.
 3. Exercise encrypted upload/download in two real browsers against the deployed
    object store. S3 now has a separate browser-facing signing endpoint, private
    bucket CORS, and CSP support; deployment values still need real-environment

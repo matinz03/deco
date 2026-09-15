@@ -1,4 +1,6 @@
 import { SignupForm } from "@/components/auth/SignupForm";
+import { ClerkAuthControls } from "@/components/auth/ClerkAuthControls";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 import Link from "next/link";
 
 export const metadata = { title: "Create account — Deco" };
@@ -15,7 +17,7 @@ export default function SignupPage() {
         <p className="text-sm text-muted">Start messaging privately and freely</p>
       </div>
 
-      <SignupForm />
+      {clerkAuthEnabled ? <ClerkAuthControls mode="sign-up" /> : <SignupForm />}
 
       <p className="text-center text-sm text-muted">
         Already have an account?{" "}

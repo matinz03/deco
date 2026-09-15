@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,6 +32,146 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+func isolatedOwnershipPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	base := testPool(t)
+	ctx := context.Background()
+	schema := fmt.Sprintf("ownership_test_%d", time.Now().UnixNano())
+	if _, err := base.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
+		t.Fatalf("create isolated schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = base.Exec(context.Background(), `DROP SCHEMA IF EXISTS `+schema+` CASCADE`)
+	})
+
+	cfg, err := pgxpool.ParseConfig(os.Getenv("DECO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("parse isolated pool config: %v", err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open isolated pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			clerk_user_id TEXT UNIQUE,
+			is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMPTZ NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create isolated users table: %v", err)
+	}
+	return pool
+}
+
+func TestEnsureUserOwnershipPreservesOldestUser(t *testing.T) {
+	pool := isolatedOwnershipPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO users (id, clerk_user_id, is_admin, created_at) VALUES
+		('later', 'user_later', FALSE, '2025-01-02T00:00:00Z'),
+		('oldest', 'user_owner', FALSE, '2025-01-01T00:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed legacy users: %v", err)
+	}
+
+	for run := 1; run <= 2; run++ {
+		if err := ensureUserOwnership(ctx, pool); err != nil {
+			t.Fatalf("ensure ownership run %d: %v", run, err)
+		}
+	}
+
+	var ownerID string
+	var ownerIsAdmin bool
+	if err := pool.QueryRow(ctx, `SELECT id, is_admin FROM users WHERE is_owner`).Scan(&ownerID, &ownerIsAdmin); err != nil {
+		t.Fatalf("read migrated owner: %v", err)
+	}
+	if ownerID != "oldest" || !ownerIsAdmin {
+		t.Fatalf("migrated owner = %q admin=%v, want oldest admin=true", ownerID, ownerIsAdmin)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE users SET is_owner=TRUE WHERE id='later'`); err == nil {
+		t.Fatal("second persisted owner was accepted")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET is_admin=FALSE WHERE id='oldest'`); err == nil {
+		t.Fatal("persisted owner was demoted")
+	}
+}
+
+func TestEnsureUserOwnershipDoesNotPromoteFreshSchemaUser(t *testing.T) {
+	pool := isolatedOwnershipPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN is_owner BOOLEAN NOT NULL DEFAULT FALSE;
+		INSERT INTO users (id, clerk_user_id, is_admin, created_at)
+		VALUES ('non-owner', 'user_non_owner', FALSE, NOW())
+	`); err != nil {
+		t.Fatalf("seed fresh-schema user: %v", err)
+	}
+
+	if err := ensureUserOwnership(ctx, pool); err != nil {
+		t.Fatalf("ensure ownership: %v", err)
+	}
+
+	var ownerCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE is_owner`).Scan(&ownerCount); err != nil {
+		t.Fatalf("count owners: %v", err)
+	}
+	if ownerCount != 0 {
+		t.Fatalf("fresh-schema owner count = %d, want 0", ownerCount)
+	}
+	if err := ValidateClerkOwner(ctx, pool, "user_owner"); err != nil {
+		t.Fatalf("ownerless fresh schema rejected before owner bootstrap: %v", err)
+	}
+}
+
+func TestValidateClerkOwner(t *testing.T) {
+	t.Run("empty database may await configured owner", func(t *testing.T) {
+		pool := isolatedOwnershipPool(t)
+		if err := ensureUserOwnership(context.Background(), pool); err != nil {
+			t.Fatalf("ensure ownership: %v", err)
+		}
+		if err := ValidateClerkOwner(context.Background(), pool, "user_owner"); err != nil {
+			t.Fatalf("empty database rejected: %v", err)
+		}
+	})
+
+	t.Run("matching owner succeeds", func(t *testing.T) {
+		pool := isolatedOwnershipPool(t)
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, `INSERT INTO users (id, clerk_user_id, is_admin, created_at) VALUES ('owner', 'user_owner', TRUE, NOW())`); err != nil {
+			t.Fatalf("seed owner: %v", err)
+		}
+		if err := ensureUserOwnership(ctx, pool); err != nil {
+			t.Fatalf("ensure ownership: %v", err)
+		}
+		if err := ValidateClerkOwner(ctx, pool, "user_owner"); err != nil {
+			t.Fatalf("matching owner rejected: %v", err)
+		}
+		if err := ValidateClerkOwner(ctx, pool, "user_someone_else"); err == nil {
+			t.Fatal("mismatched configured owner was accepted")
+		}
+	})
+
+	t.Run("unlinked legacy owner fails closed", func(t *testing.T) {
+		pool := isolatedOwnershipPool(t)
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, `INSERT INTO users (id, is_admin, created_at) VALUES ('owner', TRUE, NOW())`); err != nil {
+			t.Fatalf("seed owner: %v", err)
+		}
+		if err := ensureUserOwnership(ctx, pool); err != nil {
+			t.Fatalf("ensure ownership: %v", err)
+		}
+		if err := ValidateClerkOwner(ctx, pool, "user_owner"); err == nil {
+			t.Fatal("unlinked legacy owner was accepted")
+		}
+	})
 }
 
 // seedUser creates a user and returns its id, cleaning up afterwards. The

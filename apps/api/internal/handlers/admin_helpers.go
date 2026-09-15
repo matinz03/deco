@@ -23,13 +23,10 @@ const userSelectColumns = `
 	COALESCE(u.restricted_actions, '{}'::text[]),
 	u.last_seen_at,
 	u.created_at,
-	(
-		SELECT first_user.id = u.id
-		FROM users first_user
-		ORDER BY first_user.created_at ASC, first_user.id ASC
-		LIMIT 1
-	) AS is_owner
+	u.is_owner
 `
+
+const ownerBootstrapLockSQL = `SELECT pg_advisory_xact_lock(hashtextextended('deco-owner-bootstrap', 0))`
 
 var allowedRestrictedActions = []string{
 	"create_conversations",

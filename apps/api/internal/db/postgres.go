@@ -3,9 +3,12 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -166,6 +169,10 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	}
 
 	if err := ensureClerkIdentityColumns(ctx, pool); err != nil {
+		return err
+	}
+
+	if err := ensureUserOwnership(ctx, pool); err != nil {
 		return err
 	}
 
@@ -722,6 +729,106 @@ func EnsureSchema(pool *pgxpool.Pool) error {
 	`)
 
 	return err
+}
+
+// ensureUserOwnership persists the platform owner without changing who owns an
+// existing installation. The compatibility backfill selects the same
+// (created_at, id) row that older binaries computed on every user query.
+func ensureUserOwnership(ctx context.Context, pool *pgxpool.Pool) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return err
+	}
+	var ownershipColumnExisted bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = 'users'
+			  AND column_name = 'is_owner'
+		)
+	`).Scan(&ownershipColumnExisted); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS is_owner BOOLEAN NOT NULL DEFAULT FALSE
+	`); err != nil {
+		return err
+	}
+	if !ownershipColumnExisted {
+		if _, err := tx.Exec(ctx, `
+			WITH oldest AS (
+				SELECT id
+				FROM users
+				ORDER BY created_at ASC, id ASC
+				LIMIT 1
+			)
+			UPDATE users u
+			SET is_owner = TRUE,
+			    is_admin = TRUE
+			FROM oldest
+			WHERE u.id = oldest.id
+		`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS users_single_owner_key
+		ON users ((1))
+		WHERE is_owner
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint
+				WHERE conname = 'users_owner_must_be_admin'
+				  AND conrelid = 'users'::regclass
+			) THEN
+				ALTER TABLE users
+				ADD CONSTRAINT users_owner_must_be_admin
+				CHECK (NOT is_owner OR is_admin);
+			END IF;
+		END $$
+	`); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ValidateClerkOwner fails closed when configured managed identity disagrees
+// with persisted ownership. Ownership transfer is never an automatic boot
+// migration because that would silently grant platform control.
+func ValidateClerkOwner(ctx context.Context, pool *pgxpool.Pool, configuredClerkUserID string) error {
+	var persistedClerkUserID *string
+	err := pool.QueryRow(ctx, `SELECT clerk_user_id FROM users WHERE is_owner`).Scan(&persistedClerkUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Fresh Clerk databases may contain ordinary users before the configured
+		// owner signs in. The verified owner subject is promoted transactionally
+		// by profile bootstrap; signup order must never decide ownership.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if persistedClerkUserID == nil || strings.TrimSpace(*persistedClerkUserID) == "" {
+		return fmt.Errorf("persisted platform owner is not linked to a Clerk user")
+	}
+	if *persistedClerkUserID != configuredClerkUserID {
+		return fmt.Errorf("CLERK_OWNER_USER_ID does not match the persisted platform owner")
+	}
+	return nil
 }
 
 // ensureClerkIdentityColumns adds the external-identity column and the

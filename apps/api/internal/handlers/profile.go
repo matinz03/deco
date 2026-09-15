@@ -40,6 +40,7 @@ var (
 // is never taken from the request body — it comes from the verified token.
 type BootstrapInput struct {
 	ClerkUserID string
+	IsOwner     bool
 	PublicKey   string
 	Username    string
 	DisplayName string
@@ -112,6 +113,7 @@ func (h *ProfileHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 
 	in := BootstrapInput{
 		ClerkUserID: clerkUserID,
+		IsOwner:     h.cfg != nil && clerkUserID == h.cfg.Clerk.OwnerUserID,
 		PublicKey:   strings.TrimSpace(req.PublicKey),
 		Username:    strings.TrimSpace(req.Username),
 		DisplayName: strings.TrimSpace(req.DisplayName),
@@ -183,6 +185,13 @@ func (s *postgresProfileStore) BootstrapProfile(ctx context.Context, in Bootstra
 		return BootstrapOutcome{}, err
 	}
 	defer tx.Rollback(ctx)
+	if in.IsOwner {
+		// Serialize configured-owner retries before checking for an existing
+		// profile. Database uniqueness remains the final invariant.
+		if _, err := tx.Exec(ctx, ownerBootstrapLockSQL); err != nil {
+			return BootstrapOutcome{}, err
+		}
+	}
 
 	// Lock the existing row, if any, for the duration of the transaction.
 	var existingID, existingKey string
@@ -200,6 +209,18 @@ func (s *postgresProfileStore) BootstrapProfile(ctx context.Context, in Bootstra
 			// audit row, which is what makes "the audit table is unchanged"
 			// true rather than merely intended.
 			return BootstrapOutcome{}, ErrPublicKeyMismatch
+		}
+		if in.IsOwner {
+			// The configured owner may have created an ordinary profile before a
+			// restart or cutover completed. Promote only that verified subject,
+			// under the owner advisory lock and the single-owner DB constraint.
+			if _, err := tx.Exec(ctx, `
+				UPDATE users
+				SET is_admin = TRUE, is_owner = TRUE
+				WHERE id = $1
+			`, existingID); err != nil {
+				return BootstrapOutcome{}, err
+			}
 		}
 		var user models.User
 		if err := scanUser(tx.QueryRow(ctx, `
@@ -221,21 +242,13 @@ func (s *postgresProfileStore) BootstrapProfile(ctx context.Context, in Bootstra
 		return BootstrapOutcome{}, err
 	}
 
-	// "First user is admin" is decided against the users table, never against
-	// the identity provider.
-	var existingUsers int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&existingUsers); err != nil {
-		return BootstrapOutcome{}, err
-	}
-	isFirstUser := existingUsers == 0
-
 	var user models.User
 	// password_hash is '' for externally-authenticated users: bcrypt cannot
 	// verify any password against it, so the legacy login path stays closed for
 	// them without weakening the column's NOT NULL constraint.
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (username, email, phone_number, display_name, password_hash, clerk_user_id, public_key, is_admin)
-		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, '', $5, $6, $7)
+		INSERT INTO users (username, email, phone_number, display_name, password_hash, clerk_user_id, public_key, is_admin, is_owner)
+		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, '', $5, $6, $7, $7)
 		RETURNING
 			id,
 			username,
@@ -245,10 +258,11 @@ func (s *postgresProfileStore) BootstrapProfile(ctx context.Context, in Bootstra
 			avatar_url,
 			bio,
 			is_admin,
+			is_owner,
 			COALESCE(restricted_actions, '{}'::text[]),
 			last_seen_at,
 			created_at
-	`, in.Username, in.Email, in.Phone, in.DisplayName, in.ClerkUserID, in.PublicKey, isFirstUser).Scan(
+	`, in.Username, in.Email, in.Phone, in.DisplayName, in.ClerkUserID, in.PublicKey, in.IsOwner).Scan(
 		&user.ID,
 		&user.Username,
 		&user.Email,
@@ -257,6 +271,7 @@ func (s *postgresProfileStore) BootstrapProfile(ctx context.Context, in Bootstra
 		&user.AvatarURL,
 		&user.Bio,
 		&user.IsAdmin,
+		&user.IsOwner,
 		&user.RestrictedActions,
 		&user.LastSeenAt,
 		&user.CreatedAt,
@@ -264,8 +279,6 @@ func (s *postgresProfileStore) BootstrapProfile(ctx context.Context, in Bootstra
 	if err != nil {
 		return BootstrapOutcome{}, classifyInsertError(err)
 	}
-	user.IsOwner = isFirstUser
-
 	// Same transaction as the key write: a public key can never exist without
 	// its audit row.
 	if _, err := tx.Exec(ctx, `

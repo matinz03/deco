@@ -14,7 +14,7 @@ type User struct {
 	PublicKey         string    `json:"public_key" db:"public_key"` // E2E: user's public key
 	Bio               string    `json:"bio" db:"bio"`
 	IsAdmin           bool      `json:"is_admin" db:"is_admin"`
-	IsOwner           bool      `json:"is_owner"`
+	IsOwner           bool      `json:"is_owner" db:"is_owner"`
 	RestrictedActions []string  `json:"restricted_actions" db:"restricted_actions"`
 	LastSeenAt        time.Time `json:"last_seen_at" db:"last_seen_at"`
 	CreatedAt         time.Time `json:"created_at" db:"created_at"`

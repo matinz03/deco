@@ -8,7 +8,7 @@ The schema is defined in two places — see [`ARCHITECTURE.md`](ARCHITECTURE.md#
 
 ## Entities
 
-**`users`** — `username`/`email`/`phone_number` unique, `password_hash` (bcrypt), `public_key` (X25519, for E2E), `is_admin`, `restricted_actions text[]` (subset of `send_messages`/`create_conversations`/`manage_stickers`). No `is_owner` column — computed at query time as the user with the earliest `created_at`. GIN trigram indexes on `username`/`display_name` for fuzzy search.
+**`users`** — `username`/`email`/`phone_number` unique, nullable unique `clerk_user_id`, `password_hash` (bcrypt legacy mode), immutable `public_key` (X25519, for E2E), `is_admin`, persisted `is_owner`, and `restricted_actions text[]` (subset of `send_messages`/`create_conversations`/`manage_stickers`). A partial unique index permits at most one owner; a check constraint requires that owner to be an admin. Compatibility migration assigns ownership to the same oldest `(created_at, id)` user older releases computed dynamically. GIN trigram indexes support fuzzy username/display-name search.
 
 **`conversations`** — `type` enum `direct | group | channel | saved`, `created_by_id`. Ownership beyond the creator is tracked separately via the leadership tables below, not a column here.
 

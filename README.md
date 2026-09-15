@@ -10,7 +10,7 @@ Go REST + WebSocket API, Next.js web client, Postgres, Redis — in a pnpm/Turbo
 - **Direct messages, groups, and channels** — with member roles, typing indicators, presence, read receipts, message edit/delete, reactions, and threaded replies.
 - **Group leadership** — an objection/cooldown/election mechanism for rotating group ownership, instead of a fixed "creator is forever owner" model.
 - **Polls, stickers, media** — polls with multi-choice voting, sticker packs (including importing/cloning Telegram sticker sets), image/video/audio/file uploads.
-- **Admin controls** — the first registered user becomes an admin automatically; admins can restrict specific actions (`send_messages`, `create_conversations`, `manage_stickers`) per user, or manage/delete accounts.
+- **Admin controls** — production Clerk mode grants owner/admin only to the explicit `CLERK_OWNER_USER_ID`; legacy mode serializes first-owner creation. Admins can restrict specific actions (`send_messages`, `create_conversations`, `manage_stickers`) per user, or manage/delete accounts.
 - **Realtime** — a Redis-backed WebSocket hub fans events out across API instances.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how these fit together, [`docs/API.md`](docs/API.md) for the full endpoint reference, and [`docs/DATABASE.md`](docs/DATABASE.md) for the schema.

@@ -89,6 +89,14 @@ func main() {
 	if err := db.EnsureSchema(pool); err != nil {
 		logger.Fatal("failed to ensure database schema", zap.Error(err))
 	}
+	if cfg.Clerk.Enabled {
+		ownerCtx, cancelOwnerCheck := context.WithTimeout(context.Background(), 5*time.Second)
+		err := db.ValidateClerkOwner(ownerCtx, pool, cfg.Clerk.OwnerUserID)
+		cancelOwnerCheck()
+		if err != nil {
+			logger.Fatal("Clerk owner configuration is inconsistent with persisted ownership", zap.Error(err))
+		}
+	}
 
 	// Redis
 	rdb, err := db.ConnectRedis(cfg.RedisURL)

@@ -1,8 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 
 export const metadata = { title: "Password recovery — Deco" };
 
 export default function ForgotPasswordPage() {
+  if (clerkAuthEnabled) redirect("/login");
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col items-center gap-2 text-center">

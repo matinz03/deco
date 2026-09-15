@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
 )
@@ -64,15 +65,14 @@ func (s *memProfileStore) BootstrapProfile(_ context.Context, in BootstrapInput)
 		return BootstrapOutcome{User: *existing, Created: false}, nil
 	}
 
-	isFirstUser := len(s.usersByClerkID) == 0
 	user := &models.User{
 		ID:                bootstrapUUID,
 		Username:          in.Username,
 		DisplayName:       in.DisplayName,
 		Email:             in.Email,
 		PublicKey:         in.PublicKey,
-		IsAdmin:           isFirstUser,
-		IsOwner:           isFirstUser,
+		IsAdmin:           in.IsOwner,
+		IsOwner:           in.IsOwner,
 		RestrictedActions: []string{},
 		LastSeenAt:        time.Now(),
 		CreatedAt:         time.Now(),
@@ -88,7 +88,13 @@ func (s *memProfileStore) BootstrapProfile(_ context.Context, in BootstrapInput)
 }
 
 func newTestProfileHandler(store profileStore) *ProfileHandler {
-	return &ProfileHandler{store: store}
+	return &ProfileHandler{
+		store: store,
+		cfg: &config.Config{Clerk: config.ClerkConfig{
+			Enabled:     true,
+			OwnerUserID: bootstrapClerkID,
+		}},
+	}
 }
 
 // postBootstrap issues a bootstrap request with the given verified subject
@@ -145,29 +151,28 @@ func TestBootstrapCreatesProfileAndAuditRow(t *testing.T) {
 	}
 }
 
-// Intended behaviour: the first user in the users table becomes admin/owner.
-// The rule is evaluated against the users table, never against the identity
-// provider.
-func TestBootstrapFirstUserBecomesAdminAndOwner(t *testing.T) {
+// Intended behaviour: only the explicitly configured Clerk subject becomes
+// platform owner/admin. Signup order grants no privilege.
+func TestBootstrapOnlyConfiguredSubjectBecomesAdminAndOwner(t *testing.T) {
 	store := newMemProfileStore()
 	h := newTestProfileHandler(store)
 
-	rec := postBootstrap(h, bootstrapClerkID, map[string]string{
+	rec := postBootstrap(h, "user_first_non_owner", map[string]string{
 		"public_key": keyAlice,
 		"username":   "alice",
 	})
 	first := decodeUser(t, rec)
-	if !first.IsAdmin || !first.IsOwner {
-		t.Errorf("expected the first user to be admin and owner, got is_admin=%v is_owner=%v", first.IsAdmin, first.IsOwner)
+	if first.IsAdmin || first.IsOwner {
+		t.Errorf("first public signup received privilege: is_admin=%v is_owner=%v", first.IsAdmin, first.IsOwner)
 	}
 
-	rec = postBootstrap(h, "user_secondSUBJECT", map[string]string{
+	rec = postBootstrap(h, bootstrapClerkID, map[string]string{
 		"public_key": keyMallory,
 		"username":   "bob",
 	})
-	second := decodeUser(t, rec)
-	if second.IsAdmin || second.IsOwner {
-		t.Errorf("expected the second user to be neither admin nor owner, got is_admin=%v is_owner=%v", second.IsAdmin, second.IsOwner)
+	owner := decodeUser(t, rec)
+	if !owner.IsAdmin || !owner.IsOwner {
+		t.Errorf("configured owner lacks privilege: is_admin=%v is_owner=%v", owner.IsAdmin, owner.IsOwner)
 	}
 }
 

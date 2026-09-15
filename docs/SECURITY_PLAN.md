@@ -130,7 +130,7 @@ Codex has reserved the media and group-key paths; do not modify them without the
 
 | # | Finding | Evidence |
 |---|---|---|
-| S3-1 | **First-user-admin bootstrap is raceable.** `COUNT(*)` then `INSERT` are separate statements — two concurrent registrations on an empty DB can both observe 0 and both become admin. | `handlers/auth.go` `Register` |
+| S3-1 | **Mitigation implemented; independent verification pending.** Clerk ownership uses explicit `CLERK_OWNER_USER_ID`; legacy first-owner registration serializes selection and insert under one transaction. Database uniqueness permits at most one persisted owner. | `handlers/auth.go`, `handlers/profile.go`, `db/postgres.go` |
 | S3-2 | **Rate limiting depends on spoofable client IP.** `httprate.LimitByIP(100, time.Minute)` sits behind `middleware.RealIP`, which trusts `X-Forwarded-For`/`X-Real-IP`. If the API is ever reachable without the nginx hop, an attacker sets the header and bypasses the limit entirely. 100/min is also generous for password brute force. | `cmd/server/main.go:79-80` |
 | S3-3 | **CORS accepts exactly one origin string.** `AllowedOrigins: []string{cfg.AllowedOrigins}` — a comma-separated env value becomes one malformed origin, which tends to get "fixed" by setting `*`. Verify the deployed value. | `cmd/server/main.go` |
 | S3-4 | **Key-backup KDF below current guidance.** PBKDF2-SHA256 at 250k iterations; OWASP now recommends 600k, or Argon2id. The blob is server-stored, so a DB compromise enables offline brute force against user passphrases. | `packages/crypto/src/index.ts` |
@@ -165,7 +165,7 @@ Classes of defect this specific architecture invites. Antigravity: treat each as
 
 **AuthZ**
 - Conversation membership is checked per-handler rather than centrally — audit for any handler that trusts a path param without an `isConversationMember` check.
-- Role checks (`owner`/`admin`/`member`) vs. the separate global `is_admin` — confirm a group admin cannot escalate to platform admin, and that `is_owner` (computed as oldest `created_at`) cannot be inherited by deleting the founder.
+- Role checks (`owner`/`admin`/`member`) vs. separate global `is_admin`/`is_owner` — confirm a group admin cannot escalate to platform admin and persisted platform ownership cannot be transferred through account deletion.
 - Leadership election: can a non-member vote or object? Can a user vote twice via race? Is `finalizeLeadershipElection` idempotent under concurrent calls?
 
 **Realtime**

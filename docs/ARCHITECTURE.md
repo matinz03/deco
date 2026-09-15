@@ -47,8 +47,8 @@ Most chat apps treat the group creator as permanent owner. Deco instead models o
 
 ## Auth
 
-- Registration/login issue a JWT (HS256, `sub`=userID, 7-day expiry, signed with `JWT_SECRET`) — see `AuthHandler.generateToken` in `auth.go`.
-- The **first user ever registered** automatically becomes an admin (`is_admin=true`), determined by `COUNT(*) FROM users` at registration time. `is_owner` (shown in the UI, distinct from `is_admin`) is recomputed per-query as "the user with the earliest `created_at`" — see `userSelectColumns` in `admin_helpers.go`.
+- Authentication modes are exclusive. Clerk mode verifies RS256/JWKS tokens and removes all legacy `/auth/*` routes. Legacy mode issues HS256 JWTs (`sub`=userID, 7-day expiry, signed with `JWT_SECRET`).
+- Platform ownership is persisted in `users.is_owner`, with a unique partial index permitting at most one owner and a constraint requiring that owner to remain an admin. Existing databases backfill the same oldest `(created_at, id)` user previously computed at query time. Fresh Clerk deployments grant ownership only to the exact configured `CLERK_OWNER_USER_ID`; signup order grants no privilege.
 - Admins can set `restricted_actions` on other users (`send_messages`, `create_conversations`, `manage_stickers`); `requireAllowedAction` enforces these in the relevant handlers. Admins themselves bypass all restrictions.
 - `POST /auth/refresh` exists as a route but returns 501 Not Implemented — there is no refresh-token flow yet; clients just hold the 7-day JWT until it expires.
 

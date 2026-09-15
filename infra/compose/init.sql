@@ -17,14 +17,17 @@ CREATE TABLE users (
   avatar_url    TEXT NOT NULL DEFAULT '',
   bio           TEXT NOT NULL DEFAULT '',
   is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
+  is_owner      BOOLEAN NOT NULL DEFAULT FALSE,
   restricted_actions TEXT[] NOT NULL DEFAULT '{}',
   last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT users_owner_must_be_admin CHECK (NOT is_owner OR is_admin)
 );
 
 CREATE INDEX idx_users_username_trgm ON users USING gin(username gin_trgm_ops);
 CREATE INDEX idx_users_display_name_trgm ON users USING gin(display_name gin_trgm_ops);
+CREATE UNIQUE INDEX users_single_owner_key ON users ((1)) WHERE is_owner;
 
 -- ─── Conversations ────────────────────────────────────────────────────────────
 CREATE TYPE conversation_type AS ENUM ('direct', 'group', 'channel', 'saved');
