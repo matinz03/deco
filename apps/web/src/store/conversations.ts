@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api, ApiError, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
-import { decryptMessage, deriveSharedSecret, encryptBlob, loadPrivateKey } from "@deco/crypto";
+import { decryptBlob, decryptMessage, deriveSharedSecret, encryptBlob, loadPrivateKey } from "@deco/crypto";
 import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker, UploadResponse } from "@deco/types";
 import { useAuthStore } from "./auth";
 import { usePreferencesStore } from "./preferences";
@@ -243,6 +243,7 @@ interface ConversationState {
   ) => Promise<void>;
   sendSticker: (conversationId: string, sticker: Sticker, options?: { replyToId?: string }) => Promise<void>;
   sendPoll: (conversationId: string, input: CreatePollInput, options?: { replyToId?: string }) => Promise<void>;
+  forwardMessage: (message: Message, destinationConversationId: string) => Promise<void>;
   votePoll: (conversationId: string, messageId: string, optionId: string) => Promise<void>;
   retryMediaMessage: (conversationId: string, messageId: string) => Promise<void>;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
@@ -677,6 +678,73 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }));
         throw error;
       }
+    },
+
+    async forwardMessage(message, destinationConversationId) {
+      if (message.conversationId === destinationConversationId) {
+        throw new Error("Choose a different conversation to forward this message.");
+      }
+
+      if (message.type === "system") {
+        throw new Error("System messages cannot be forwarded.");
+      }
+
+      if (message.type === "sticker") {
+        if (!message.sticker) throw new Error("Sticker details are unavailable.");
+        await get().sendSticker(destinationConversationId, message.sticker);
+        return;
+      }
+
+      if (message.type === "poll") {
+        if (!message.poll) throw new Error("Poll details are unavailable.");
+        await get().sendPoll(destinationConversationId, {
+          question: message.poll.question,
+          options: message.poll.options.map((option) => option.text),
+        });
+        return;
+      }
+
+      if (message.type === "image" || message.type === "video" || message.type === "audio" || message.type === "file") {
+        const user = useAuthStore.getState().user;
+        if (!user) throw new EncryptionError("Sign in before forwarding a message.");
+
+        const ticketUrl = await api.messages.getMediaTicket(message.conversationId, message.id);
+        const response = await fetch(ticketUrl, { credentials: "omit" });
+        if (!response.ok) throw new Error("Attachment could not be downloaded for forwarding.");
+
+        let bytes: Uint8Array = new Uint8Array(await response.arrayBuffer());
+        if (message.mediaEncrypted) {
+          const sourceConversation = get().conversations.find((conversation) => conversation.id === message.conversationId);
+          const key = await getConversationEncryptionKey(sourceConversation, user.id, message.groupKeyEpoch);
+          if (!key) throw new EncryptionError("Attachment key is unavailable on this device.");
+          bytes = Uint8Array.from(decryptBlob(bytes, key));
+        }
+
+        const mimeType = message.mediaMimeType || "application/octet-stream";
+        const file = new File(
+          [Uint8Array.from(bytes)],
+          message.mediaName || `forwarded-${Date.now()}`,
+          { type: mimeType }
+        );
+        await get().sendMediaMessage(destinationConversationId, {
+          type: message.type,
+          file,
+          fileName: file.name,
+          mimeType,
+          caption: message.decryptedContent,
+        });
+        return;
+      }
+
+      if (message.type === "text" || message.type === "location" || message.type === "contact") {
+        if (message.decryptedContent === undefined) {
+          throw new EncryptionError("Message content is unavailable on this device.");
+        }
+        await get().sendMessage(destinationConversationId, message.decryptedContent, { type: message.type });
+        return;
+      }
+
+      throw new Error("This message cannot be forwarded.");
     },
 
     async votePoll(conversationId, messageId, optionId) {

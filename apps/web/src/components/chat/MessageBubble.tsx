@@ -123,10 +123,11 @@ interface Props {
   isLastInGroup: boolean;
   replyCount?: number;
   onReply?: (message: Message) => void;
+  onForward?: (message: Message) => void;
   onOpenThread?: (message: Message) => void;
 }
 
-export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isLastInGroup, replyCount = 0, onReply, onOpenThread }: Props) {
+export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isLastInGroup, replyCount = 0, onReply, onForward, onOpenThread }: Props) {
 	const {
 	  url: mediaUrl,
 	  observe: observeMedia,
@@ -778,6 +779,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
             seenTitle={readReceiptTitle || undefined}
             onEdit={isSent && !msg.isDeleted ? () => setIsEditing(true) : undefined}
             onReply={() => onReply?.(msg)}
+            onForward={() => onForward?.(msg)}
             onCopy={() => void navigator.clipboard.writeText(text)}
             onDelete={isSent && !msg.isDeleted ? () => void deleteMessage(msg.conversationId, msg.id) : undefined}
             onClose={() => setContextMenu(null)}
