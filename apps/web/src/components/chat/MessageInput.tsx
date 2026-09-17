@@ -668,6 +668,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         <textarea
           ref={textareaRef}
           rows={1}
+          aria-label="Message"
           value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
