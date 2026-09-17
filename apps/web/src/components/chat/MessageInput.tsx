@@ -297,8 +297,9 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
     }
   }
 
-  async function handleFileInput(type: Extract<MessageType, "image" | "video" | "audio" | "file">, files: FileList | null) {
-    const file = files?.[0];
+  async function handleFileInput(type: Extract<MessageType, "image" | "video" | "audio" | "file">, input: HTMLInputElement) {
+    const file = input.files?.[0];
+    input.value = "";
     if (!file) return;
     await handleAttachmentSelected(file, type);
   }
@@ -516,14 +517,14 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(event) => void handleFileInput("image", event.target.files)}
+        onChange={(event) => void handleFileInput("image", event.target)}
       />
       <input
         ref={videoInputRef}
         type="file"
         accept="video/*"
         className="hidden"
-        onChange={(event) => void handleFileInput("video", event.target.files)}
+        onChange={(event) => void handleFileInput("video", event.target)}
       />
       <input
         ref={cameraImageInputRef}
@@ -531,7 +532,7 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={(event) => void handleFileInput("image", event.target.files)}
+        onChange={(event) => void handleFileInput("image", event.target)}
       />
       <input
         ref={cameraVideoInputRef}
@@ -539,20 +540,20 @@ export function MessageInput({ conversationId, replyTo, onCancelReply }: Props) 
         accept="video/*"
         capture="environment"
         className="hidden"
-        onChange={(event) => void handleFileInput("video", event.target.files)}
+        onChange={(event) => void handleFileInput("video", event.target)}
       />
       <input
         ref={fileInputRef}
         type="file"
         className="hidden"
-        onChange={(event) => void handleFileInput("file", event.target.files)}
+        onChange={(event) => void handleFileInput("file", event.target)}
       />
       <input
         ref={audioInputRef}
         type="file"
         accept="audio/*"
         className="hidden"
-        onChange={(event) => void handleFileInput("audio", event.target.files)}
+        onChange={(event) => void handleFileInput("audio", event.target)}
       />
       <PollComposerModal
         open={showPollComposer}

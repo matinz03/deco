@@ -184,6 +184,7 @@ type PendingMediaUpload = {
 };
 
 const MAX_ENCRYPTED_ATTACHMENT_BYTES = 20 << 20;
+const MAX_ENCRYPTED_IMAGE_BYTES = 10 << 20;
 
 const pendingMediaUploads = new Map<string, PendingMediaUpload>();
 
@@ -1438,9 +1439,10 @@ async function uploadAndSendMediaMessage({
       mediaEncrypted = false;
     }
     if (!upload && conversation?.type !== "saved") {
-      if (input.file.size > MAX_ENCRYPTED_ATTACHMENT_BYTES) {
+      const maxBytes = input.type === "image" ? MAX_ENCRYPTED_IMAGE_BYTES : MAX_ENCRYPTED_ATTACHMENT_BYTES;
+      if (input.file.size > maxBytes) {
         throw new EncryptionError(
-          "Encrypted attachments are limited to 20 MB for the MVP to avoid exhausting browser memory."
+          `Encrypted ${input.type === "image" ? "images" : "attachments"} are limited to ${maxBytes >> 20} MB.`
         );
       }
       const attachmentKey = await getConversationEncryptionKey(
@@ -1516,6 +1518,8 @@ async function uploadAndSendMediaMessage({
     const failureReason =
       error instanceof EncryptionError
         ? error.message
+        : error instanceof ApiError
+          ? error.message
         : "Upload failed. Tap retry to try again.";
     useConversationStore.setState((s) => ({
       messages: {

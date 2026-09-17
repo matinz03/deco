@@ -37,6 +37,7 @@ export default function SettingsPage() {
   const updateProfile = useAuthStore((s) => s.updateProfile);
   const [editingProfile, setEditingProfile] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
+  const [username, setUsername] = useState(user?.username ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl ?? "");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -130,6 +131,7 @@ export default function SettingsPage() {
                 className="ml-auto shrink-0 text-sm text-primary hover:underline"
                 onClick={() => {
                   setDisplayName(user?.displayName ?? "");
+                  setUsername(user?.username ?? "");
                   setBio(user?.bio ?? "");
                   setAvatarUrl(user?.avatarUrl ?? "");
                   setAvatarFile(null);
@@ -150,6 +152,10 @@ export default function SettingsPage() {
                   setProfileError("Display name cannot be empty");
                   return;
                 }
+                if (!username.trim()) {
+                  setProfileError("Username cannot be empty");
+                  return;
+                }
                 if (avatarProcessing) {
                   setProfileError("Please wait for the image to finish processing");
                   return;
@@ -164,13 +170,14 @@ export default function SettingsPage() {
                   }
                   await updateProfile({
                     displayName: displayName.trim(),
+                    username: username.trim(),
                     bio: bio.trim(),
                     avatarUrl: nextAvatarUrl,
                   });
                   setAvatarFile(null);
                   setEditingProfile(false);
-                } catch {
-                  setProfileError("Failed to save changes");
+                } catch (error) {
+                  setProfileError(error instanceof Error ? error.message : "Failed to save changes");
                 } finally {
                   setProfileSaving(false);
                 }
@@ -220,6 +227,16 @@ export default function SettingsPage() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted">Username</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="input"
+                  placeholder="Your username"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-muted">Bio</label>
                 <input
                   type="text"
@@ -240,6 +257,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => {
                     setAvatarUrl(user?.avatarUrl ?? "");
+                    setUsername(user?.username ?? "");
                     setAvatarFile(null);
                     setEditingProfile(false);
                   }}

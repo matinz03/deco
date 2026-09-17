@@ -31,6 +31,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
   const forgetAccount = useAuthStore((s) => s.forgetAccount);
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -47,6 +48,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
   useEffect(() => {
     if (open) {
       setDisplayName(user?.displayName ?? "");
+      setUsername(user?.username ?? "");
       setBio(user?.bio ?? "");
       setAvatarUrl(user?.avatarUrl ?? "");
       setAvatarFile(null);
@@ -60,6 +62,10 @@ export function OwnProfileModal({ open, onClose }: Props) {
   async function handleSave() {
     if (!displayName.trim()) {
       setProfileError("Display name cannot be empty");
+      return;
+    }
+    if (!username.trim()) {
+      setProfileError("Username cannot be empty");
       return;
     }
     if (avatarProcessing) {
@@ -76,11 +82,14 @@ export function OwnProfileModal({ open, onClose }: Props) {
       }
       await updateProfile({
         displayName: displayName.trim(),
+        username: username.trim(),
         bio: bio.trim(),
         avatarUrl: nextAvatarUrl,
       });
       setAvatarFile(null);
       setEditing(false);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "Failed to save changes");
     } finally {
       setSaving(false);
     }
@@ -187,6 +196,15 @@ export function OwnProfileModal({ open, onClose }: Props) {
                     />
                   </label>
                   <label className="flex flex-col gap-1.5">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted">Username</span>
+                    <input
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="input"
+                      placeholder="Your username"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5">
                     <span className="text-xs font-semibold uppercase tracking-wider text-muted">Bio</span>
                     <textarea
                       value={bio}
@@ -203,6 +221,7 @@ export function OwnProfileModal({ open, onClose }: Props) {
                       className="rounded-lg border border-sidebar px-3 py-1.5 text-sm text-muted transition-colors hover:text-foreground"
                       onClick={() => {
                         setDisplayName(user.displayName ?? "");
+                        setUsername(user.username ?? "");
                         setBio(user.bio ?? "");
                         setAvatarUrl(user.avatarUrl ?? "");
                         setAvatarFile(null);

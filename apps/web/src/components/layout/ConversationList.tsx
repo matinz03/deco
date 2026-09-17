@@ -316,8 +316,18 @@ function ConversationItem({
   const isMuted = mutedIds.has(conversation.id);
   const title = conversation.name || "Unknown conversation";
   const lastMessageText = getConversationPreview(conversation);
-  const timeStr = conversation.updatedAt
-    ? formatDistanceToNowStrict(new Date(conversation.updatedAt), { addSuffix: false })
+  const updatedAt = conversation.updatedAt ? new Date(conversation.updatedAt) : null;
+  const updatedAtMs = updatedAt?.getTime() ?? 0;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!updatedAtMs) return;
+    const elapsed = Math.max(0, now - updatedAtMs);
+    const delay = Math.max(1_000, 60_000 - (elapsed % 60_000));
+    const timer = window.setTimeout(() => setNow(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [now, updatedAtMs]);
+  const timeStr = updatedAt && now - updatedAtMs >= 60_000
+    ? formatDistanceToNowStrict(updatedAt, { addSuffix: false })
     : "";
 
   const x = useMotionValue(0);

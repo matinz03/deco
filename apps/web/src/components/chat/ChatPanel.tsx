@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { isSameDay, isToday, isYesterday, format } from "date-fns";
@@ -48,8 +48,8 @@ export function ChatPanel({ conversationId }: Props) {
   const user = useAuthStore((s) => s.user);
   const readReceipts = usePreferencesStore((s) => s.readReceipts);
   const { messages, fetchMessages, loadMoreMessages, messagesHasMore, messagesLoadingMore, setActiveConversation, markConversationRead, conversations, typing, sendMediaMessage } = useConversationStore();
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -57,7 +57,8 @@ export function ChatPanel({ conversationId }: Props) {
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
   const initialScrollDone = useRef(false);
-  const lastScrollTop = useRef(0);
+  const isPinnedToBottomRef = useRef(true);
+  const previousMessageCountRef = useRef(0);
 
   const hasMore = messagesHasMore[conversationId] ?? false;
   const isLoadingMore = messagesLoadingMore[conversationId] ?? false;
@@ -116,6 +117,13 @@ export function ChatPanel({ conversationId }: Props) {
 
   const useVirtual = items.length > VIRTUAL_THRESHOLD;
 
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const element = scrollRef.current;
+    if (!element) return;
+    isPinnedToBottomRef.current = true;
+    element.scrollTo({ top: element.scrollHeight, behavior });
+  }, []);
+
   const virtualizer = useVirtualizer({
     count: useVirtual ? items.length : 0,
     getScrollElement: () => scrollRef.current,
@@ -141,38 +149,46 @@ export function ChatPanel({ conversationId }: Props) {
   useEffect(() => {
     initialScrollDone.current = false;
     isLoadingMoreRef.current = false;
+    isPinnedToBottomRef.current = true;
+    previousMessageCountRef.current = 0;
     setShowScrollBtn(false);
     setReplyTo(null);
     setThreadMessageId(null);
   }, [conversationId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (loading || convMessages.length === 0) return;
-    const el = scrollRef.current;
-    if (!el) return;
     if (!initialScrollDone.current) {
       initialScrollDone.current = true;
-      el.scrollTop = el.scrollHeight;
+      previousMessageCountRef.current = convMessages.length;
+      requestAnimationFrame(() => scrollToBottom());
       return;
     }
-    if (!showScrollBtn) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (convMessages.length > previousMessageCountRef.current && isPinnedToBottomRef.current) {
+      requestAnimationFrame(() => scrollToBottom());
     }
-  }, [loading, convMessages.length, showScrollBtn]);
+    previousMessageCountRef.current = convMessages.length;
+  }, [convMessages.length, loading, scrollToBottom]);
+
+  useEffect(() => {
+    const element = messageListRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (initialScrollDone.current && isPinnedToBottomRef.current) {
+        scrollToBottom();
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [scrollToBottom, useVirtual]);
 
   function handleScroll() {
     const el = scrollRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const scrollingDown = el.scrollTop > lastScrollTop.current;
-    lastScrollTop.current = el.scrollTop;
-    if (distanceFromBottom <= 200) {
-      setShowScrollBtn(false);
-    } else if (scrollingDown) {
-      setShowScrollBtn(true);
-    } else {
-      setShowScrollBtn(false);
-    }
+    const pinned = distanceFromBottom <= 200;
+    isPinnedToBottomRef.current = pinned;
+    setShowScrollBtn((visible) => visible === !pinned ? visible : !pinned);
     if (el.scrollTop < 150 && hasMore && !isLoadingMore && !isLoadingMoreRef.current && initialScrollDone.current) {
       isLoadingMoreRef.current = true;
       const prevScrollHeight = el.scrollHeight;
@@ -324,7 +340,7 @@ export function ChatPanel({ conversationId }: Props) {
               </div>
             )}
             {useVirtual ? (
-              <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+              <div ref={messageListRef} style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
                 {virtualizer.getVirtualItems().map((virtualItem) => {
                   const item = items[virtualItem.index]!;
                   return (
@@ -346,7 +362,7 @@ export function ChatPanel({ conversationId }: Props) {
                 })}
               </div>
             ) : (
-              <div className="mt-auto flex flex-col">
+              <div ref={messageListRef} className="mt-auto flex flex-col">
                 {items.map((item) => renderItem(item))}
               </div>
             )}
@@ -358,7 +374,7 @@ export function ChatPanel({ conversationId }: Props) {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
                   transition={{ type: "spring", stiffness: 400, damping: 28 }}
-                  onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
+                  onClick={() => scrollToBottom()}
                   className="sticky bottom-2 self-center z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border shadow-md text-xs text-foreground hover:bg-accent transition-colors"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -368,7 +384,6 @@ export function ChatPanel({ conversationId }: Props) {
                 </motion.button>
               )}
             </AnimatePresence>
-            <div ref={bottomRef} />
           </>
         )}
       </div>

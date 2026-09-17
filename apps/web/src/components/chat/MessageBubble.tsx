@@ -9,6 +9,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
 import { useMediaTicketUrl } from "@/lib/use-media-ticket";
+import { api } from "@/lib/api";
 
 const ReactionPicker = dynamic(
   () => import("./ReactionPicker").then((mod) => mod.ReactionPicker),
@@ -156,6 +157,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const [editError, setEditError] = useState<string | null>(null);
+  const [sharedPackState, setSharedPackState] = useState<"idle" | "adding" | "added" | "error">("idle");
   const tapCount = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -163,6 +165,8 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const readers = getReadersForMessage(msg, conversation?.members, currentUserId);
   const readReceiptLabel = getReadReceiptLabel(msg, conversation?.type, readers);
   const readReceiptTitle = getReadReceiptTitle(readers);
+
+  const sharedPackId = getSharedStickerPackId(text);
 	const encryptedAttachmentPending = Boolean(
 	  msg.mediaEncrypted &&
 	  !mediaUrl &&
@@ -172,6 +176,18 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const swipeX = useMotionValue(0);
   const replyIconOpacity = useTransform(swipeX, [0, 30, 70], [0, 0.6, 1]);
   const replyIconScale = useTransform(swipeX, [0, 30, 70], [0.5, 0.8, 1]);
+
+  async function handleAddSharedPack(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (!sharedPackId || sharedPackState === "adding" || sharedPackState === "added") return;
+    setSharedPackState("adding");
+    try {
+      await api.stickers.clonePack(sharedPackId);
+      setSharedPackState("added");
+    } catch {
+      setSharedPackState("error");
+    }
+  }
 
   function openReactions() {
     const rect = reactionContainerRef.current?.getBoundingClientRect();
@@ -617,10 +633,28 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   </div>
                 </div>
               ) : (
-                <span className="whitespace-pre-wrap break-words">
-                  {text}
-                  {msg.isEdited && <span className="ml-1 text-[11px] opacity-60">(edited)</span>}
-                </span>
+                <>
+                  <span className="whitespace-pre-wrap break-words">
+                    {text}
+                    {msg.isEdited && <span className="ml-1 text-[11px] opacity-60">(edited)</span>}
+                  </span>
+                  {sharedPackId && (
+                    <button
+                      type="button"
+                      onClick={(event) => void handleAddSharedPack(event)}
+                      disabled={sharedPackState === "adding" || sharedPackState === "added"}
+                      className="mt-2 rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-70"
+                    >
+                      {sharedPackState === "adding"
+                        ? "Adding sticker pack…"
+                        : sharedPackState === "added"
+                          ? "Added to your stickers"
+                          : sharedPackState === "error"
+                            ? "Could not add pack — retry"
+                            : "Add sticker pack"}
+                    </button>
+                  )}
+                </>
               )}
 
               <span className={`mt-1 flex items-center gap-1 text-[10px] opacity-55 ${isSent ? "justify-end" : "justify-start"}`}>
@@ -817,6 +851,11 @@ function getMessageText(message: Message) {
   if (message.type !== "text" && message.mediaUrl) return "";
   if (message.encryptedContent) return "Encrypted message unavailable on this device";
   return "";
+}
+
+function getSharedStickerPackId(text: string) {
+  const match = text.match(/[?&]share=([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})/);
+  return match?.[1] ?? null;
 }
 
 function parseLocationAttachment(message: Message): LocationAttachment | null {

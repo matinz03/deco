@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { decryptBlob } from "@deco/crypto";
 import type { Message } from "@deco/types";
 import { api } from "./api";
@@ -121,6 +121,8 @@ export function useMediaTicketUrl(
   } = message;
   const userId = useAuthStore((state) => state.user?.id);
   const conversation = useConversationStore((state) => state.conversations.find((item) => item.id === conversationId));
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
   const [sourceUrl, setSourceUrl] = useState(initialUrl ?? "");
   const [url, setUrl] = useState(mediaEncrypted ? "" : (initialUrl ?? ""));
   const [observedElement, setObservedElement] = useState<HTMLElement | null>(null);
@@ -164,14 +166,22 @@ export function useMediaTicketUrl(
       return;
     }
 
-    setShouldLoad(false);
+    setShouldLoad(messageType === "file");
     if (!observedElement || messageType === "file") return;
     if (typeof IntersectionObserver === "undefined") {
       setShouldLoad(true);
       return;
     }
 
-    const observer = new IntersectionObserver(([entry]) => setShouldLoad(Boolean(entry?.isIntersecting)), {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) {
+        // Once loaded, retain decrypted media for this mounted message. Store
+        // updates replace conversation objects, and unloading here made every
+        // visible attachment decrypt again after each incoming message.
+        setShouldLoad(true);
+        observer.disconnect();
+      }
+    }, {
       rootMargin: "400px 0px",
     });
     observer.observe(observedElement);
@@ -199,7 +209,8 @@ export function useMediaTicketUrl(
       setLoading(false);
       return;
     }
-    if (!sourceUrl || !conversation || !userId) {
+    const currentConversation = conversationRef.current;
+    if (!sourceUrl || !currentConversation || !userId) {
       setUrl("");
       return;
     }
@@ -215,7 +226,7 @@ export function useMediaTicketUrl(
       try {
         await withDecryptSlot(async () => {
           if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
-          const key = await getConversationEncryptionKey(conversation, userId, groupKeyEpoch);
+          const key = await getConversationEncryptionKey(currentConversation, userId, groupKeyEpoch);
           if (!key) throw new Error("attachment key unavailable");
           const response = await fetchEncryptedAttachment(sourceUrl, controller.signal, refresh);
           const plaintext = decryptBlob(new Uint8Array(await response.arrayBuffer()), key);
@@ -248,7 +259,7 @@ export function useMediaTicketUrl(
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [conversation, groupKeyEpoch, loadVersion, mediaEncrypted, mediaMimeType, refresh, shouldLoad, sourceUrl, userId]);
+  }, [groupKeyEpoch, loadVersion, mediaEncrypted, mediaMimeType, refresh, shouldLoad, sourceUrl, userId]);
 
   return { url, refresh, observe, load, loading, error };
 }

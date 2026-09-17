@@ -743,6 +743,7 @@ export const api = {
 
     updateMe: async (body: {
       displayName?: string;
+      username?: string;
       bio?: string;
       avatarUrl?: string;
       email?: string;
@@ -753,6 +754,7 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({
           display_name: body.displayName,
+          username: body.username,
           bio: body.bio,
           avatar_url: body.avatarUrl,
           email: body.email,
