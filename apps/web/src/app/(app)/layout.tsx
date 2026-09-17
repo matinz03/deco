@@ -11,7 +11,6 @@ import { SettingsSidebar } from "@/components/layout/SettingsSidebar";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
-import { KeyBackupGate } from "@/components/auth/KeyBackupGate";
 import { ChatToastContainer } from "@/components/ui/ChatToast";
 
 const AuthBackground = dynamic(
@@ -104,7 +103,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </Suspense>
 
       <KeyboardShortcutsOverlay />
-      <KeyBackupGate />
       <ChatToastContainer />
     </div>
   );

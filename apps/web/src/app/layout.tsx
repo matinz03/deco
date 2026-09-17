@@ -1,3 +1,6 @@
+import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkBootstrapGate } from "@/components/auth/ClerkBootstrapGate";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -34,7 +37,15 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
-        <Providers>{children}</Providers>
+        {clerkAuthEnabled ? (
+          <ClerkProvider afterSignOutUrl="/sign-out">
+            <ClerkBootstrapGate>
+              <Providers>{children}</Providers>
+            </ClerkBootstrapGate>
+          </ClerkProvider>
+        ) : (
+          <Providers>{children}</Providers>
+        )}
       </body>
     </html>
   );

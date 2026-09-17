@@ -72,6 +72,7 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
   const [description, setDescription] = useState(liveConversation.description || "");
   const [saving, setSaving] = useState(false);
   const [managingMembers, setManagingMembers] = useState(false);
+  const [memberError, setMemberError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [searching, setSearching] = useState(false);
@@ -178,10 +179,13 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
 
   async function handleAddMember(userId: string) {
     setManagingMembers(true);
+    setMemberError("");
     try {
       await addMember(liveConversation.id, userId);
       setSearchQuery("");
       setSearchResults([]);
+    } catch (error) {
+      setMemberError(error instanceof Error ? error.message : "Failed to add member securely.");
     } finally {
       setManagingMembers(false);
     }
@@ -189,8 +193,11 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
 
   async function handleRoleChange(member: Member, role: "admin" | "member") {
     setManagingMembers(true);
+    setMemberError("");
     try {
       await updateMemberRole(liveConversation.id, member.userId, role);
+    } catch (error) {
+      setMemberError(error instanceof Error ? error.message : "Failed to update member role.");
     } finally {
       setManagingMembers(false);
     }
@@ -198,8 +205,11 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
 
   async function handleRemoveMember(member: Member) {
     setManagingMembers(true);
+    setMemberError("");
     try {
       await removeMember(liveConversation.id, member.userId);
+    } catch (error) {
+      setMemberError(error instanceof Error ? error.message : "Failed to remove member securely.");
     } finally {
       setManagingMembers(false);
     }
@@ -210,20 +220,6 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
     setManagingMembers(true);
     try {
       await deleteConversation(liveConversation.id);
-      setSettingsOpen(false);
-      router.push("/inbox?tab=groups");
-    } finally {
-      setManagingMembers(false);
-    }
-  }
-
-  async function handleLeaveGroup() {
-    if (!currentUserId) return;
-    if (!window.confirm(`Leave "${title}"?`)) return;
-    setManagingMembers(true);
-    try {
-      await removeMember(liveConversation.id, currentUserId);
-      setMenuOpen(false);
       setSettingsOpen(false);
       router.push("/inbox?tab=groups");
     } finally {
@@ -421,16 +417,7 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
                           <span>Delete chat</span>
                           <span className="text-xs text-red-300/80">Owner</span>
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void handleLeaveGroup()}
-                          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-red-400 transition-colors hover:bg-red-500/10"
-                        >
-                          <span>Leave chat</span>
-                          <span className="text-xs text-red-300/80">Group</span>
-                        </button>
-                      )
+                      ) : null
                     ) : otherMember ? (
                       <button
                         type="button"
@@ -621,6 +608,11 @@ export function ChatHeader({ conversation, onJumpToMessage }: Props) {
                                   : "See who is in this group."}
                             </p>
                           </div>
+                          {memberError && (
+                            <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                              {memberError}
+                            </p>
+                          )}
                           <div className="space-y-2">
                             {members.map((member) => {
                               const canRemove =

@@ -10,7 +10,6 @@ export function KeyBackupGate() {
   const backupBusy = useAuthStore((s) => s.backupBusy);
   const createKeyBackup = useAuthStore((s) => s.createKeyBackup);
   const restoreKeyBackup = useAuthStore((s) => s.restoreKeyBackup);
-  const dismissBackupPrompt = useAuthStore((s) => s.dismissBackupPrompt);
   const clearBackupError = useAuthStore((s) => s.clearBackupError);
 
   const [passphrase, setPassphrase] = useState("");
@@ -122,22 +121,12 @@ export function KeyBackupGate() {
                     ? "Create backup"
                     : "Restore key"}
               </button>
-              {backupPrompt === "restore" && (
-                <button
-                  type="button"
-                  onClick={dismissBackupPrompt}
-                  disabled={backupBusy}
-                  className="rounded-xl border border-sidebar px-4 py-3 text-sm font-medium text-muted transition-colors hover:text-foreground"
-                >
-                  Skip for now
-                </button>
-              )}
             </div>
 
             <p className="mt-4 text-xs text-muted">
               {backupPrompt === "setup"
                 ? "If you forget this passphrase, only a device that already has your local key can create a new backup."
-                : "If you skip this, encrypted history will stay unavailable on this device until you restore your key."}
+                : "Restoring is required before this device can open your encrypted conversations."}
             </p>
           </form>
         </div>

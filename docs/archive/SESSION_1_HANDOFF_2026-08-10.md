@@ -1,4 +1,14 @@
-# Pick up here tomorrow
+# Session 1 handoff — 2026-08-10 (superseded)
+
+> **Archived 2026-08-27.** This was `docs/TOMORROW.md`. It is retained as
+> historical context only, **not** as instructions. Branch names, SHAs, and the
+> "do these first" list below are stale. For current branch and worktree state
+> read [`../STATUS.md`](../STATUS.md); for the documentation map read
+> [`../README.md`](../README.md).
+>
+> Its durable acceptance criteria for S1-1 are carried forward in
+> [`../PLATFORM_MIGRATION_PLAN.md`](../PLATFORM_MIGRATION_PLAN.md) Phase A.
+
 
 State as of 2026-08-10, end of session 1. Read this before touching anything — several things look finished but are not.
 
@@ -47,7 +57,7 @@ Items 1, 3, 4 and 5 are curl-testable. Item 2 needs an actual browser — and it
 
 ## Remaining security work
 
-Full detail in [`SECURITY_PLAN.md`](SECURITY_PLAN.md); this is just the queue.
+Full detail in [`SECURITY_PLAN.md`](../SECURITY_PLAN.md); this is just the queue.
 
 | Item | Owner | State |
 |---|---|---|
@@ -60,7 +70,7 @@ Full detail in [`SECURITY_PLAN.md`](SECURITY_PLAN.md); this is just the queue.
 
 ## Feature work
 
-[`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md) has the full list. Next most valuable:
+[`FEATURE_BACKLOG.md`](../FEATURE_BACKLOG.md) has the full list. Next most valuable:
 
 - **D-9 real ESLint** — currently there is no linting at all, and CI's lint step is deliberately commented out until this exists.
 - **A-1 follow-through** — the forgot-password *page* exists; there is still no password reset flow. Needs Codex's design first because it entangles with E2E key backup.
@@ -92,8 +102,8 @@ Test accounts in the local DB from this session: `matinz03` (admin/owner), plus 
 
 ## Process
 
-Working rules are at the top of [`../AGENTS.md`](../AGENTS.md) and they are not decoration — each one exists because its absence broke something here. The two that did the most work: **never certify your own work**, and **never weaken a gate to make it green**.
+Working rules are at the top of [`../AGENTS.md`](../../AGENTS.md) and they are not decoration — each one exists because its absence broke something here. The two that did the most work: **never certify your own work**, and **never weaken a gate to make it green**.
 
-Session analysis: [`AGENT_OPERATIONS.md`](AGENT_OPERATIONS.md) (what was produced, per-agent scorecard) and [`INTERACTION_PATTERNS.md`](INTERACTION_PATTERNS.md) (how it was communicated, and why enthusiasm turned out to be a negative signal for reliability).
+Session analysis: [`AGENT_OPERATIONS.md`](../AGENT_OPERATIONS.md) (what was produced, per-agent scorecard) and [`INTERACTION_PATTERNS.md`](../INTERACTION_PATTERNS.md) (how it was communicated, and why enthusiasm turned out to be a negative signal for reliability).
 
 **Open question worth answering tomorrow:** whether the multi-agent setup earns its ~32% coordination overhead once the no-self-certification rule is actually in force. If the correction ratio does not fall, shrink the crew.

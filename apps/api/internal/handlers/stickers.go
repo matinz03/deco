@@ -26,6 +26,7 @@ type StickerHandler struct {
 	cfg      *config.Config
 	logger   *zap.Logger
 	telegram *telegram.Client
+	storage  storage.Backend
 }
 
 func (h *StickerHandler) ListPacks(w http.ResponseWriter, r *http.Request) {
@@ -313,7 +314,7 @@ func (h *StickerHandler) ImportTelegramPack(w http.ResponseWriter, r *http.Reque
 
 		filename := filepath.Base(file.FilePath)
 		mimeType := mimeTypeForTelegramSticker(filename, sticker)
-		saved, saveErr := storage.Save(storage.KindSticker, h.cfg.UploadRoot, h.cfg.PublicUploadBase, filename, mimeType, reader, 0)
+		saved, saveErr := storage.Save(r.Context(), h.storage, storage.KindSticker, filename, mimeType, reader, 0)
 		reader.Close()
 		if saveErr != nil {
 			skipped = append(skipped, fmt.Sprintf("Couldn't save %s.", filename))
@@ -768,7 +769,7 @@ func (h *StickerHandler) importTelegramThumbnail(ctx context.Context, fileID str
 	}
 	defer reader.Close()
 	filename := filepath.Base(file.FilePath)
-	saved, err := storage.Save(storage.KindSticker, h.cfg.UploadRoot, h.cfg.PublicUploadBase, filename, mimeTypeFromPath(filename), reader, 0)
+	saved, err := storage.Save(ctx, h.storage, storage.KindSticker, filename, mimeTypeFromPath(filename), reader, 0)
 	if err != nil {
 		return "", err
 	}

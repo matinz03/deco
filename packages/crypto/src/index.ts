@@ -9,7 +9,13 @@
  */
 
 import nacl from "tweetnacl";
-import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from "tweetnacl-util";
+// tweetnacl-util is CommonJS and assigns its exports dynamically, so named ESM
+// imports fail to link under Node's ESM loader. Bundlers tolerate it; `node --test`
+// does not. Importing the default and destructuring keeps this module loadable by
+// the test runner, so the tests exercise this file instead of a copy of it.
+import naclUtil from "tweetnacl-util";
+
+const { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } = naclUtil;
 import type { KeyBackupPayload } from "@deco/types";
 
 // ─── Key Generation ───────────────────────────────────────────────────────────
@@ -68,6 +74,50 @@ export function decryptMessage(encryptedB64: string, sharedSecretB64: string): s
   if (!plaintext) throw new Error("Decryption failed — message may be corrupted or tampered with");
 
   return encodeUTF8(plaintext);
+}
+
+// ─── Blob Encryption (XSalsa20-Poly1305) ──────────────────────────────────────
+
+/**
+ * Encrypt attachment bytes with an existing per-conversation key — the DM
+ * shared secret from `deriveSharedSecret`, or the group key from
+ * `generateGroupKey`. No separate key hierarchy, no derivation.
+ *
+ * Same primitive and same packing as `encryptMessage`: XSalsa20-Poly1305
+ * secretbox with a fresh random nonce prepended to the ciphertext. The one
+ * deliberate divergence is that the payload stays binary instead of being
+ * base64-wrapped — attachments run to 100 MB and base64 would inflate them by
+ * a third.
+ */
+export function encryptBlob(data: Uint8Array, keyB64: string): Uint8Array {
+  const key = decodeBase64(keyB64);
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+  const ciphertext = nacl.secretbox(data, nonce, key);
+
+  // Pack nonce + ciphertext — nonce is safe to transmit
+  const combined = new Uint8Array(nonce.length + ciphertext.length);
+  combined.set(nonce);
+  combined.set(ciphertext, nonce.length);
+
+  return combined;
+}
+
+export function decryptBlob(encrypted: Uint8Array, keyB64: string): Uint8Array {
+  const key = decodeBase64(keyB64);
+
+  // A shorter input cannot hold a nonce plus a Poly1305 tag, and would reach
+  // secretbox.open with an undersized nonce, which throws a different error.
+  if (encrypted.length < nacl.secretbox.nonceLength + nacl.secretbox.overheadLength) {
+    throw new Error("Decryption failed — attachment may be corrupted or tampered with");
+  }
+
+  const nonce = encrypted.slice(0, nacl.secretbox.nonceLength);
+  const ciphertext = encrypted.slice(nacl.secretbox.nonceLength);
+
+  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
+  if (!plaintext) throw new Error("Decryption failed — attachment may be corrupted or tampered with");
+
+  return plaintext;
 }
 
 // ─── Key Storage (IndexedDB) ──────────────────────────────────────────────────

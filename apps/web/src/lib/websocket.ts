@@ -1,5 +1,5 @@
 import type { WSEvent } from "@deco/types";
-import { mapWSEvent } from "./api";
+import { mapWSEvent, resolveAuthToken } from "./api";
 
 type Listener = (event: WSEvent) => void;
 
@@ -25,7 +25,7 @@ export function resolveWebSocketURL() {
   return "ws://localhost:8080";
 }
 
-class WSClient {
+export class WSClient {
   private ws: WebSocket | null = null;
   private listeners = new Map<string, Set<Listener>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -33,17 +33,23 @@ class WSClient {
   private url = "";
   private shouldReconnect = true;
   private boundBrowserRecovery = false;
+  private connecting = false;
+  private connectionGeneration = 0;
+
+  private hasActiveSocket() {
+    return this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING;
+  }
 
   connect(url = resolveWebSocketURL()) {
     this.url = url;
     this.shouldReconnect = true;
     this.bindBrowserRecovery();
 
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+    if (this.hasActiveSocket()) {
       return;
     }
 
-    this._connect();
+    void this._connect();
   }
 
   private bindBrowserRecovery() {
@@ -56,11 +62,11 @@ class WSClient {
         return;
       }
 
-      if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+      if (this.hasActiveSocket()) {
         return;
       }
 
-      this._connect();
+      void this._connect();
     };
 
     window.addEventListener("focus", recover);
@@ -74,23 +80,39 @@ class WSClient {
     this.boundBrowserRecovery = true;
   }
 
-  private _connect() {
-    const token = localStorage.getItem("deco_token");
-    if (!token || !this.url) return;
+  private async _connect() {
+    if (this.connecting || !this.shouldReconnect || !this.url) return;
+    if (this.hasActiveSocket()) return;
+
+    const generation = ++this.connectionGeneration;
+    this.connecting = true;
+
+    const token = await resolveAuthToken();
+    if (generation !== this.connectionGeneration) return;
+    this.connecting = false;
+
+    if (!this.shouldReconnect || !token || !this.url) {
+      if (this.shouldReconnect) this.scheduleReconnect();
+      return;
+    }
+
+    if (this.hasActiveSocket()) return;
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
 
-    const socketURL = `${this.url.replace(/\/$/, "")}/ws?token=${encodeURIComponent(token)}`;
-    this.ws = new WebSocket(socketURL);
+    const baseURL = this.url.replace(/\/$/, "");
+    const socketURL = `${baseURL.endsWith("/ws") ? baseURL : `${baseURL}/ws`}?token=${encodeURIComponent(token)}`;
+    const socket = new WebSocket(socketURL);
+    this.ws = socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
       this.reconnectDelay = 1000;
     };
 
-    this.ws.onmessage = (e) => {
+    socket.onmessage = (e) => {
       try {
         const chunks = String(e.data)
           .split("\n")
@@ -107,22 +129,30 @@ class WSClient {
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
       this.ws = null;
 
       if (!this.shouldReconnect) {
         return;
       }
 
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
-        this._connect();
-      }, this.reconnectDelay);
+      this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
-      this.ws?.close();
+    socket.onerror = () => {
+      socket.close();
     };
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer || !this.shouldReconnect) return;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+      void this._connect();
+    }, this.reconnectDelay);
   }
 
   on(type: string, listener: Listener) {
@@ -139,6 +169,8 @@ class WSClient {
 
   disconnect() {
     this.shouldReconnect = false;
+    this.connectionGeneration += 1;
+    this.connecting = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

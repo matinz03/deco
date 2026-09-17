@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up Deco PostgreSQL and MinIO off host
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/deco
+ExecStart=%h/deco/backup.sh

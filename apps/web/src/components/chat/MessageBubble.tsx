@@ -8,6 +8,7 @@ import type { ContactAttachment, LocationAttachment, Message } from "@deco/types
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuthStore } from "@/store/auth";
 import { useConversationStore } from "@/store/conversations";
+import { useMediaTicketUrl } from "@/lib/use-media-ticket";
 
 const ReactionPicker = dynamic(
   () => import("./ReactionPicker").then((mod) => mod.ReactionPicker),
@@ -125,6 +126,13 @@ interface Props {
 }
 
 export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isLastInGroup, replyCount = 0, onReply, onOpenThread }: Props) {
+	const {
+	  url: mediaUrl,
+	  observe: observeMedia,
+	  load: loadMedia,
+	  loading: mediaLoading,
+	  error: mediaError,
+	} = useMediaTicketUrl(msg);
   if (msg.isDeleted) return null;
 
   const text = getMessageText(msg);
@@ -155,6 +163,11 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const readers = getReadersForMessage(msg, conversation?.members, currentUserId);
   const readReceiptLabel = getReadReceiptLabel(msg, conversation?.type, readers);
   const readReceiptTitle = getReadReceiptTitle(readers);
+	const encryptedAttachmentPending = Boolean(
+	  msg.mediaEncrypted &&
+	  !mediaUrl &&
+	  (msg.type === "image" || msg.type === "video" || msg.type === "audio" || msg.type === "file")
+	);
 
   const swipeX = useMotionValue(0);
   const replyIconOpacity = useTransform(swipeX, [0, 30, 70], [0, 0.6, 1]);
@@ -235,6 +248,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   return (
     <>
       <div
+		ref={observeMedia}
         data-message-id={msg.id}
         className={`relative ${isGrouped ? "mt-0.5" : "mt-3"}`}
         onContextMenu={handleContextMenu}
@@ -300,23 +314,37 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
               transition={{ type: "spring", stiffness: 500, damping: 30 }}
               onClick={handleBubbleClick}
             >
-              {msg.type === "image" && msg.mediaUrl && (
+			  {encryptedAttachmentPending && (
+				<button
+				  type="button"
+				  disabled={mediaLoading}
+				  className="mb-2 rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-70"
+				  onClick={(event) => {
+					event.stopPropagation();
+					loadMedia();
+				  }}
+				  title={mediaError || undefined}
+				>
+				  {mediaLoading ? "Decrypting attachment…" : mediaError ? "Retry attachment" : "Load attachment"}
+				</button>
+			  )}
+			  {msg.type === "image" && mediaUrl && (
                 <>
                   <img
-                    src={msg.mediaUrl}
+					src={mediaUrl}
                     alt="Image"
                     className="mb-1.5 max-h-64 max-w-full rounded-xl object-cover cursor-zoom-in"
                     loading="lazy"
                     onClick={(e) => { e.stopPropagation(); setLightboxOpen(true); }}
                   />
                   <ImageLightbox
-                    src={msg.mediaUrl}
+					src={mediaUrl}
                     open={lightboxOpen}
                     onClose={() => setLightboxOpen(false)}
                   />
                   <div className="mt-2 flex items-center gap-2">
                     <a
-                      href={msg.mediaUrl}
+					  href={mediaUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
@@ -325,7 +353,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                       Open
                     </a>
                     <a
-                      href={msg.mediaUrl}
+					  href={mediaUrl}
                       download={msg.mediaName || "image"}
                       className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
                       onClick={(event) => event.stopPropagation()}
@@ -335,11 +363,11 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   </div>
                 </>
               )}
-              {msg.type === "sticker" && (msg.sticker?.assetUrl || msg.mediaUrl) && (
+			  {msg.type === "sticker" && (msg.sticker?.assetUrl || mediaUrl) && (
                 <div className="mb-2 flex justify-center">
                   {msg.sticker?.format === "video" || msg.mediaMimeType?.startsWith("video/") ? (
                     <video
-                      src={msg.sticker?.assetUrl || msg.mediaUrl}
+					  src={msg.sticker?.assetUrl || mediaUrl}
                       muted
                       loop
                       autoPlay
@@ -348,7 +376,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                     />
                   ) : (
                     <img
-                      src={msg.sticker?.assetUrl || msg.mediaUrl}
+					  src={msg.sticker?.assetUrl || mediaUrl}
                       alt={msg.sticker?.name || "Sticker"}
                       className="max-h-48 max-w-[180px] rounded-2xl object-contain"
                       loading="lazy"
@@ -356,10 +384,10 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   )}
                 </div>
               )}
-              {msg.type === "video" && msg.mediaUrl && (
+			  {msg.type === "video" && mediaUrl && (
                 <div className="mb-2 overflow-hidden rounded-2xl bg-black">
                   <video
-                    src={msg.mediaUrl}
+					src={mediaUrl}
                     controls
                     playsInline
                     preload="metadata"
@@ -369,14 +397,14 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                     <span className="truncate text-[11px] text-white/70 max-w-[140px]">{msg.mediaName || "Video"}</span>
                     <div className="flex items-center gap-2 shrink-0">
                       <a
-                        href={msg.mediaUrl}
+						href={mediaUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/80 hover:bg-white/10 transition-colors"
                         onClick={(e) => e.stopPropagation()}
                       >Open</a>
                       <a
-                        href={msg.mediaUrl}
+						href={mediaUrl}
                         download={msg.mediaName || "video"}
                         className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/80 hover:bg-white/10 transition-colors"
                         onClick={(e) => e.stopPropagation()}
@@ -385,10 +413,10 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                   </div>
                 </div>
               )}
-              {msg.type === "audio" && msg.mediaUrl && (
-                <AudioPlayer src={msg.mediaUrl} name={msg.mediaName} />
+			  {msg.type === "audio" && mediaUrl && (
+				<AudioPlayer src={mediaUrl} name={msg.mediaName} />
               )}
-              {msg.type === "file" && (msg.mediaUrl || msg.mediaName) && (() => {
+			  {msg.type === "file" && (mediaUrl || msg.mediaName) && (() => {
                 const ft = getFileTypeStyle(msg.mediaMimeType, msg.mediaName);
                 return (
                   <div className="mb-2 min-w-[240px] rounded-xl border border-border/70 bg-background/50 px-3 py-3">
@@ -407,17 +435,17 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                         <div className="truncate text-xs opacity-70">{formatBytes(msg.mediaSize)}</div>
                       </div>
                     </div>
-                    {msg.mediaUrl && (
+					{mediaUrl && (
                       <div className="mt-3 flex items-center gap-2">
                         <a
-                          href={msg.mediaUrl}
+						  href={mediaUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
                           onClick={(e) => e.stopPropagation()}
                         >Open</a>
                         <a
-                          href={msg.mediaUrl}
+						  href={mediaUrl}
                           download={msg.mediaName || "attachment"}
                           className="rounded-full border border-border/70 px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
                           onClick={(e) => e.stopPropagation()}

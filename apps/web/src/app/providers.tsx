@@ -5,13 +5,17 @@ import { useState, useEffect } from "react";
 import { ThemeProvider } from "@/components/ui/ThemeProvider";
 import { KeyBackupGate } from "@/components/auth/KeyBackupGate";
 import { useAuthStore } from "@/store/auth";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 
 function HydrationGate({ children }: { children: React.ReactNode }) {
   const hydrate = useAuthStore((s) => s.hydrate);
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const user = useAuthStore((s) => s.user);
+  const hasLocalPrivateKey = useAuthStore((s) => s.hasLocalPrivateKey);
 
-  useEffect(() => { hydrate(); }, [hydrate]);
+  useEffect(() => {
+    if (!clerkAuthEnabled) void hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
     if (!user || typeof window === "undefined" || typeof Notification === "undefined") {
@@ -34,7 +38,7 @@ function HydrationGate({ children }: { children: React.ReactNode }) {
   return (
     <>
       <KeyBackupGate />
-      {children}
+      {(!clerkAuthEnabled || !user || hasLocalPrivateKey) ? children : null}
     </>
   );
 }

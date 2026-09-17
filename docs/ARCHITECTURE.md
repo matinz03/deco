@@ -26,7 +26,7 @@ The server never has access to plaintext message content or private keys.
 - **Groups/channels**: a single symmetric group key is generated once (`generateGroupKey`) and distributed to each member individually, encrypted to that member's public key. Clients cache resolved group keys (`groupKeyCache` in `store/conversations.ts`). Group-key distribution is done via `GET/PUT /conversations/{id}/group-key(s)`.
 - **Key backup**: because private keys live only in the browser, a lost device means lost message history unless the user opts into backup. `KeyBackupGate` (web) lets a user encrypt their private key with a passphrase (PBKDF2-SHA256, 250k iterations, AES-GCM) and store the resulting blob server-side (`user_key_backups` table, `GET/PUT/DELETE /users/me/key-backup`) for restore on a new device. The server stores only the encrypted blob — it cannot decrypt it without the passphrase.
 
-What the server *can* see: who is messaging whom, when, message metadata (type, size, reactions), and media files (uploads are not end-to-end encrypted). What it *cannot* see: message text/content, or anyone's private key.
+What the server *can* see: who is messaging whom, when, message metadata (type, size, reactions), and media files (uploads are not end-to-end encrypted — changing that is Phase D of [`PLATFORM_MIGRATION_PLAN.md`](PLATFORM_MIGRATION_PLAN.md)). What it *cannot* see: message text/content, or anyone's private key.
 
 ## Realtime (WebSocket)
 
@@ -47,14 +47,14 @@ Most chat apps treat the group creator as permanent owner. Deco instead models o
 
 ## Auth
 
-- Registration/login issue a JWT (HS256, `sub`=userID, 7-day expiry, signed with `JWT_SECRET`) — see `AuthHandler.generateToken` in `auth.go`.
-- The **first user ever registered** automatically becomes an admin (`is_admin=true`), determined by `COUNT(*) FROM users` at registration time. `is_owner` (shown in the UI, distinct from `is_admin`) is recomputed per-query as "the user with the earliest `created_at`" — see `userSelectColumns` in `admin_helpers.go`.
+- Authentication modes are exclusive. Clerk mode verifies RS256/JWKS tokens and removes all legacy `/auth/*` routes. Legacy mode issues HS256 JWTs (`sub`=userID, 7-day expiry, signed with `JWT_SECRET`).
+- Platform ownership is persisted in `users.is_owner`, with a unique partial index permitting at most one owner and a constraint requiring that owner to remain an admin. Existing databases backfill the same oldest `(created_at, id)` user previously computed at query time. Fresh Clerk deployments grant ownership only to the exact configured `CLERK_OWNER_USER_ID`; signup order grants no privilege.
 - Admins can set `restricted_actions` on other users (`send_messages`, `create_conversations`, `manage_stickers`); `requireAllowedAction` enforces these in the relevant handlers. Admins themselves bypass all restrictions.
 - `POST /auth/refresh` exists as a route but returns 501 Not Implemented — there is no refresh-token flow yet; clients just hold the 7-day JWT until it expires.
 
 ## Storage
 
-Media (avatars, message attachments, stickers) is stored on local disk under `UPLOAD_ROOT`, served back via `http.FileServer` at `PUBLIC_UPLOAD_BASE` (default `/api/v1/media`). Config fields for Cloudflare R2 (`R2_ACCOUNT_ID`, etc.) and an Anthropic API key exist in `internal/config/config.go` but aren't referenced anywhere else in the codebase — they're unused placeholders for future work, not a currently-wired integration.
+Media (avatars, message attachments, stickers) is stored on local disk under `UPLOAD_ROOT`, served back via `http.FileServer` at `PUBLIC_UPLOAD_BASE` (default `/api/v1/media`). Config fields for Cloudflare R2 (`R2_ACCOUNT_ID`, etc.) and an Anthropic API key exist in `internal/config/config.go` but aren't referenced anywhere else in the codebase — they're unused placeholders for future work, not a currently-wired integration. Adopting R2 behind a storage interface is Phase C of [`PLATFORM_MIGRATION_PLAN.md`](PLATFORM_MIGRATION_PLAN.md).
 
 ## Schema evolution
 

@@ -1,151 +1,167 @@
 package storage
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"context"
+	"errors"
 	"fmt"
 	"io"
-	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
 )
 
-type Kind string
-
+// DefaultUploadRoot and DefaultPublicUploadBase mirror the historical
+// UPLOAD_ROOT / PUBLIC_UPLOAD_BASE defaults.
 const (
-	KindAvatar Kind = "avatar"
-	KindImage  Kind = "image"
-	KindVideo  Kind = "video"
-	KindAudio  Kind = "audio"
-	KindFile   Kind = "file"
-	KindSticker Kind = "sticker"
+	DefaultUploadRoot       = "./uploads"
+	DefaultPublicUploadBase = "/api/v1/media"
 )
 
-type SavedFile struct {
-	URL      string
-	MimeType string
-	Size     int64
-	Name     string
+// LocalBackend stores objects on the API server's own disk, served by the
+// http.FileServer mounted in cmd/server. It reproduces the behaviour and the
+// URL shape this repository had before the Backend interface existed.
+//
+// It is a development and single-host fallback only. It has NO way to sign a
+// URL: PresignGet returns the same permanent, unauthenticated URL that Put
+// returns, ignoring the TTL, and it does not enforce the public/private split
+// — every object under the root is reachable through the file server. Any
+// caller that depends on a private object actually being private must run on
+// the s3 backend.
+type LocalBackend struct {
+	root       string
+	publicBase string
 }
 
-func EnsureDirectories(root string) error {
-	for _, dir := range []string{
-		filepath.Join(root, "avatars"),
-		filepath.Join(root, "messages", "images"),
-		filepath.Join(root, "messages", "videos"),
-		filepath.Join(root, "messages", "audio"),
-		filepath.Join(root, "messages", "files"),
-		filepath.Join(root, "stickers", "static"),
-		filepath.Join(root, "stickers", "video"),
-		filepath.Join(root, "stickers", "animated"),
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
+var _ Backend = (*LocalBackend)(nil)
+
+// NewLocalBackend prepares the on-disk root. root and publicBase fall back to
+// the historical defaults when empty.
+func NewLocalBackend(root, publicBase string) (*LocalBackend, error) {
+	if strings.TrimSpace(root) == "" {
+		root = DefaultUploadRoot
+	}
+	if strings.TrimSpace(publicBase) == "" {
+		publicBase = DefaultPublicUploadBase
+	}
+
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("storage: resolving upload root %q: %w", root, err)
+	}
+	if err := EnsureDirectories(abs); err != nil {
+		return nil, fmt.Errorf("storage: preparing upload root %q: %w", abs, err)
+	}
+
+	return &LocalBackend{root: abs, publicBase: strings.TrimRight(publicBase, "/")}, nil
+}
+
+// Root is the absolute directory objects are written under.
+func (b *LocalBackend) Root() string { return b.root }
+
+// PublicBase is the URL prefix objects are served from.
+func (b *LocalBackend) PublicBase() string { return b.publicBase }
+
+func (b *LocalBackend) Put(ctx context.Context, ref ObjectRef, in PutInput) (*PutResult, error) {
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	if in.Body == nil {
+		return nil, errors.New("storage: nil body")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	absolute, err := b.resolve(ref.Key)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+		return nil, err
+	}
+
+	file, err := os.Create(absolute)
+	if err != nil {
+		return nil, err
+	}
+
+	written, copyErr := io.Copy(file, in.Body)
+	closeErr := file.Close()
+	if copyErr != nil {
+		// Do not leave a truncated object behind for a URL nobody holds.
+		_ = os.Remove(absolute)
+		return nil, copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(absolute)
+		return nil, closeErr
+	}
+
+	return &PutResult{
+		Bucket: ref.Bucket,
+		Key:    ref.Key,
+		URL:    joinURL(b.publicBase, ref.Key),
+		Size:   written,
+	}, nil
+}
+
+// PresignGet returns the plain file-server URL. The local backend cannot sign,
+// so ttl is ignored and the URL never expires — see the type comment.
+func (b *LocalBackend) PresignGet(ctx context.Context, ref ObjectRef, ttl time.Duration) (string, error) {
+	if err := ref.Validate(); err != nil {
+		return "", err
+	}
+	if ttl > MaxPresignTTL {
+		return "", fmt.Errorf("%w: %s > %s", ErrTTLTooLong, ttl, MaxPresignTTL)
+	}
+	return joinURL(b.publicBase, ref.Key), nil
+}
+
+func (b *LocalBackend) Delete(ctx context.Context, ref ObjectRef) error {
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	absolute, err := b.resolve(ref.Key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(absolute); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }
 
-func Save(kind Kind, root, publicBase, originalName, mimeType string, data io.Reader, size int64) (*SavedFile, error) {
-	subdir := subdirectoryForKind(kind, originalName, mimeType)
-	if subdir == "" {
-		return nil, fmt.Errorf("unsupported upload kind: %s", kind)
-	}
-
-	if err := EnsureDirectories(root); err != nil {
-		return nil, err
-	}
-
-	ext := fileExtension(originalName, mimeType)
-	filename := fmt.Sprintf("%d_%s%s", time.Now().UnixMilli(), randomID(), ext)
-	relativePath := filepath.Join(subdir, filename)
-	absolutePath := filepath.Join(root, relativePath)
-
-	file, err := os.Create(absolutePath)
+// resolve maps an object key onto an absolute path and refuses anything that
+// lands outside the root.
+func (b *LocalBackend) resolve(key string) (string, error) {
+	absolute := filepath.Join(b.root, filepath.FromSlash(key))
+	rel, err := filepath.Rel(b.root, absolute)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("%w: %s", ErrInvalidKey, key)
 	}
-	defer file.Close()
-
-	written, err := io.Copy(file, data)
-	if err != nil {
-		return nil, err
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: escapes the upload root", ErrInvalidKey)
 	}
-
-	return &SavedFile{
-		URL:      joinURL(publicBase, filepath.ToSlash(relativePath)),
-		MimeType: mimeType,
-		Size:     written,
-		Name:     sanitizeFileName(originalName),
-	}, nil
+	return absolute, nil
 }
 
-func DetectMimeType(header []byte, fallback string) string {
-	detected := http.DetectContentType(header)
-	if detected == "application/octet-stream" && fallback != "" {
-		return fallback
-	}
-	return detected
-}
-
-func subdirectoryForKind(kind Kind, originalName, mimeType string) string {
-	switch kind {
-	case KindAvatar:
-		return "avatars"
-	case KindImage:
-		return filepath.Join("messages", "images")
-	case KindVideo:
-		return filepath.Join("messages", "videos")
-	case KindAudio:
-		return filepath.Join("messages", "audio")
-	case KindFile:
-		return filepath.Join("messages", "files")
-	case KindSticker:
-		if strings.HasSuffix(strings.ToLower(filepath.Ext(originalName)), ".tgs") || mimeType == "application/x-tgsticker" {
-			return filepath.Join("stickers", "animated")
+// EnsureDirectories creates the fixed key prefixes under root at boot so the
+// first upload of each kind does not race directory creation.
+func EnsureDirectories(root string) error {
+	for _, dir := range []string{
+		"avatars",
+		"messages/images",
+		"messages/videos",
+		"messages/audio",
+		"messages/files",
+		"stickers/static",
+		"stickers/video",
+		"stickers/animated",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
+			return err
 		}
-		if strings.HasPrefix(mimeType, "video/") || strings.HasSuffix(strings.ToLower(filepath.Ext(originalName)), ".webm") {
-			return filepath.Join("stickers", "video")
-		}
-		return filepath.Join("stickers", "static")
-	default:
-		return ""
 	}
-}
-
-func fileExtension(originalName, mimeType string) string {
-	ext := strings.ToLower(filepath.Ext(originalName))
-	if ext != "" && len(ext) <= 10 {
-		return ext
-	}
-	if exts, _ := mime.ExtensionsByType(mimeType); len(exts) > 0 {
-		return exts[0]
-	}
-	return ".bin"
-}
-
-func sanitizeFileName(name string) string {
-	name = filepath.Base(strings.TrimSpace(name))
-	if name == "" || name == "." || name == string(filepath.Separator) {
-		return "upload"
-	}
-	return name
-}
-
-func joinURL(base, rel string) string {
-	base = strings.TrimRight(base, "/")
-	rel = strings.TrimLeft(rel, "/")
-	return base + "/" + rel
-}
-
-func randomID() string {
-	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf)
+	return nil
 }

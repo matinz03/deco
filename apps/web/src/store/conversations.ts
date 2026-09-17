@@ -1,14 +1,26 @@
 import { create } from "zustand";
-import { api, mapMessage } from "@/lib/api";
+import { api, ApiError, mapMessage } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
-import { decryptMessage, deriveSharedSecret, loadPrivateKey } from "@deco/crypto";
-import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker } from "@deco/types";
+import { decryptMessage, deriveSharedSecret, encryptBlob, loadPrivateKey } from "@deco/crypto";
+import type { Conversation, Member, Message, MessageType, WSEvent, CreatePollInput, Sticker, UploadResponse } from "@deco/types";
 import { useAuthStore } from "./auth";
 import { usePreferencesStore } from "./preferences";
 import { useToastStore } from "./toasts";
 
-// In-memory cache of decrypted group keys: conversationId → plaintext group key (base64)
+// Immutable decrypted group keys are cached by conversation and epoch. The
+// separate current-epoch pointer is invalidated whenever the server rejects a
+// stale write.
 const groupKeyCache = new Map<string, string>();
+const currentGroupKeyEpoch = new Map<string, number>();
+let conversationSessionGeneration = 0;
+
+function groupConversationCacheKey(userId: string, conversationId: string) {
+  return `${userId}:${conversationId}`;
+}
+
+function groupKeyCacheKey(userId: string, conversationId: string, epoch: number) {
+  return `${groupConversationCacheKey(userId, conversationId)}:${epoch}`;
+}
 
 /**
  * Thrown when a message cannot be encrypted (missing keys). Sending must fail
@@ -21,30 +33,131 @@ export class EncryptionError extends Error {
   }
 }
 
-async function getOrFetchGroupKey(conversationId: string, conversation: Conversation | undefined): Promise<string | null> {
-  const cached = groupKeyCache.get(conversationId);
-  if (cached) return cached;
-
+async function getOrFetchGroupKey(
+  conversationId: string,
+  requestedEpoch?: number
+): Promise<{ key: string; epoch: number } | null> {
   const user = useAuthStore.getState().user;
   if (!user) return null;
+  const conversationCacheKey = groupConversationCacheKey(user.id, conversationId);
+  const knownEpoch = requestedEpoch ?? currentGroupKeyEpoch.get(conversationCacheKey);
+  if (knownEpoch) {
+    const cached = groupKeyCache.get(groupKeyCacheKey(user.id, conversationId, knownEpoch));
+    if (cached) return { key: cached, epoch: knownEpoch };
+  }
 
   try {
-    const { encryptedKey, encryptedBy } = await api.conversations.getGroupKey(conversationId);
-    if (!encryptedKey || !encryptedBy) return null;
+    const { epoch, encryptedKey, encryptorPublicKey } = await api.conversations.getGroupKey(
+      conversationId,
+      requestedEpoch
+    );
+    if (!epoch || !encryptedKey || !encryptorPublicKey) return null;
 
     const privateKey = await loadPrivateKey(user.id);
     if (!privateKey) return null;
 
-    // Find encryptor's public key from conversation members
-    const encryptor = conversation?.members?.find((m) => m.userId === encryptedBy)?.user;
-    if (!encryptor?.publicKey) return null;
-
-    const sharedSecret = deriveSharedSecret(encryptor.publicKey, privateKey);
+    const sharedSecret = deriveSharedSecret(encryptorPublicKey, privateKey);
     const groupKey = decryptMessage(encryptedKey, sharedSecret);
-    groupKeyCache.set(conversationId, groupKey);
-    return groupKey;
+    groupKeyCache.set(groupKeyCacheKey(user.id, conversationId, epoch), groupKey);
+    const currentEpoch = currentGroupKeyEpoch.get(conversationCacheKey) ?? 0;
+    if (requestedEpoch === undefined || epoch > currentEpoch) {
+      currentGroupKeyEpoch.set(conversationCacheKey, epoch);
+    }
+    return { key: groupKey, epoch };
   } catch {
     return null;
+  }
+}
+
+export async function getConversationEncryptionKey(
+  conversation: Conversation | undefined,
+  userId: string,
+  groupKeyEpoch?: number
+): Promise<string | null> {
+  if (!conversation || conversation.type === "saved") return null;
+
+  // Channels do not have a distributable key protocol yet. Failing closed is
+  // safer than encrypting for one arbitrary member and hiding the upload from
+  // everyone else.
+  if (conversation.type === "channel") return null;
+
+  if (conversation.type === "group") {
+    return (await getOrFetchGroupKey(conversation.id, groupKeyEpoch))?.key ?? null;
+  }
+
+  const otherUser = conversation.members?.find((member) => member.userId !== userId)?.user;
+  if (!otherUser?.publicKey) return null;
+  const privateKey = await loadPrivateKey(userId);
+  if (!privateKey) return null;
+  return deriveSharedSecret(otherUser.publicKey, privateKey);
+}
+
+type GroupKeyRecipient = { userId: string; publicKey?: string };
+
+async function rotateGroupKey(
+  conversationId: string,
+  expectedEpoch: number,
+  recipients: GroupKeyRecipient[],
+  membershipChange?: { action: "add" | "remove"; userId: string }
+): Promise<number> {
+  const user = useAuthStore.getState().user;
+  if (!user) throw new EncryptionError("Sign in before changing an encrypted group.");
+
+  const privateKey = await loadPrivateKey(user.id);
+  if (!privateKey) {
+    throw new EncryptionError(
+      "Your private key is missing on this device. Restore your key backup before changing group membership."
+    );
+  }
+
+  const normalizedRecipients = recipients.map((recipient) => ({
+    userId: recipient.userId,
+    publicKey: recipient.publicKey || (recipient.userId === user.id ? user.publicKey : undefined),
+  }));
+  const missingKeys = normalizedRecipients.filter((recipient) => !recipient.publicKey);
+  if (missingKeys.length > 0) {
+    throw new EncryptionError("Every group member needs a public key before the group can be secured.");
+  }
+
+  const { encryptMessage, generateGroupKey } = await import("@deco/crypto");
+  const groupKey = generateGroupKey();
+  const copies = normalizedRecipients.map((recipient) => ({
+    userId: recipient.userId,
+    encryptedKey: encryptMessage(
+      groupKey,
+      deriveSharedSecret(recipient.publicKey!, privateKey)
+    ),
+  }));
+  let epoch: number;
+  try {
+    epoch = await api.conversations.createGroupKeyEpoch(conversationId, {
+      expectedEpoch,
+      membershipChange,
+      copies,
+    });
+  } catch (error) {
+    // A dropped response can hide a committed rotation. Accept the server state
+    // only when our next-epoch copy decrypts to the exact key generated above.
+    try {
+      const existing = await api.conversations.getGroupKey(conversationId, expectedEpoch + 1);
+      const sharedSecret = deriveSharedSecret(existing.encryptorPublicKey, privateKey);
+      if (decryptMessage(existing.encryptedKey, sharedSecret) !== groupKey) throw error;
+      epoch = existing.epoch;
+    } catch {
+      throw error;
+    }
+  }
+
+  const conversationCacheKey = groupConversationCacheKey(user.id, conversationId);
+  groupKeyCache.set(groupKeyCacheKey(user.id, conversationId, epoch), groupKey);
+  currentGroupKeyEpoch.set(conversationCacheKey, epoch);
+  return epoch;
+}
+
+function invalidateCurrentGroupKey(conversationId: string, error: unknown) {
+  if (error instanceof ApiError && error.status === 409) {
+    const userId = useAuthStore.getState().user?.id;
+    if (userId) currentGroupKeyEpoch.delete(groupConversationCacheKey(userId, conversationId));
   }
 }
 
@@ -65,9 +178,31 @@ type PendingMediaUpload = {
     previewUrl?: string;
     replyToId?: string;
   };
+  upload?: UploadResponse;
+  mediaEncrypted?: boolean;
+  groupKeyEpoch?: number;
 };
 
+const MAX_ENCRYPTED_ATTACHMENT_BYTES = 20 << 20;
+
 const pendingMediaUploads = new Map<string, PendingMediaUpload>();
+
+export function resetConversationSession() {
+  conversationSessionGeneration += 1;
+  groupKeyCache.clear();
+  currentGroupKeyEpoch.clear();
+  pendingMediaUploads.clear();
+  useConversationStore.setState((state) => ({
+    conversations: [],
+    messages: {},
+    activeConversationId: null,
+    presence: {},
+    typing: {},
+    messagesHasMore: {},
+    messagesLoadingMore: {},
+    mutedIds: state.mutedIds,
+  }));
+}
 
 interface ConversationState {
   conversations: Conversation[];
@@ -203,17 +338,22 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async fetchConversations() {
+      const generation = conversationSessionGeneration;
       const rawConversations = await api.conversations.list();
       const conversations = await hydrateConversationSummaries(rawConversations);
+      if (generation !== conversationSessionGeneration) return;
       const existingMessages = get().messages;
       const hydratedMessages = await rehydrateConversationMessages(existingMessages, conversations);
+      if (generation !== conversationSessionGeneration) return;
       set({ conversations, messages: hydratedMessages });
     },
 
     async fetchMessages(conversationId) {
+      const generation = conversationSessionGeneration;
       const rawMessages = await api.messages.list(conversationId);
       const conversation = get().conversations.find((c) => c.id === conversationId);
       const decrypted = await hydrateMessages(rawMessages, conversation);
+      if (generation !== conversationSessionGeneration) return;
       set((s) => ({
         messages: { ...s.messages, [conversationId]: withReplyLinks(decrypted) },
         messagesHasMore: { ...s.messagesHasMore, [conversationId]: rawMessages.length === 50 },
@@ -222,6 +362,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async loadMoreMessages(conversationId) {
+      const generation = conversationSessionGeneration;
       const state = get();
       if (!state.messagesHasMore[conversationId] || state.messagesLoadingMore[conversationId]) return;
       const existingMessages = state.messages[conversationId] ?? [];
@@ -232,6 +373,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const rawMessages = await api.messages.list(conversationId, before);
         const conversation = get().conversations.find((c) => c.id === conversationId);
         const decrypted = await hydrateMessages(rawMessages, conversation);
+        if (generation !== conversationSessionGeneration) return;
         set((s) => ({
           messages: {
             ...s.messages,
@@ -281,13 +423,25 @@ export const useConversationStore = create<ConversationState>((set, get) => {
 
       try {
         const conversation = get().conversations.find((c) => c.id === conversationId);
-        const encryptedContent = await encryptOutgoingContent(conversation, user.id, text);
-
-        const confirmed = await api.messages.send(conversationId, {
-          type: messageType,
-          encryptedContent,
-          replyToId: options?.replyToId,
-        });
+        let confirmed: Message | undefined;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const encrypted = await encryptOutgoingContent(conversation, user.id, text);
+          try {
+            confirmed = await api.messages.send(conversationId, {
+              type: messageType,
+              encryptedContent: encrypted.content,
+              groupKeyEpoch: encrypted.groupKeyEpoch,
+              replyToId: options?.replyToId,
+            });
+            break;
+          } catch (error) {
+            const staleGroupKey =
+              conversation?.type === "group" && error instanceof ApiError && error.status === 409;
+            if (!staleGroupKey || attempt > 0) throw error;
+            invalidateCurrentGroupKey(conversationId, error);
+          }
+        }
+        if (!confirmed) throw new Error("Message was not accepted by the server.");
 
         const confirmedMessage = await hydrateMessage(confirmed, conversation);
 
@@ -303,7 +457,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             )),
           },
         }));
-      } catch {
+      } catch (error) {
+        invalidateCurrentGroupKey(conversationId, error);
         // Mark optimistic message as failed
         set((s) => ({
           messages: {
@@ -705,7 +860,13 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }
 
       // Throws EncryptionError when the keys needed to encrypt are unavailable.
-      const encryptedContent = await encryptOutgoingContent(conversation, user.id, trimmed);
+      const encrypted = await encryptOutgoingContent(
+        conversation,
+        user.id,
+        trimmed,
+        message.groupKeyEpoch
+      );
+      const encryptedContent = encrypted.content;
 
       const previousMessage = message;
 
@@ -788,32 +949,35 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       const [conv] = await hydrateConversationSummaries([raw]);
       if (!conv) throw new Error("Failed to create conversation");
 
-      // For group conversations: generate a group key and distribute it to all members
-      if (opts.type === "group" && conv.members && conv.members.length > 0) {
+      // A group is not usable until every member has an epoch-1 key copy.
+      if (opts.type === "group") {
         try {
-          const user = useAuthStore.getState().user;
-          const privateKey = user ? await loadPrivateKey(user.id) : null;
-          if (user && privateKey) {
-            const { generateGroupKey, encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-            const groupKey = generateGroupKey();
-            // Cache immediately so this device can use it right away
-            groupKeyCache.set(conv.id, groupKey);
-
-            const entries = conv.members
-              .filter((m) => m.user?.publicKey)
-              .map((m) => {
-                const sharedSecret = derive(m.user!.publicKey, privateKey);
-                return {
-                  userId: m.userId,
-                  encryptedKey: encryptMessage(groupKey, sharedSecret),
-                  encryptedBy: user.id,
-                };
-              });
-
-            await api.conversations.putGroupKeys(conv.id, entries);
+          const members = conv.members?.length
+            ? conv.members
+            : await api.conversations.listMembers(conv.id);
+          if (members.length === 0) {
+            throw new EncryptionError("The server returned a group without members.");
           }
-        } catch {
-          // Non-fatal — messages will show as undecryptable until key is set up
+          conv.members = members;
+          conv.memberCount = members.length;
+          await rotateGroupKey(
+            conv.id,
+            0,
+            members.map((member) => ({
+              userId: member.userId,
+              publicKey: member.user?.publicKey,
+            }))
+          );
+        } catch (error) {
+          // Known validation/auth failures cannot have committed. Network/5xx
+          // outcomes are ambiguous and must not trigger destructive cleanup.
+          const provenPreCommitFailure =
+            error instanceof EncryptionError ||
+            (error instanceof ApiError && error.status !== 409 && error.status >= 400 && error.status < 500);
+          if (provenPreCommitFailure) {
+            await api.conversations.remove(conv.id).catch(() => undefined);
+          }
+          throw error;
         }
       }
 
@@ -855,34 +1019,37 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async addMember(conversationId, userId) {
-      await api.conversations.addMember(conversationId, userId);
-      const members = await get().listMembers(conversationId);
-
-      // Distribute the existing group key to the new member
-      try {
-        const conversation = get().conversations.find((c) => c.id === conversationId);
-        const newMember = members.find((m) => m.userId === userId);
-        if (newMember?.user?.publicKey) {
-          const currentUser = useAuthStore.getState().user;
-          const privateKey = currentUser ? await loadPrivateKey(currentUser.id) : null;
-          if (currentUser && privateKey) {
-            const groupKey = await getOrFetchGroupKey(conversationId, conversation);
-            if (groupKey) {
-              const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
-              const sharedSecret = derive(newMember.user.publicKey, privateKey);
-              await api.conversations.putGroupKeys(conversationId, [{
-                userId,
-                encryptedKey: encryptMessage(groupKey, sharedSecret),
-                encryptedBy: currentUser.id,
-              }]);
-            }
-          }
-        }
-      } catch {
-        // Non-fatal
+      const conversation = get().conversations.find((item) => item.id === conversationId);
+      if (conversation?.type !== "group") {
+        await api.conversations.addMember(conversationId, userId);
+        return get().listMembers(conversationId);
       }
 
-      return members;
+      try {
+        const currentKey = await getOrFetchGroupKey(conversationId);
+        if (!currentKey) throw new EncryptionError("The current group key is unavailable.");
+        const [members, newUser] = await Promise.all([
+          api.conversations.listMembers(conversationId),
+          api.users.get(userId),
+        ]);
+        await rotateGroupKey(
+          conversationId,
+          currentKey.epoch,
+          [
+            ...members.map((member) => ({
+              userId: member.userId,
+              publicKey: member.user?.publicKey,
+            })),
+            { userId, publicKey: newUser.publicKey },
+          ],
+          { action: "add", userId }
+        );
+      } catch (error) {
+        invalidateCurrentGroupKey(conversationId, error);
+        await get().listMembers(conversationId).catch(() => undefined);
+        throw error;
+      }
+      return get().listMembers(conversationId);
     },
 
     async updateMemberRole(conversationId, userId, role) {
@@ -891,7 +1058,32 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     },
 
     async removeMember(conversationId, userId) {
-      await api.conversations.removeMember(conversationId, userId);
+      const conversation = get().conversations.find((item) => item.id === conversationId);
+      if (conversation?.type !== "group") {
+        await api.conversations.removeMember(conversationId, userId);
+        return get().listMembers(conversationId);
+      }
+
+      try {
+        const currentKey = await getOrFetchGroupKey(conversationId);
+        if (!currentKey) throw new EncryptionError("The current group key is unavailable.");
+        const members = await api.conversations.listMembers(conversationId);
+        await rotateGroupKey(
+          conversationId,
+          currentKey.epoch,
+          members
+            .filter((member) => member.userId !== userId)
+            .map((member) => ({
+              userId: member.userId,
+              publicKey: member.user?.publicKey,
+            })),
+          { action: "remove", userId }
+        );
+      } catch (error) {
+        invalidateCurrentGroupKey(conversationId, error);
+        await get().listMembers(conversationId).catch(() => undefined);
+        throw error;
+      }
       return get().listMembers(conversationId);
     },
 
@@ -1235,24 +1427,56 @@ async function uploadAndSendMediaMessage({
 
   try {
     const conversation = useConversationStore.getState().conversations.find((c) => c.id === conversationId);
-    const encryptedContent = await encryptOutgoingContent(conversation, userId, caption);
+    const encrypted = await encryptOutgoingContent(conversation, userId, caption);
+    const encryptedContent = encrypted.content;
     const uploadKind = input.type === "image" ? "image" : input.type === "video" ? "video" : input.type === "audio" ? "audio" : "file";
-    const upload = await api.uploads.create(input.file, uploadKind, input.fileName, {
-      onProgress: (progress) => {
-        useConversationStore.setState((s) => ({
-          messages: {
-            ...s.messages,
-            [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
-              message.id === tempId
-                ? {
-                    ...message,
-                    uploadProgress: progress,
-                  }
-                : message
-            )),
-          },
-        }));
-      },
+    const pending = pendingMediaUploads.get(tempId);
+    let upload = pending?.upload;
+    let mediaEncrypted = pending?.mediaEncrypted ?? false;
+    if (pending?.groupKeyEpoch !== encrypted.groupKeyEpoch) {
+      upload = undefined;
+      mediaEncrypted = false;
+    }
+    if (!upload && conversation?.type !== "saved") {
+      if (input.file.size > MAX_ENCRYPTED_ATTACHMENT_BYTES) {
+        throw new EncryptionError(
+          "Encrypted attachments are limited to 20 MB for the MVP to avoid exhausting browser memory."
+        );
+      }
+      const attachmentKey = await getConversationEncryptionKey(
+        conversation,
+        userId,
+        encrypted.groupKeyEpoch
+      );
+      if (!attachmentKey) {
+        throw new EncryptionError(
+          "Attachment encryption is unavailable on this device, so the file was not uploaded. Restore your key backup or wait for the group key."
+        );
+      }
+      const plaintext = new Uint8Array(await input.file.arrayBuffer());
+      const ciphertext = encryptBlob(plaintext, attachmentKey);
+      const uploadBody = new Blob([Uint8Array.from(ciphertext)], { type: "application/octet-stream" });
+      mediaEncrypted = true;
+
+      upload = await api.uploads.create(uploadBody, uploadKind, input.fileName, {
+        encrypted: { originalMimeType: input.mimeType, originalSize: input.file.size },
+        onProgress: updateMediaUploadProgress(conversationId, tempId),
+      });
+    }
+
+    if (!upload) {
+      upload = await api.uploads.create(input.file, uploadKind, input.fileName, {
+        onProgress: updateMediaUploadProgress(conversationId, tempId),
+      });
+    }
+
+    pendingMediaUploads.set(tempId, {
+      conversationId,
+      tempId,
+      input,
+      upload,
+      mediaEncrypted,
+      groupKeyEpoch: encrypted.groupKeyEpoch,
     });
     const confirmed = await api.messages.send(conversationId, {
       type: input.type,
@@ -1262,6 +1486,8 @@ async function uploadAndSendMediaMessage({
       mediaName: upload.name,
       mediaMimeType: upload.mimeType,
       mediaSize: upload.size,
+      mediaEncrypted,
+      groupKeyEpoch: encrypted.groupKeyEpoch,
     });
     const confirmedMessage = await hydrateMessage(confirmed, conversation);
     pendingMediaUploads.delete(tempId);
@@ -1286,6 +1512,7 @@ async function uploadAndSendMediaMessage({
       },
     }));
   } catch (error) {
+    invalidateCurrentGroupKey(conversationId, error);
     const failureReason =
       error instanceof EncryptionError
         ? error.message
@@ -1306,6 +1533,19 @@ async function uploadAndSendMediaMessage({
       },
     }));
   }
+}
+
+function updateMediaUploadProgress(conversationId: string, tempId: string) {
+  return (progress: number) => {
+    useConversationStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: withReplyLinks((s.messages[conversationId] ?? []).map((message) =>
+          message.id === tempId ? { ...message, uploadProgress: progress } : message
+        )),
+      },
+    }));
+  };
 }
 
 async function hydrateConversationSummaries(conversations: Conversation[]) {
@@ -1350,9 +1590,9 @@ async function hydrateMessage(message: Message, conversation?: Conversation) {
     }
     if (conversation?.type === "group") {
       // Group: decrypt with the shared group key
-      const groupKey = await getOrFetchGroupKey(message.conversationId, conversation);
+      const groupKey = await getOrFetchGroupKey(message.conversationId, message.groupKeyEpoch);
       if (!groupKey) return message;
-      return { ...message, decryptedContent: decryptMessage(message.encryptedContent, groupKey) };
+      return { ...message, decryptedContent: decryptMessage(message.encryptedContent, groupKey.key) };
     } else {
       // DM: decrypt with ECDH shared secret
       const otherUser = conversation?.members?.find((member) => member.userId !== user.id)?.user;
@@ -1367,26 +1607,33 @@ async function hydrateMessage(message: Message, conversation?: Conversation) {
   }
 }
 
-async function encryptOutgoingContent(conversation: Conversation | undefined, userId: string, text: string) {
-  if (!text) {
-    return "";
-  }
-
+async function encryptOutgoingContent(
+  conversation: Conversation | undefined,
+  userId: string,
+  text: string,
+  requestedGroupKeyEpoch?: number
+): Promise<{ content: string; groupKeyEpoch?: number }> {
   // "Saved Messages" are notes to yourself, stored unencrypted by design.
   if (conversation?.type === "saved") {
-    return text;
+    return { content: text };
   }
 
   if (conversation?.type === "group") {
-    const groupKey = await getOrFetchGroupKey(conversation.id, conversation);
+    const groupKey = await getOrFetchGroupKey(conversation.id, requestedGroupKeyEpoch);
     if (!groupKey) {
       throw new EncryptionError(
         "This group's encryption key isn't available on this device yet, so the message was not sent."
       );
     }
+    if (!text) return { content: "", groupKeyEpoch: groupKey.epoch };
     const { encryptMessage } = await import("@deco/crypto");
-    return encryptMessage(text, groupKey);
+    return {
+      content: encryptMessage(text, groupKey.key),
+      groupKeyEpoch: groupKey.epoch,
+    };
   }
+
+  if (!text) return { content: "" };
 
   const otherUser = conversation?.members?.find((member) => member.userId !== userId)?.user;
   if (!otherUser?.publicKey) {
@@ -1402,7 +1649,7 @@ async function encryptOutgoingContent(conversation: Conversation | undefined, us
   }
   const { encryptMessage, deriveSharedSecret: derive } = await import("@deco/crypto");
   const sharedSecret = derive(otherUser.publicKey, privateKey);
-  return encryptMessage(text, sharedSecret);
+  return { content: encryptMessage(text, sharedSecret) };
 }
 
 function notifyAboutMessage(message: Message, conversation?: Conversation) {

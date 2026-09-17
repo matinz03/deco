@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 import { wsClient, resolveWebSocketURL } from "@/lib/websocket";
 import {
   generateKeyPair,
@@ -13,6 +14,7 @@ import type { User } from "@deco/types";
 type BackupPrompt = "setup" | "restore" | null;
 const KNOWN_ACCOUNTS_KEY = "deco_known_accounts";
 const SAVED_SESSIONS_KEY = "deco_saved_sessions";
+let clerkSessionGeneration = 0;
 
 type SavedSession = {
   token: string;
@@ -40,6 +42,8 @@ interface AuthState {
   }) => Promise<void>;
   logout: () => Promise<void>;
   hydrate: () => Promise<void>;
+  establishClerkSession: (user: User, reason: "hydrate" | "signup") => Promise<void>;
+  clearClerkSession: () => void;
   refreshKeyBackupStatus: (reason?: "hydrate" | "login" | "signup" | "settings") => Promise<void>;
   createKeyBackup: (passphrase: string) => Promise<void>;
   changeKeyBackupPassphrase: (passphrase: string) => Promise<void>;
@@ -60,15 +64,8 @@ interface AuthState {
 }
 
 async function refreshConversationState() {
-  const { useConversationStore } = await import("./conversations");
-  useConversationStore.setState((state) => ({
-    conversations: [],
-    messages: {},
-    activeConversationId: null,
-    presence: {},
-    typing: {},
-    mutedIds: state.mutedIds,
-  }));
+  const { resetConversationSession, useConversationStore } = await import("./conversations");
+  resetConversationSession();
   const store = useConversationStore.getState();
   await store.fetchConversations();
   if (store.activeConversationId) {
@@ -135,6 +132,14 @@ function persistAuth(token: string, user: User) {
   rememberKnownAccount(user);
   rememberSavedSession(token, user);
   document.cookie = `auth_token=${token}; path=/; SameSite=Lax; Max-Age=604800`;
+}
+
+function clearLegacyAuthArtifacts() {
+  localStorage.removeItem("deco_token");
+  localStorage.removeItem("deco_user");
+  localStorage.removeItem(KNOWN_ACCOUNTS_KEY);
+  localStorage.removeItem(SAVED_SESSIONS_KEY);
+  document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
 }
 
 function rememberKnownAccount(user: User) {
@@ -204,7 +209,67 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   backupError: null,
   backupBusy: false,
 
+  async establishClerkSession(user, reason) {
+    const generation = ++clerkSessionGeneration;
+    wsClient.disconnect();
+    const { resetConversationSession } = await import("./conversations");
+    if (generation !== clerkSessionGeneration) return;
+    resetConversationSession();
+    clearLegacyAuthArtifacts();
+    set({
+      user,
+      token: null,
+      isHydrated: false,
+      hasLocalPrivateKey: false,
+      hasServerKeyBackup: false,
+      backupPrompt: null,
+      backupWarning: null,
+      backupError: null,
+      backupBusy: false,
+    });
+
+    await syncKeyBackupState(user, reason, (partial) => {
+      if (generation === clerkSessionGeneration) set(partial);
+    });
+    if (generation !== clerkSessionGeneration) return;
+
+    const keyState = get();
+    if (!keyState.hasLocalPrivateKey) {
+      set({ isHydrated: true });
+      if (keyState.hasServerKeyBackup && keyState.backupPrompt === "restore") return;
+      throw new Error(
+        keyState.backupWarning ??
+          "This account has no recoverable encryption key on this device. Sign out and contact support."
+      );
+    }
+
+    wsClient.connect(resolveWebSocketURL());
+    set({ isHydrated: true });
+  },
+
+  clearClerkSession() {
+    const generation = ++clerkSessionGeneration;
+    wsClient.disconnect();
+    clearLegacyAuthArtifacts();
+    void import("./conversations").then(({ resetConversationSession }) => {
+      if (generation === clerkSessionGeneration) resetConversationSession();
+    });
+    set({
+      token: null,
+      user: null,
+      isHydrated: true,
+      hasLocalPrivateKey: false,
+      hasServerKeyBackup: false,
+      backupPrompt: null,
+      backupWarning: null,
+      backupError: null,
+      backupBusy: false,
+    });
+  },
+
   async hydrate() {
+    if (clerkAuthEnabled) return;
+
     const token = localStorage.getItem("deco_token");
     const userRaw = localStorage.getItem("deco_user");
 
@@ -256,6 +321,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async logout() {
+    if (clerkAuthEnabled) {
+      get().clearClerkSession();
+      return;
+    }
+
     const currentUserId = get().user?.id;
     await api.auth.logout().catch(() => {});
     localStorage.removeItem("deco_token");
@@ -337,6 +407,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const privateKey = await decryptPrivateKeyBackup(response.backup, passphrase);
       await storePrivateKey(user.id, privateKey);
       await refreshConversationState();
+      wsClient.connect(resolveWebSocketURL());
 
       set({
         hasLocalPrivateKey: true,
@@ -402,14 +473,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async updateProfile(data) {
     const updated = await api.users.updateMe(data);
     set({ user: updated });
-    localStorage.setItem("deco_user", JSON.stringify(updated));
-    rememberKnownAccount(updated);
-    if (get().token) {
+    if (!clerkAuthEnabled) {
+      localStorage.setItem("deco_user", JSON.stringify(updated));
+      rememberKnownAccount(updated);
+    }
+    if (!clerkAuthEnabled && get().token) {
       rememberSavedSession(get().token!, updated);
     }
   },
 
   async switchAccount(userId) {
+    if (clerkAuthEnabled) return false;
+
     const session = readSavedSessions().find((entry) => entry.user.id === userId);
     if (!session) {
       return false;

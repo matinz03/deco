@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { clerkAuthEnabled } from "@/lib/auth-mode";
 import { usePreferencesStore } from "@/store/preferences";
 import { useAuthStore } from "@/store/auth";
 import { Avatar } from "@/components/ui/Avatar";
@@ -610,7 +611,14 @@ export default function SettingsPage() {
           </form>
 
           <button
-            onClick={async () => { await logout(); router.replace("/login"); }}
+            onClick={async () => {
+              if (clerkAuthEnabled) {
+                router.push("/sign-out");
+                return;
+              }
+              await logout();
+              router.replace("/login");
+            }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/10"
           >
             Sign out

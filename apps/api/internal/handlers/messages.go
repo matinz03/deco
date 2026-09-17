@@ -5,25 +5,30 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matinz03/deco/internal/config"
 	"github.com/matinz03/deco/internal/middleware"
 	"github.com/matinz03/deco/internal/models"
+	"github.com/matinz03/deco/internal/storage"
 	"github.com/matinz03/deco/internal/websocket"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
 type MessageHandler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
-	hub    *websocket.Hub
+	pool       *pgxpool.Pool
+	cfg        *config.Config
+	logger     *zap.Logger
+	hub        *websocket.Hub
+	media      storage.Backend
+	storageCfg *config.StorageConfig
 }
 
 // List returns messages for a conversation, cursor-paginated (before= query param).
@@ -53,7 +58,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.pool.Query(r.Context(), `
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-				m.media_url, m.media_name, m.media_mime_type, m.media_size,
+				m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted, m.group_key_epoch,
 				m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
@@ -68,7 +73,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.pool.Query(r.Context(), `
 			SELECT
 				m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-				m.media_url, m.media_name, m.media_mime_type, m.media_size,
+				m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted, m.group_key_epoch,
 				m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 				u.id, u.username, u.display_name, u.avatar_url, u.public_key
 			FROM messages m
@@ -91,15 +96,16 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var msg models.Message
 		var sender models.User
 		if err := rows.Scan(
-				&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-				&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
-				&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
-				&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
+			&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
+			&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
+			&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
+			&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 		); err != nil {
 			h.logger.Error("scan error", zap.Error(err))
 			continue
 		}
 		msg.Sender = &sender
+		h.ticketMessageMedia(r.Context(), &msg)
 		messages = append(messages, msg)
 	}
 
@@ -158,12 +164,18 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var count int
-	h.pool.QueryRow(r.Context(), `
-		SELECT COUNT(*) FROM members WHERE conversation_id = $1 AND user_id = $2
-	`, convID, userID).Scan(&count)
-	if count == 0 {
+	var conversationType string
+	var currentGroupKeyEpoch int64
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT c.type::text, c.current_group_key_epoch
+		FROM conversations c
+		JOIN members m ON m.conversation_id = c.id
+		WHERE c.id = $1 AND m.user_id = $2
+	`, convID, userID).Scan(&conversationType, &currentGroupKeyEpoch); errors.Is(err, pgx.ErrNoRows) {
 		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	} else if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to verify conversation membership")
 		return
 	}
 
@@ -174,6 +186,8 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		MediaName        string  `json:"media_name"`
 		MediaMimeType    string  `json:"media_mime_type"`
 		MediaSize        *int64  `json:"media_size"`
+		MediaEncrypted   bool    `json:"media_encrypted"`
+		GroupKeyEpoch    *int64  `json:"group_key_epoch"`
 		StickerID        *string `json:"sticker_id"`
 		ReplyToID        *string `json:"reply_to_id,omitempty"`
 		Poll             *struct {
@@ -218,6 +232,42 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "sticker_id is required for sticker messages")
 		return
 	}
+	if conversationType == string(models.ConversationTypeGroup) && messageUsesGroupKey(req.Type) {
+		if currentGroupKeyEpoch == 0 {
+			respondError(w, http.StatusConflict, "group encryption key is not initialized")
+			return
+		}
+		if req.GroupKeyEpoch == nil {
+			// Epoch 1 is the compatibility window for clients deployed before
+			// versioned keys. Once a group rotates, an explicit epoch is required.
+			if currentGroupKeyEpoch != 1 {
+				respondError(w, http.StatusConflict, "group key epoch is required")
+				return
+			}
+			req.GroupKeyEpoch = &currentGroupKeyEpoch
+		}
+		if *req.GroupKeyEpoch != currentGroupKeyEpoch {
+			respondError(w, http.StatusConflict, "group key epoch is stale")
+			return
+		}
+	} else if req.GroupKeyEpoch != nil {
+		respondError(w, http.StatusBadRequest, "group_key_epoch is only valid for encrypted group messages")
+		return
+	}
+	if isPrivateMediaMessage(req.Type) {
+		mediaObject, owned := h.mediaObjectOwnedBy(r.Context(), userID, req.MediaURL)
+		if !owned {
+			respondError(w, http.StatusForbidden, "media must be an upload owned by the sender")
+			return
+		}
+		if err := validateMediaMessagePolicy(conversationType, req.Type, mediaObject, req.MediaEncrypted); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		req.MediaName = mediaObject.Name
+		req.MediaMimeType = mediaObject.MimeType
+		req.MediaSize = &mediaObject.Size
+	}
 
 	var msg models.Message
 	tx, err := h.pool.Begin(r.Context())
@@ -227,18 +277,44 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
+	// Re-check membership and the epoch while holding row locks through the
+	// insert. Otherwise a rotation could commit after the preflight query and a
+	// removed member could append ciphertext under the retired key.
+	var lockedConversationType string
+	var lockedGroupKeyEpoch int64
+	err = tx.QueryRow(r.Context(), `
+		SELECT c.type::text, c.current_group_key_epoch
+		FROM conversations c
+		JOIN members m ON m.conversation_id = c.id AND m.user_id = $2
+		WHERE c.id = $1
+		FOR SHARE OF c, m
+	`, convID, userID).Scan(&lockedConversationType, &lockedGroupKeyEpoch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to lock conversation membership")
+		return
+	}
+	if lockedConversationType == string(models.ConversationTypeGroup) && messageUsesGroupKey(req.Type) &&
+		(req.GroupKeyEpoch == nil || *req.GroupKeyEpoch != lockedGroupKeyEpoch) {
+		respondError(w, http.StatusConflict, "group key epoch is stale")
+		return
+	}
+
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO messages (
 			conversation_id, sender_id, type, encrypted_content,
-			media_url, media_name, media_mime_type, media_size, sticker_id, reply_to_id
+			media_url, media_name, media_mime_type, media_size, media_encrypted, group_key_epoch, sticker_id, reply_to_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_name, media_mime_type, media_size, sticker_id,
+		          media_url, media_name, media_mime_type, media_size, media_encrypted, group_key_epoch, sticker_id,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
-	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.StickerID, req.ReplyToID).Scan(
+	`, convID, userID, req.Type, req.EncryptedContent, nullableString(req.MediaURL), nullableString(req.MediaName), nullableString(req.MediaMimeType), req.MediaSize, req.MediaEncrypted, req.GroupKeyEpoch, req.StickerID, req.ReplyToID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
@@ -271,6 +347,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to finalize message")
 		return
 	}
+	h.ticketMessageMedia(r.Context(), &msg)
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
@@ -282,6 +359,154 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	h.pool.Exec(r.Context(), `UPDATE conversations SET updated_at = NOW() WHERE id = $1`, convID)
 
 	respondJSON(w, http.StatusCreated, msg)
+}
+
+func isPrivateMediaMessage(messageType string) bool {
+	return messageType == string(models.MessageTypeImage) ||
+		messageType == string(models.MessageTypeVideo) ||
+		messageType == string(models.MessageTypeAudio) ||
+		messageType == string(models.MessageTypeFile)
+}
+
+func messageUsesGroupKey(messageType string) bool {
+	return messageType == string(models.MessageTypeText) ||
+		messageType == string(models.MessageTypeImage) ||
+		messageType == string(models.MessageTypeVideo) ||
+		messageType == string(models.MessageTypeAudio) ||
+		messageType == string(models.MessageTypeFile) ||
+		messageType == string(models.MessageTypeLocation) ||
+		messageType == string(models.MessageTypeContact)
+}
+
+func (h *MessageHandler) ownsMediaObject(ctx context.Context, userID, mediaURL string) bool {
+	_, owned := h.mediaObjectOwnedBy(ctx, userID, mediaURL)
+	return owned
+}
+
+type registeredMediaObject struct {
+	Kind      string
+	Encrypted bool
+	Name      string
+	MimeType  string
+	Size      int64
+}
+
+func validateMediaMessagePolicy(conversationType, messageType string, media registeredMediaObject, requestedEncrypted bool) error {
+	if conversationType == string(models.ConversationTypeChannel) {
+		return errors.New("channel attachments are unavailable until channel key distribution is configured")
+	}
+	if media.Kind != messageType {
+		return errors.New("message type does not match upload")
+	}
+	if conversationType != string(models.ConversationTypeSaved) && !media.Encrypted {
+		return errors.New("attachments must be encrypted for this conversation")
+	}
+	if media.Encrypted != requestedEncrypted {
+		return errors.New("media encryption metadata does not match upload")
+	}
+	return nil
+}
+
+func (h *MessageHandler) mediaObjectOwnedBy(ctx context.Context, userID, mediaURL string) (registeredMediaObject, bool) {
+	storagePath, ok := storage.PrivateMediaPath(mediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
+	if !ok {
+		return registeredMediaObject{}, false
+	}
+	var object registeredMediaObject
+	if err := h.pool.QueryRow(ctx, `
+		SELECT kind, encrypted, original_name, mime_type, size
+		FROM media_objects
+		WHERE storage_path = $1 AND owner_id = $2
+	`, storagePath, userID).Scan(&object.Kind, &object.Encrypted, &object.Name, &object.MimeType, &object.Size); err != nil {
+		return registeredMediaObject{}, false
+	}
+	return object, true
+}
+
+// ticketMessageMedia converts a stored private path into a short-lived URL
+// only after the caller has already been authorized for the containing
+// conversation. Public avatar and sticker paths intentionally remain direct.
+func (h *MessageHandler) ticketMessageMedia(ctx context.Context, msg *models.Message) {
+	if msg.MediaURL == nil {
+		return
+	}
+	resolved, ok, err := h.resolvePrivateMediaURL(ctx, msg.SenderID, *msg.MediaURL)
+	if err != nil {
+		h.logger.Error("failed to resolve private media URL", zap.Error(err), zap.String("sender_id", msg.SenderID))
+		msg.MediaURL = nil
+		return
+	}
+	if ok {
+		msg.MediaURL = &resolved
+	}
+}
+
+func (h *MessageHandler) resolvePrivateMediaURL(ctx context.Context, senderID, mediaURL string) (string, bool, error) {
+	storagePath, ok := storage.PrivateMediaPath(mediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin)
+	if !ok || !h.ownsMediaObject(ctx, senderID, mediaURL) {
+		return "", false, nil
+	}
+
+	if h.storageCfg != nil && h.storageCfg.Backend == config.StorageBackendS3 {
+		legacyPath := filepath.Join(h.cfg.UploadRoot, filepath.FromSlash(storagePath))
+		if _, err := os.Stat(legacyPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return "", false, err
+			}
+			if h.media == nil {
+				return "", false, errors.New("private media backend is not configured")
+			}
+			presigned, err := h.media.PresignGet(ctx, storage.ObjectRef{Bucket: storage.BucketPrivate, Key: storagePath}, h.storageCfg.PresignTTL)
+			if err != nil {
+				return "", false, err
+			}
+			return presigned, true, nil
+		}
+	}
+
+	ticketed, ok := storage.TicketedMediaURL(mediaURL, h.cfg.PublicUploadBase, h.cfg.PublicUploadOrigin, h.cfg.JWTSecret, time.Now())
+	return ticketed, ok, nil
+}
+
+// GetMediaTicket refreshes a browser-safe, short-lived URL for a single
+// attachment. Authorization is performed against the message's conversation,
+// never merely against knowledge of the storage path.
+func (h *MessageHandler) GetMediaTicket(w http.ResponseWriter, r *http.Request) {
+	convID := chi.URLParam(r, "conversationID")
+	messageID := chi.URLParam(r, "messageID")
+	userID := middleware.GetUserID(r)
+	if !h.isConversationMember(r, convID, userID) {
+		respondError(w, http.StatusForbidden, "not a member of this conversation")
+		return
+	}
+
+	var mediaURL *string
+	var senderID string
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT media_url, sender_id FROM messages
+		WHERE id = $1 AND conversation_id = $2 AND is_deleted = false
+	`, messageID, convID).Scan(&mediaURL, &senderID)
+	if err == pgx.ErrNoRows || mediaURL == nil {
+		respondError(w, http.StatusNotFound, "media attachment not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("failed to load media attachment", zap.Error(err), zap.String("message_id", messageID))
+		respondError(w, http.StatusInternalServerError, "failed to load media attachment")
+		return
+	}
+
+	resolved, ok, resolveErr := h.resolvePrivateMediaURL(r.Context(), senderID, *mediaURL)
+	if resolveErr != nil {
+		h.logger.Error("failed to resolve private media URL", zap.Error(resolveErr), zap.String("message_id", messageID))
+		respondError(w, http.StatusInternalServerError, "failed to resolve media attachment")
+		return
+	}
+	if !ok {
+		respondError(w, http.StatusNotFound, "private media attachment not found")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"url": resolved})
 }
 
 func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
@@ -352,7 +577,7 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `
 		SELECT
 			m.id, m.conversation_id, m.sender_id, m.type, m.encrypted_content,
-			m.media_url, m.media_name, m.media_mime_type, m.media_size,
+			m.media_url, m.media_name, m.media_mime_type, m.media_size, m.media_encrypted, m.group_key_epoch,
 			m.sticker_id, m.reply_to_id, m.status, m.is_edited, m.is_deleted, m.sent_at, m.edited_at,
 			u.id, u.username, u.display_name, u.avatar_url, u.public_key
 		FROM messages m
@@ -360,7 +585,7 @@ func (h *MessageHandler) VotePoll(w http.ResponseWriter, r *http.Request) {
 		WHERE m.id = $1
 	`, msgID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 		&sender.ID, &sender.Username, &sender.DisplayName, &sender.AvatarURL, &sender.PublicKey,
 	)
@@ -408,11 +633,11 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		SET encrypted_content = $1, is_edited = true, edited_at = NOW()
 		WHERE id = $2 AND conversation_id = $3 AND sender_id = $4 AND is_deleted = false
 		RETURNING id, conversation_id, sender_id, type, encrypted_content,
-		          media_url, media_name, media_mime_type, media_size, sticker_id,
+		          media_url, media_name, media_mime_type, media_size, media_encrypted, group_key_epoch, sticker_id,
 		          reply_to_id, status, is_edited, is_deleted, sent_at, edited_at
 	`, req.EncryptedContent, msgID, convID, userID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Type, &msg.EncryptedContent,
-		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize,
+		&msg.MediaURL, &msg.MediaName, &msg.MediaMimeType, &msg.MediaSize, &msg.MediaEncrypted, &msg.GroupKeyEpoch,
 		&msg.StickerID, &msg.ReplyToID, &msg.Status, &msg.IsEdited, &msg.IsDeleted, &msg.SentAt, &msg.EditedAt,
 	)
 	if err != nil {
@@ -527,7 +752,7 @@ func (h *MessageHandler) RemoveReaction(w http.ResponseWriter, r *http.Request) 
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
-			Type:    websocket.EventMessageReaction,
+			Type: websocket.EventMessageReaction,
 			Payload: mustMarshal(map[string]any{
 				"action":     "remove",
 				"message_id": msgID,
@@ -564,7 +789,7 @@ func (h *MessageHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 	if h.hub != nil {
 		h.broadcastToConversation(r, convID, websocket.Event{
-			Type:    websocket.EventRead,
+			Type: websocket.EventRead,
 			Payload: mustMarshal(map[string]string{
 				"conversation_id": convID,
 				"user_id":         userID,

@@ -1,29 +1,44 @@
 package handlers
 
 import (
-	"github.com/matinz03/deco/internal/config"
-	"github.com/matinz03/deco/internal/middleware"
-	"github.com/matinz03/deco/internal/telegram"
-	"github.com/matinz03/deco/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/matinz03/deco/internal/config"
+	"github.com/matinz03/deco/internal/middleware"
+	"github.com/matinz03/deco/internal/storage"
+	"github.com/matinz03/deco/internal/telegram"
+	"github.com/matinz03/deco/internal/websocket"
 	"go.uber.org/zap"
 )
 
-func RegisterAuthRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+// RegisterAuthRoutes exposes exactly one identity path. Clerk mode removes all
+// legacy password/session endpoints; legacy mode keeps them for compatibility.
+func RegisterAuthRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &AuthHandler{pool: pool, cfg: cfg, logger: logger}
-	r.Route("/auth", func(r chi.Router) {
-		r.Post("/register", h.Register)
-		r.Post("/login", h.Login)
-		r.Post("/logout", h.Logout)
-		r.Post("/refresh", h.Refresh)
-	})
+	if !cfg.Clerk.Enabled {
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/register", h.Register)
+			r.Post("/login", h.Login)
+			r.Post("/logout", h.Logout)
+			r.Post("/refresh", h.Refresh)
+		})
+	}
+
+	if auth != nil && auth.ClerkEnabled() {
+		p := NewProfileHandler(pool, cfg, logger, auth)
+		r.Group(func(r chi.Router) {
+			// RequireVerifiedToken, not Middleware: this is the one route
+			// that must be reachable before a profile row exists.
+			r.Use(auth.RequireVerifiedToken())
+			r.Post("/profile/bootstrap", p.Bootstrap)
+		})
+	}
 }
 
-func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &UserHandler{pool: pool, cfg: cfg, logger: logger}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/me", h.GetMe)
 			r.Patch("/me", h.UpdateMe)
@@ -39,10 +54,10 @@ func RegisterUserRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, lo
 	})
 }
 
-func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
+func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, auth *middleware.Authenticator) {
 	h := &ConversationHandler{pool: pool, cfg: cfg, logger: logger}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/conversations", func(r chi.Router) {
 			r.Get("/", h.List)
 			r.Post("/", h.Create)
@@ -58,24 +73,25 @@ func RegisterConversationRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Co
 			r.Delete("/{conversationID}/members/{userID}", h.RemoveMember)
 			r.Get("/{conversationID}/group-key", h.GetGroupKey)
 			r.Put("/{conversationID}/group-keys", h.PutGroupKeys)
+			r.Post("/{conversationID}/group-key-epochs", h.CreateGroupKeyEpoch)
 		})
 	})
 }
 
-func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
-	h := &UploadHandler{pool: pool, cfg: cfg, logger: logger}
+func RegisterUploadRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, media storage.Backend, auth *middleware.Authenticator) {
+	h := &UploadHandler{pool: pool, cfg: cfg, logger: logger, storage: media}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/uploads", func(r chi.Router) {
 			r.Post("/", h.Create)
 		})
 	})
 }
 
-func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) {
-	h := &StickerHandler{pool: pool, cfg: cfg, logger: logger, telegram: telegram.NewClient(cfg.TelegramBotToken)}
+func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, media storage.Backend, auth *middleware.Authenticator) {
+	h := &StickerHandler{pool: pool, cfg: cfg, logger: logger, telegram: telegram.NewClient(cfg.TelegramBotToken), storage: media}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/stickers", func(r chi.Router) {
 			r.Get("/packs", h.ListPacks)
 			r.Post("/packs", h.CreatePack)
@@ -89,14 +105,15 @@ func RegisterStickerRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config,
 	})
 }
 
-func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub) {
-	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub}
+func RegisterMessageRoutes(r chi.Router, pool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, hub *websocket.Hub, media storage.Backend, storageCfg *config.StorageConfig, auth *middleware.Authenticator) {
+	h := &MessageHandler{pool: pool, cfg: cfg, logger: logger, hub: hub, media: media, storageCfg: storageCfg}
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Use(auth.Middleware())
 		r.Route("/conversations/{conversationID}/messages", func(r chi.Router) {
 			r.Get("/", h.List)
 			r.Post("/", h.Send)
 			r.Post("/read", h.MarkRead)
+			r.Get("/{messageID}/media-ticket", h.GetMediaTicket)
 			r.Patch("/{messageID}", h.Edit)
 			r.Delete("/{messageID}", h.Delete)
 			r.Post("/{messageID}/poll/vote", h.VotePoll)

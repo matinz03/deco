@@ -19,18 +19,48 @@ import type {
   CreateStickerPackInput,
   UserRestriction,
 } from "@deco/types";
+import { clerkAuthEnabled } from "./auth-mode";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const PUBLIC_UPLOAD_BASE = process.env.NEXT_PUBLIC_UPLOAD_BASE ?? "/api/v1/media";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("deco_token") : null;
+/**
+ * Supplies a Clerk session token. Registered by ClerkBootstrapGate rather than
+ * imported, so this module stays free of React and of @clerk/nextjs — it is
+ * used from stores and plain functions as well as components.
+ *
+ * Clerk tokens are short-lived (60s by default), so this is called per request
+ * rather than cached. Clerk's own SDK caches and refreshes behind getToken().
+ */
+type ClerkTokenProvider = () => Promise<string | null>;
+
+let clerkTokenProvider: ClerkTokenProvider | null = null;
+
+export function setClerkTokenProvider(provider: ClerkTokenProvider | null) {
+  clerkTokenProvider = provider;
+}
+
+export async function resolveAuthToken(): Promise<string | null> {
+  if (clerkAuthEnabled) {
+    if (!clerkTokenProvider) return null;
+    try {
+      return await clerkTokenProvider();
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof window !== "undefined" ? localStorage.getItem("deco_token") : null;
+}
+
+async function request<T>(path: string, init?: RequestInit, explicitToken?: string): Promise<T> {
+  const token = explicitToken ?? await resolveAuthToken();
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
 
   const res = await fetch(`${BASE}${path}`, {
@@ -87,6 +117,8 @@ export function mapMessage(r: any): Message {
     mediaName: r.media_name ?? r.mediaName,
     mediaMimeType: r.media_mime_type ?? r.mediaMimeType,
     mediaSize: r.media_size ?? r.mediaSize,
+    mediaEncrypted: Boolean(r.media_encrypted ?? r.mediaEncrypted ?? false),
+    groupKeyEpoch: r.group_key_epoch ?? r.groupKeyEpoch,
     sticker: r.sticker ? mapSticker(r.sticker) : undefined,
     poll: r.poll ? mapPoll(r.poll) : undefined,
     replyToId: r.reply_to_id ?? r.replyToId,
@@ -154,11 +186,17 @@ function mapKeyBackupResponse(r: any): KeyBackupResponse {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapUploadResponse(r: any): UploadResponse {
   return {
-    url: resolveAssetUrl(r.url ?? ""),
+    // Keep the upload's canonical relative path when it is sent back to the
+    // API as media_url. Resolving it here would turn it into an absolute URL,
+    // which would either force the server to trust an origin supplied by the
+    // client or let an attacker substitute a different origin. Messages are
+    // resolved for display by mapMessage after the server has authorized them.
+    url: r.url ?? "",
     mimeType: r.mime_type ?? r.mimeType ?? "",
     size: r.size ?? 0,
     name: r.name ?? "",
     kind: r.kind ?? "file",
+    encrypted: Boolean(r.encrypted ?? false),
   };
 }
 
@@ -355,6 +393,41 @@ export function mapWSEvent(event: any): WSEvent {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const api = {
+  /**
+   * Clerk identity path only. Creates the Deco `users` row for a Clerk
+   * account and binds its X25519 public key.
+   *
+   * Registration on the legacy path inserts the user and their public key in
+   * one statement. Clerk creates the identity outside the database, so this
+   * closes that gap from the client instead of from a webhook, which would
+   * race the first authenticated request and leave an account with no key.
+   *
+   * Idempotent: the same key succeeds, a different key is refused with
+   * 409 `public_key_immutable`.
+   */
+  profile: {
+    bootstrap: async (input: {
+      publicKey: string;
+      username: string;
+      displayName?: string;
+      email?: string;
+      phoneNumber?: string;
+    }, explicitToken?: string, signal?: AbortSignal) => {
+      const raw = await request<{ user: unknown }>("/api/v1/profile/bootstrap", {
+        method: "POST",
+        signal,
+        body: JSON.stringify({
+          public_key: input.publicKey,
+          username: input.username,
+          display_name: input.displayName ?? input.username,
+          email: input.email ?? "",
+          phone_number: input.phoneNumber ?? "",
+        }),
+      }, explicitToken);
+      return mapUser(raw.user);
+    },
+  },
+
   auth: {
     login: async (body: { email?: string; phone?: string; password: string }) => {
       const raw = await request<{ token: string; user: unknown }>("/api/v1/auth/login", {
@@ -459,20 +532,42 @@ export const api = {
       });
     },
 
-    getGroupKey: async (id: string): Promise<{ encryptedKey: string; encryptedBy: string }> => {
-      const raw = await request<Record<string, string>>(`/api/v1/conversations/${id}/group-key`);
-      return { encryptedKey: raw["encrypted_key"] ?? "", encryptedBy: raw["encrypted_by"] ?? "" };
+    getGroupKey: async (
+      id: string,
+      epoch?: number
+    ): Promise<{ epoch: number; encryptedKey: string; encryptedBy?: string; encryptorPublicKey: string }> => {
+      const query = epoch ? `?epoch=${encodeURIComponent(epoch)}` : "";
+      const raw = await request<Record<string, unknown>>(`/api/v1/conversations/${id}/group-key${query}`);
+      return {
+        epoch: Number(raw["epoch"] ?? 0),
+        encryptedKey: String(raw["encrypted_key"] ?? ""),
+        encryptedBy: raw["encrypted_by"] ? String(raw["encrypted_by"]) : undefined,
+        encryptorPublicKey: String(raw["encryptor_public_key"] ?? ""),
+      };
     },
 
-    putGroupKeys: async (id: string, entries: { userId: string; encryptedKey: string; encryptedBy: string }[]) => {
-      await request(`/api/v1/conversations/${id}/group-keys`, {
-        method: "PUT",
-        body: JSON.stringify(entries.map((e) => ({
-          user_id: e.userId,
-          encrypted_key: e.encryptedKey,
-          encrypted_by: e.encryptedBy,
-        }))),
+    createGroupKeyEpoch: async (
+      id: string,
+      body: {
+        expectedEpoch: number;
+        membershipChange?: { action: "add" | "remove"; userId: string };
+        copies: { userId: string; encryptedKey: string }[];
+      }
+    ) => {
+      const raw = await request<{ epoch: number }>(`/api/v1/conversations/${id}/group-key-epochs`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_epoch: body.expectedEpoch,
+          membership_change: body.membershipChange
+            ? { action: body.membershipChange.action, user_id: body.membershipChange.userId }
+            : undefined,
+          copies: body.copies.map((copy) => ({
+            user_id: copy.userId,
+            encrypted_key: copy.encryptedKey,
+          })),
+        }),
       });
+      return raw.epoch;
     },
 
     getLeadership: async (id: string) => {
@@ -504,6 +599,13 @@ export const api = {
       return raw.map(mapMessage);
     },
 
+    getMediaTicket: async (conversationId: string, messageId: string) => {
+      const raw = await request<{ url?: string }>(
+        `/api/v1/conversations/${conversationId}/messages/${messageId}/media-ticket`
+      );
+      return resolveAssetUrl(raw.url ?? "");
+    },
+
     send: async (
       conversationId: string,
       body: {
@@ -514,6 +616,8 @@ export const api = {
         mediaName?: string;
         mediaMimeType?: string;
         mediaSize?: number;
+        mediaEncrypted?: boolean;
+        groupKeyEpoch?: number;
         stickerId?: string;
         poll?: CreatePollInput;
       }
@@ -528,6 +632,8 @@ export const api = {
           media_name: body.mediaName,
           media_mime_type: body.mediaMimeType,
           media_size: body.mediaSize,
+          media_encrypted: body.mediaEncrypted,
+          group_key_epoch: body.groupKeyEpoch,
           sticker_id: body.stickerId,
           poll: body.poll ? {
             question: body.poll.question,
@@ -591,8 +697,13 @@ export const api = {
       return raw.map(mapUser);
     },
 
-    getMe: async () => {
-      const raw = await request<unknown>("/api/v1/users/me");
+    get: async (id: string) => {
+      const raw = await request<unknown>(`/api/v1/users/${id}`);
+      return mapUser(raw);
+    },
+
+    getMe: async (explicitToken?: string, signal?: AbortSignal) => {
+      const raw = await request<unknown>("/api/v1/users/me", { signal }, explicitToken);
       return mapUser(raw);
     },
 
@@ -678,19 +789,27 @@ export const api = {
       file: File | Blob,
       kind: UploadKind,
       name?: string,
-      options?: { onProgress?: (progress: number) => void }
+      options?: {
+        onProgress?: (progress: number) => void;
+        encrypted?: { originalMimeType: string; originalSize: number };
+      }
     ) => {
       const form = new FormData();
       const filename = name ?? (file instanceof File ? file.name : `${kind}-${Date.now()}`);
       form.append("file", file, filename);
       form.append("kind", kind);
+      if (options?.encrypted) {
+        form.append("encrypted", "true");
+        form.append("original_mime_type", options.encrypted.originalMimeType);
+        form.append("original_size", String(options.encrypted.originalSize));
+      }
 
       if (typeof window !== "undefined" && options?.onProgress) {
-        const token = localStorage.getItem("deco_token");
+        const token = await resolveAuthToken();
         const xhrResult = await new Promise<unknown>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${BASE}/api/v1/uploads`);
-          xhr.setRequestHeader("Authorization", token ? `Bearer ${token}` : "");
+          if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
           xhr.upload.onprogress = (event) => {
             if (!event.lengthComputable) return;
             options.onProgress?.(Math.round((event.loaded / event.total) * 100));

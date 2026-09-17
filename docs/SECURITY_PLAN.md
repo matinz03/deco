@@ -20,10 +20,10 @@ Remediation reviewed independently by Claude Coder and Codex. Verified by runnin
 
 | ID | Status | Notes |
 |---|---|---|
-| S1-1 | 🟡 **Partial — and currently breaks the app** | **Injection closed:** `isAllowedUpload` requires MIME **and** extension (`&&`); `.html/.htm/.svg/.js/.exe/.cmd/.bat/.sh/.php` rejected; `kind=file` restricted to a document allowlist; media responses carry `nosniff`, `default-src 'none'`, `Content-Disposition: attachment`. **Anonymous access closed:** `uploadHandler` now validates a JWT (Bearer or `?token=`) and 401s without one. **Two problems remain.** (1) 🚨 **REGRESSION — all media is broken in the browser.** The web client renders media as `<img src={mediaUrl}>` / `<a href={mediaUrl}>` (`components/chat/MessageBubble.tsx`), and `resolveAssetUrl` (`lib/api.ts:247`) appends no token. Browsers never attach an `Authorization` header to `<img>`/`<a>` requests, so **every avatar, inline image, sticker, and file link now 401s**. Go tests do not cover this path. Fix requires a client-side strategy: short-lived signed URL, `?token=` query param (leaks tokens into logs/referrers — see S3-5), or fetch-as-blob with an object URL. (2) **Confidentiality only partly closed** — the handler accepts *any* valid JWT and performs **no conversation-membership check**, so any registered user can still read any other user's media by URL. The regression test below (non-member ⇒ 403) is still unmet. |
-| S1-2 | 🟡 **Partial** | **Closed:** `encrypted_by` must equal the caller; the recipient must be an active member; `ON CONFLICT DO UPDATE` is guarded by `WHERE group_keys.encrypted_by = EXCLUDED.encrypted_by OR <caller is owner/admin>`; and `RowsAffected() == 0` now returns `403` instead of a silent `204` — the silent-failure hole is genuinely fixed. **Still open (Codex, concurred):** the guard only applies on *conflict*, so any regular member can still create the **first** `group_keys` row for another member — initial distribution remains a land-grab race — and a member who authored that first row can then mutate it indefinitely, since `encrypted_by` will always match. Needs a defined distributor authority, a key epoch/version, and atomic authorization. |
+| S1-1 | 🟡 **Implemented; live proof pending** | Upload types are allowlisted, private media is bound to uploader/conversation metadata, and reads use membership-gated short-lived tickets or private S3 presigns. DM/group attachments are encrypted before upload and decrypted only into browser-local Blob URLs; Saved Messages keep their documented plaintext behavior. Focused Go/crypto tests pass on the authored tree. Remaining proof: real object store, two-browser render/download, non-member denial, expiry, and tamper exercises. |
+| S1-2 | 🟡 **Implemented; live proof pending** | Only group owner/admin can initialize or rotate. Immutable epochs contain exactly one encrypted copy per post-change member, add/remove membership commits in the same transaction, expected-epoch CAS rejects competing admins, sender membership/epoch is locked through message insert, and each message/media record keeps its decryption epoch. Direct epoch mutation is database-blocked; account deletion refuses to cascade an encrypted-group membership. Legacy `group_keys` is a current-key rollback projection. Remaining proof: real-Postgres migration and concurrent two-client rotation/removal exercise. |
 | S2-1 | 🔴 **Open** | No revocation, no refresh. Untouched. |
-| S2-2 | 🔴 **Open** | Cookie still written via `document.cookie` (not `HttpOnly`); CSP still allows `unsafe-inline`/`unsafe-eval`. |
+| S2-2 | 🟡 **Partial** | Production CSP no longer allows `unsafe-eval` and fails its build when API/WS origins are missing. App Router/Clerk still require `unsafe-inline` until nonce-based CSP is introduced; the legacy auth cookie is still written via `document.cookie` and is not `HttpOnly`. |
 | S2-3 | 🟢 **Fixed** | `Load()` panics when `JWT_SECRET` is empty or `change-me` outside development, and `API_ENV` now **defaults to `production`**, so misconfiguration fails closed. ⚠️ Onboarding side effect: a fresh clone with no `.env` now panics at startup instead of silently running insecure — intended, but follow the `README.md` setup steps. |
 | S3-9 | 🟢 **Fixed** | `makeCheckOrigin(cfg)` validates `Origin` against `ALLOWED_ORIGINS` (comma-split), with `localhost` fallbacks gated on `cfg.Env == "development"`. |
 
@@ -33,7 +33,10 @@ Everything else in this document remains open and unverified.
 
 Codex owns everything in this file. OpenCode + Antigravity own [`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md). Four items straddle the line and must be designed jointly, with Codex approving the design before implementation: **password reset / multi-device** (key lifecycle), **refresh tokens** (S2-1, same work item), **media storage / R2** (S1-1 confidentiality), and **CI** (runs every regression test specified here). See the Boundary table in the backlog for the split.
 
-**Live blocker, needs an owner now:** the S1-1 media auth change ships a user-facing regression — every `<img>`/`<a>` in the client 401s because browsers send no `Authorization` header. Choosing the mechanism (signed URLs vs. `?token=` vs. fetch-as-blob) is a **security** decision and therefore Codex's call; implementing the client side is feature work. This needs both parties in the same conversation before anyone writes code.
+**S1-1 implementation decision:** private media uses path-scoped, short-lived
+tickets (or private S3 presigns) and encrypted attachments use authenticated
+fetch plus browser-local Blob URLs. Session JWTs are never placed in media
+query strings. Live browser/object-store proof remains a launch gate.
 
 ---
 
@@ -127,7 +130,7 @@ Codex has reserved the media and group-key paths; do not modify them without the
 
 | # | Finding | Evidence |
 |---|---|---|
-| S3-1 | **First-user-admin bootstrap is raceable.** `COUNT(*)` then `INSERT` are separate statements — two concurrent registrations on an empty DB can both observe 0 and both become admin. | `handlers/auth.go` `Register` |
+| S3-1 | **Mitigation implemented; independent verification pending.** Clerk ownership uses explicit `CLERK_OWNER_USER_ID`; legacy first-owner registration serializes selection and insert under one transaction. Database uniqueness permits at most one persisted owner. | `handlers/auth.go`, `handlers/profile.go`, `db/postgres.go` |
 | S3-2 | **Rate limiting depends on spoofable client IP.** `httprate.LimitByIP(100, time.Minute)` sits behind `middleware.RealIP`, which trusts `X-Forwarded-For`/`X-Real-IP`. If the API is ever reachable without the nginx hop, an attacker sets the header and bypasses the limit entirely. 100/min is also generous for password brute force. | `cmd/server/main.go:79-80` |
 | S3-3 | **CORS accepts exactly one origin string.** `AllowedOrigins: []string{cfg.AllowedOrigins}` — a comma-separated env value becomes one malformed origin, which tends to get "fixed" by setting `*`. Verify the deployed value. | `cmd/server/main.go` |
 | S3-4 | **Key-backup KDF below current guidance.** PBKDF2-SHA256 at 250k iterations; OWASP now recommends 600k, or Argon2id. The blob is server-stored, so a DB compromise enables offline brute force against user passphrases. | `packages/crypto/src/index.ts` |
@@ -156,12 +159,13 @@ Classes of defect this specific architecture invites. Antigravity: treat each as
 **E2E / key management**
 - No forward secrecy: DM shared secret is a static ECDH product, so one stolen private key retroactively decrypts *all* history. Any post-compromise security story requires ratcheting.
 - No public-key verification/pinning — the server hands clients the peer's `public_key`, so a malicious server can substitute its own and MITM silently. There is no safety-number/fingerprint UI to detect it.
-- Group key rotation on member removal: when someone is removed, is a new group key generated? If not, a removed member who retains the old key can decrypt all future traffic they can still obtain.
+- Group key rotation on member removal is implemented atomically with membership
+  deletion; live concurrent-client proof remains pending.
 - Key-backup passphrase has no strength requirement and no attempt throttling on `GET /users/me/key-backup`.
 
 **AuthZ**
 - Conversation membership is checked per-handler rather than centrally — audit for any handler that trusts a path param without an `isConversationMember` check.
-- Role checks (`owner`/`admin`/`member`) vs. the separate global `is_admin` — confirm a group admin cannot escalate to platform admin, and that `is_owner` (computed as oldest `created_at`) cannot be inherited by deleting the founder.
+- Role checks (`owner`/`admin`/`member`) vs. separate global `is_admin`/`is_owner` — confirm a group admin cannot escalate to platform admin and persisted platform ownership cannot be transferred through account deletion.
 - Leadership election: can a non-member vote or object? Can a user vote twice via race? Is `finalizeLeadershipElection` idempotent under concurrent calls?
 
 **Realtime**
