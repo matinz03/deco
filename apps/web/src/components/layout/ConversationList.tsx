@@ -116,6 +116,7 @@ export function ConversationList() {
           </svg>
           <input
             type="search"
+            aria-label={isGroupsTab ? "Search groups" : "Search conversations"}
             placeholder={isGroupsTab ? "Search groups..." : "Search conversations..."}
             value={search}
             onChange={(e) => setSearch(e.target.value)}

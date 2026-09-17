@@ -1,9 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
-import dynamic from "next/dynamic";
 import { NavRail } from "@/components/layout/NavRail";
 import { ConversationList } from "@/components/layout/ConversationList";
 import { SearchPanel } from "@/components/layout/SearchPanel";
@@ -12,11 +10,6 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { NoiseOverlay } from "@/components/ui/NoiseOverlay";
 import { KeyboardShortcutsOverlay } from "@/components/ui/KeyboardShortcutsOverlay";
 import { ChatToastContainer } from "@/components/ui/ChatToast";
-
-const AuthBackground = dynamic(
-  () => import("@/components/auth/AuthBackground").then((module) => module.AuthBackground),
-  { ssr: false }
-);
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -50,10 +43,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="relative flex h-app overflow-hidden bg-background">
-      <div className="pointer-events-none absolute inset-0 opacity-60">
-        <AuthBackground />
-      </div>
-
       <div className="hidden md:relative md:block md:shrink-0">
         <Suspense>
           <NavRail
@@ -84,18 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ${showMainMobile ? "flex flex-1" : "hidden"} md:flex md:flex-1
         `}
       >
-        <AnimatePresence initial={false}>
-          <motion.div
-            key={pathname}
-            className="absolute inset-0 flex flex-col"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
-          >
-            {children}
-          </motion.div>
-        </AnimatePresence>
+        <div className="absolute inset-0 flex flex-col">{children}</div>
       </main>
 
       <Suspense>

@@ -66,6 +66,7 @@ export function SearchPanel() {
           <input
             autoFocus
             type="search"
+            aria-label="Search people"
             value={query}
             onChange={(e) => handleSearch(e.target.value)}
             placeholder="Search by username or name…"

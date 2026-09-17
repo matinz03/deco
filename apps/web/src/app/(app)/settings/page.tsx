@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { clerkAuthEnabled } from "@/lib/auth-mode";
@@ -509,7 +510,10 @@ export default function SettingsPage() {
       <section id="account">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Account</h2>
         <div className="overflow-hidden rounded-2xl border border-sidebar bg-muted/50">
-          <form
+          {clerkAuthEnabled ? (
+            <ClerkAccountControls email={user?.email ?? ""} />
+          ) : (
+            <form
             onSubmit={async (event) => {
               event.preventDefault();
               setAccountError("");
@@ -608,7 +612,8 @@ export default function SettingsPage() {
                 {accountSaving ? "Saving..." : "Save account"}
               </button>
             </div>
-          </form>
+            </form>
+          )}
 
           <button
             onClick={async () => {
@@ -626,6 +631,28 @@ export default function SettingsPage() {
         </div>
       </section>
     </div></div>
+  );
+}
+
+function ClerkAccountControls({ email }: { email: string }) {
+  const { openUserProfile } = useClerk();
+
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-sidebar px-4 py-4">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">Sign-in details</p>
+        <p className="mt-1 truncate text-xs text-muted">
+          {email || "Managed securely by Clerk"}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => openUserProfile()}
+        className="shrink-0 rounded-xl border border-sidebar px-4 py-2 text-sm font-medium transition-colors hover:bg-accent"
+      >
+        Manage account
+      </button>
+    </div>
   );
 }
 
