@@ -158,6 +158,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
   const [draft, setDraft] = useState(text);
   const [editError, setEditError] = useState<string | null>(null);
   const [sharedPackState, setSharedPackState] = useState<"idle" | "adding" | "added" | "error">("idle");
+  const [sharedPackError, setSharedPackError] = useState("");
   const tapCount = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -181,10 +182,12 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
     event.stopPropagation();
     if (!sharedPackId || sharedPackState === "adding" || sharedPackState === "added") return;
     setSharedPackState("adding");
+    setSharedPackError("");
     try {
       await api.stickers.clonePack(sharedPackId);
       setSharedPackState("added");
-    } catch {
+    } catch (error) {
+      setSharedPackError(error instanceof Error ? error.message : "Could not add sticker pack.");
       setSharedPackState("error");
     }
   }
@@ -650,7 +653,7 @@ export function MessageBubble({ message: msg, isSent, showAvatar, isGrouped, isL
                         : sharedPackState === "added"
                           ? "Added to your stickers"
                           : sharedPackState === "error"
-                            ? "Could not add pack — retry"
+                            ? `${sharedPackError || "Could not add pack"} — retry`
                             : "Add sticker pack"}
                     </button>
                   )}
