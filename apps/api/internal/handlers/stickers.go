@@ -602,7 +602,7 @@ func (h *StickerHandler) clonePack(ctx context.Context, userID, packID string) (
 	var cloned models.StickerPack
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO sticker_packs (owner_id, name, slug, title, description, source)
-		VALUES ($1, $2, $3, $4, $5, 'deco')
+		VALUES ($1, $2, $3 || '-' || replace(gen_random_uuid()::text, '-', ''), $4, $5, 'deco')
 		RETURNING id, owner_id, name, slug, title, description, source, telegram_set_name, cover_sticker_id, created_at, updated_at
 	`, userID, source.Name, buildPackSlug(source.Title), source.Title, source.Description).Scan(
 		&cloned.ID, &cloned.OwnerID, &cloned.Name, &cloned.Slug, &cloned.Title, &cloned.Description,
