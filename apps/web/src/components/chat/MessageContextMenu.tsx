@@ -13,6 +13,7 @@ interface MessageContextMenuProps {
   seenTitle?: string;
   onEdit?: () => void;
   onReply: () => void;
+  onForward: () => void;
   onCopy: () => void;
   onDelete?: () => void;
   onClose: () => void;
@@ -45,11 +46,11 @@ function MenuItem({
 }
 
 export function MessageContextMenu({
-  x, y, isSent, text, seenLabel, seenTitle, onEdit, onReply, onCopy, onDelete, onClose,
+  x, y, isSent, text, seenLabel, seenTitle, onEdit, onReply, onForward, onCopy, onDelete, onClose,
 }: MessageContextMenuProps) {
   // Keep within viewport — flip upward if too close to the bottom
   const menuWidth = 184;
-  const menuHeight = 260; // generous upper bound (5 rows + seen row + padding)
+  const menuHeight = 308; // generous upper bound (6 rows + seen row + padding)
   const clampedX = Math.min(Math.max(x, 8), window.innerWidth - menuWidth - 8);
   const clampedY = y + menuHeight > window.innerHeight
     ? Math.max(8, y - menuHeight)
@@ -86,6 +87,15 @@ export function MessageContextMenu({
         }
         label="Reply"
         onClick={() => { onReply(); onClose(); }}
+      />
+      <MenuItem
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m15 9 3 3m0 0-3 3m3-3H6m0-6-3 3m0 0 3 3m-3-3h12" />
+          </svg>
+        }
+        label="Forward"
+        onClick={() => { onForward(); onClose(); }}
       />
       <MenuItem
         icon={

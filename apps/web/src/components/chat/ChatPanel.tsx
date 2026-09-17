@@ -22,6 +22,11 @@ const ThreadPortal = dynamic(
   { ssr: false }
 );
 
+const ForwardMessageModal = dynamic(
+  () => import("./ForwardMessageModal").then((mod) => mod.ForwardMessageModal),
+  { ssr: false }
+);
+
 const VIRTUAL_THRESHOLD = 80;
 
 type ChatItem =
@@ -53,6 +58,7 @@ export function ChatPanel({ conversationId }: Props) {
   const [loading, setLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
   const [threadMessageId, setThreadMessageId] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
@@ -153,6 +159,7 @@ export function ChatPanel({ conversationId }: Props) {
     previousMessageCountRef.current = 0;
     setShowScrollBtn(false);
     setReplyTo(null);
+    setForwardMessage(null);
     setThreadMessageId(null);
   }, [conversationId]);
 
@@ -264,6 +271,7 @@ export function ChatPanel({ conversationId }: Props) {
         isLastInGroup={item.isLastInGroup}
         replyCount={replyCounts[item.msg.id] ?? 0}
         onReply={setReplyTo}
+        onForward={setForwardMessage}
         onOpenThread={(msg) => setThreadMessageId(msg.id)}
       />
     );
@@ -396,6 +404,10 @@ export function ChatPanel({ conversationId }: Props) {
         focusMessageId={threadMessageId}
         onClose={() => setThreadMessageId(null)}
         onJumpToMessage={jumpToMessage}
+      />
+      <ForwardMessageModal
+        message={forwardMessage}
+        onClose={() => setForwardMessage(null)}
       />
     </div>
   );
