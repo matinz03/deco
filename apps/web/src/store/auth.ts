@@ -53,6 +53,7 @@ interface AuthState {
   clearBackupError: () => void;
   updateProfile: (data: {
     displayName?: string;
+    username?: string;
     bio?: string;
     avatarUrl?: string;
     email?: string;

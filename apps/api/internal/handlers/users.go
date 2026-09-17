@@ -43,6 +43,7 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		DisplayName     string `json:"display_name"`
+		Username        string `json:"username"`
 		Bio             string `json:"bio"`
 		AvatarURL       string `json:"avatar_url"`
 		Email           string `json:"email"`
@@ -55,6 +56,7 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Email = strings.TrimSpace(req.Email)
+	req.Username = strings.TrimSpace(req.Username)
 
 	var nextPasswordHash *string
 	if strings.TrimSpace(req.NewPassword) != "" {
@@ -90,13 +92,18 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.pool.Exec(r.Context(), `
 		UPDATE users
 		SET display_name = COALESCE(NULLIF($1,''), display_name),
-		    bio          = COALESCE(NULLIF($2,''), bio),
-		    avatar_url   = COALESCE(NULLIF($3,''), avatar_url),
-		    email        = COALESCE(NULLIF($4,''), email),
-		    password_hash = COALESCE($5, password_hash),
+		    username     = COALESCE(NULLIF($2,''), username),
+		    bio          = COALESCE(NULLIF($3,''), bio),
+		    avatar_url   = COALESCE(NULLIF($4,''), avatar_url),
+		    email        = COALESCE(NULLIF($5,''), email),
+		    password_hash = COALESCE($6, password_hash),
 		    updated_at   = NOW()
-		WHERE id = $6
-	`, req.DisplayName, req.Bio, req.AvatarURL, req.Email, nextPasswordHash, userID); err != nil {
+		WHERE id = $7
+	`, req.DisplayName, req.Username, req.Bio, req.AvatarURL, req.Email, nextPasswordHash, userID); err != nil {
+		if strings.Contains(err.Error(), "users_username_key") {
+			respondError(w, http.StatusConflict, "username is already taken")
+			return
+		}
 		if strings.Contains(err.Error(), "users_email_key") {
 			respondError(w, http.StatusConflict, "email is already taken")
 			return

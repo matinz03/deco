@@ -138,8 +138,8 @@ export default function StickersPage() {
       const pack = await api.stickers.clonePack(packId);
       setSharedPackInput("");
       await loadPacks(pack.id);
-    } catch {
-      setError("Couldn't add that shared Deco pack.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Couldn't add that shared Deco pack.");
     } finally {
       setBusy(false);
     }
