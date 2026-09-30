@@ -27,6 +27,9 @@ and are context only — they are **not** implementation instructions.
   including why InsForge is rejected. Proposal, not approved.
 - [`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md) — open product and operational
   work. Security defects deliberately live in `SECURITY_PLAN.md` instead.
+- [`QUICK_WINS.md`](QUICK_WINS.md) — 47 verified enhancements that each fit in
+  under an hour, from a 2026-09-30 static review of `master`, with evidence and
+  fix sketches. Items marked for sign-off still need Codex's approval.
 
 ## Process retrospectives
 
